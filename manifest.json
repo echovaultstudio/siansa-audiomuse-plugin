@@ -1,0 +1,11 @@
+{
+  "plugins": [
+    {
+      "id": "siansa_analysis",
+      "name": "Siansa Analysis",
+      "author": "Siansa",
+      "description": "For the Siansa app: measures each song's loudness and how it starts and ends (levelling and SmoothFade), and finds similar albums and artists from AudioMuse-AI's sound analysis.",
+      "pluginUrl": "https://raw.githubusercontent.com/echovaultstudio/siansa-audiomuse-plugin/main/plugins/SiansaAnalysis/plugin.json"
+    }
+  ]
+}
