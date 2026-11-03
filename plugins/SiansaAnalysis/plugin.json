@@ -2,9 +2,17 @@
   "id": "siansa_analysis",
   "name": "Siansa Analysis",
   "author": "Siansa",
-  "description": "For the Siansa app: measures each song's loudness, how it starts and ends (levelling and SmoothFade) and the beat grid at each end (beat-matched blends), and finds similar albums and artists from AudioMuse-AI's sound analysis.",
+  "description": "For the Siansa app: each song's loudness, how it starts and ends, and its beat grids, plus similar albums and artists from AudioMuse-AI's sound analysis.",
   "requirements": [],
   "versions": [
+    {
+      "version": "0.5.2",
+      "min_core_version": "3.6.4",
+      "changelog": "Shorter texts on the settings page: each part says what it's for and how it runs in a few lines. Nothing else changes.",
+      "imageUrl": "",
+      "sourceUrl": "https://raw.githubusercontent.com/echovaultstudio/siansa-audiomuse-plugin/main/dist/siansa_analysis-0.5.2.zip",
+      "checksum": "2f512bbb2c7642f6cde3c78e13f08d5a"
+    },
     {
       "version": "0.5.1",
       "min_core_version": "3.6.4",
