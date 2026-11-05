@@ -6,6 +6,14 @@
   "requirements": [],
   "versions": [
     {
+      "version": "0.5.6",
+      "min_core_version": "3.6.4",
+      "changelog": "Siansa's settings show the plugin's real version. It had said 0.3.3 since that version.",
+      "imageUrl": "",
+      "sourceUrl": "https://raw.githubusercontent.com/echovaultstudio/siansa-audiomuse-plugin/main/dist/siansa_analysis-0.5.6.zip",
+      "checksum": "d40f4d44b036fe835bb09febf09bda75"
+    },
+    {
       "version": "0.5.5",
       "min_core_version": "3.6.4",
       "changelog": "Scheduled Tasks lists only the plugin's tick, with a short description of what it does. The two extra entries (measure_missing and rebuild_similar) are gone: they asked for a schedule nobody needed, and the settings page's Measure now and Build now buttons do the same as before.",
