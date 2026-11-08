@@ -133,10 +133,12 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
       <div class="step" id="now-step"></div>
     </div>
     <div class="controls">
+      <button class="primary" id="start" title="Analyse the ticked libraries: their songs are read from Navidrome and queued">Start analysis</button>
       <button id="read" title="Read the chosen libraries from Navidrome now (it's done every 6 hours anyway)">Look for new songs</button>
       <button id="pause">Pause</button>
     </div>
-    <div class="libs" role="group" aria-label="Libraries to analyse"><span class="label">Libraries to analyse:</span><span id="libs" class="controls"><span class="sub">Asking Navidrome…</span></span></div>
+    <div class="libs" role="group" aria-label="Libraries to analyse"><span class="label">Libraries to analyse:</span><span id="libs" class="controls"><span class="sub">Asking Navidrome…</span></span><span class="sub" id="libs-note" role="status"></span></div>
+    <div class="libs" id="left-out" hidden></div>
     <div class="progress" id="progress" aria-hidden="true"></div>
     <div class="counts" id="counts"></div>
   </section>
@@ -173,6 +175,7 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
         <div class="seg" role="group" aria-label="Show">
           <button data-filter="all" aria-pressed="true">All</button>
           <button data-filter="differ" aria-pressed="false" title="Songs where a reading really disagrees: half and double speed count as the same beat">Worth a listen</button>
+          <button data-filter="done" aria-pressed="false" title="Songs analysed">Done</button>
           <button data-filter="failed" aria-pressed="false">Failed</button>
         </div>
       </div>
@@ -210,7 +213,7 @@ const css = (name) => getComputedStyle(document.documentElement).getPropertyValu
 const BUSY = ["downloading", "decoding", "ready", "analysing"];
 const SHOWN = 200;  // songs in the table at once: the search finds the rest
 let songs = [], filter = "all", selected = null, detail = null, lastCounts = "", status = null;
-let songsAsked = 0, songsTimer = null, libraries = [];
+let songsAsked = 0, songsTimer = null, libraries = [], picked = null;  // picked: the ticks not started yet
 
 async function api(path, options = {}) {
   const r = await fetch(path, {headers: {"Content-Type": "application/json"}, ...options});
@@ -257,7 +260,7 @@ async function refreshStatus() {
     $("now-what").textContent = "Paused"; $("now-step").textContent = `${queued} waiting`;
   } else {
     $("now-what").textContent = total ? (queued ? "Starting the next song…" : "All done") : "No songs yet";
-    $("now-step").textContent = total ? "" : (libraries.some((l) => l.on) ? "Reading the libraries…" : "Choose the libraries to analyse below.");
+    $("now-step").textContent = total ? "" : (libraries.some((l) => l.on) ? "Reading the libraries…" : "Tick the libraries to analyse below, then Start analysis.");
   }
   $("pause").textContent = s.paused ? "Carry on" : "Pause";
   const read = (s.libraries || {}).read_at;
@@ -301,7 +304,7 @@ function drawRows() {
   $("shown-note").textContent = `Showing the first ${songs.length} of ${total} songs: search to find others.`;
   const shown = songs;  // found and filtered by the service
   if (!shown.length) {
-    $("rows").innerHTML = `<tr><td colspan="9" class="empty">${$("search").value.trim() || filter !== "all" ? "Nothing matches." : "No songs yet: choose the libraries to analyse above."}</td></tr>`;
+    $("rows").innerHTML = `<tr><td colspan="9" class="empty">${$("search").value.trim() || filter !== "all" ? "Nothing matches." : "No songs yet: tick the libraries to analyse above, then Start analysis."}</td></tr>`;
     return;
   }
   $("rows").innerHTML = shown.map((s) => {
@@ -343,15 +346,39 @@ document.querySelectorAll("[data-filter]").forEach((b) => b.addEventListener("cl
 // ---- the libraries ----
 async function refreshLibraries() {
   try { libraries = await api("api/libraries"); } catch (e) { $("libs").innerHTML = `<span class="sub">Navidrome doesn't answer: ${esc(e.message)}</span>`; return; }
-  $("libs").innerHTML = libraries.map((l) => `<button data-lib="${esc(l.id)}" aria-pressed="${l.on}" title="${l.on ? "Analysed: tap to leave it out (its songs not yet done leave the queue)" : "Left out: tap to analyse it"}">${esc(l.name)}<span class="n">${l.songs ? `${l.done} of ${l.songs}` : ""}</span></button>`).join("") || `<span class="sub">Navidrome has no libraries.</span>`;
+  drawLibraries();
 }
-$("libs").addEventListener("click", async (e) => {
+const savedIds = () => libraries.filter((l) => l.on).map((l) => l.id);
+function drawLibraries() {
+  const ticked = new Set(picked || savedIds());
+  $("libs").innerHTML = libraries.map((l) => `<button data-lib="${esc(l.id)}" aria-pressed="${ticked.has(l.id)}" title="${ticked.has(l.id) ? "Ticked: tap to leave it out" : "Left out: tap to tick it"}">${esc(l.name)}<span class="n">${l.songs ? `${l.done} of ${l.songs}` : ""}</span></button>`).join("") || `<span class="sub">Navidrome has no libraries.</span>`;
+  const changed = picked && [...ticked].sort().join() !== savedIds().sort().join();
+  $("libs-note").textContent = changed ? "Not started yet: press Start analysis" : "";
+  const left = libraries.filter((l) => !l.on && l.songs);
+  $("left-out").hidden = !left.length;
+  $("left-out").innerHTML = left.map((l) => `<span class="sub">${esc(l.name)} is left out, but ${l.songs} of its songs are still here.</span><button data-remove="${esc(l.id)}" data-name="${esc(l.name)}" data-songs="${l.songs}">Remove them</button>`).join("");
+}
+$("libs").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-lib]");
   if (!b) return;
-  const ids = libraries.filter((l) => (l.id === b.dataset.lib ? !l.on : l.on)).map((l) => l.id);
-  $("libs").querySelectorAll("button").forEach((x) => { x.disabled = true; });
-  b.lastChild.textContent = b.getAttribute("aria-pressed") === "true" ? "" : "reading…";
-  try { await api("api/libraries", {method: "POST", body: JSON.stringify({ids})}); banner(null); }
+  const ticked = new Set(picked || savedIds());
+  if (ticked.has(b.dataset.lib)) ticked.delete(b.dataset.lib); else ticked.add(b.dataset.lib);
+  picked = [...ticked];
+  drawLibraries();
+});
+$("start").addEventListener("click", async () => {
+  const ids = picked || savedIds();
+  if (!ids.length && !confirm("No library is ticked: stop analysing? Songs already done stay.")) return;
+  $("start").disabled = true; $("start").textContent = "Reading the libraries…";
+  try { await api("api/libraries", {method: "POST", body: JSON.stringify({ids})}); picked = null; banner(null); }
+  catch (err) { banner(err.message); }
+  finally { $("start").disabled = false; $("start").textContent = "Start analysis"; await refreshLibraries(); lastCounts = ""; songsAsked = 0; refreshStatus(); }
+});
+$("left-out").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-remove]");
+  if (!b || !confirm(`Remove the ${b.dataset.songs} songs of ${b.dataset.name} from Siansa Beats, with their beats and marks? Nothing changes on Navidrome. The Siansa Dev app then falls back to the Siansa plugin's readings for them.`)) return;
+  b.disabled = true;
+  try { await api(`api/libraries/${encodeURIComponent(b.dataset.remove)}/songs`, {method: "DELETE"}); banner(null); }
   catch (err) { banner(err.message); }
   finally { await refreshLibraries(); lastCounts = ""; songsAsked = 0; refreshStatus(); }
 });

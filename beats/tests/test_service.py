@@ -230,7 +230,7 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(ids(find="%_"), ["c"])  # as written, not as a pattern
         self.assertEqual(len(ids(limit=2)), 2)
         db.set_state("b", "failed", "no")
-        self.assertEqual(ids(failed=True), ["b"])
+        self.assertEqual(ids(state="failed"), ["b"])
         self.assertEqual(db.overview("final0", song_id="b")[0]["genres"][0]["label"], "Drum & Bass")
 
     def test_settings_are_kept(self):
@@ -531,6 +531,7 @@ class ServiceTest(Base):
         self.wait_done()
         self.assertEqual([s["id"] for s in self.call("/api/songs?find=waltz")], ["t96w"])
         self.assertEqual([s["id"] for s in self.call("/api/songs?show=failed")], ["bad"])
+        self.assertEqual(sorted(s["id"] for s in self.call("/api/songs?show=done")), ["t122", "t140", "t96w"])
         self.assertEqual(len(self.call("/api/songs?limit=2")), 2)
         self.assertEqual(len(self.call("/api/songs")), 4)
         self.assertEqual(len(self.call("/api/export.json")["songs"]), 3)
@@ -539,6 +540,24 @@ class ServiceTest(Base):
         self.assertEqual(len(csv_body.decode().strip().splitlines()), 2)
         self.assertEqual(self.call("/api/grids?ids=t122")["grids"][0]["track_id"], "t122")  # the app finds them all
         self.assertEqual(self.call("/api/libraries/read", "POST"), {"songs": 4, "queued": 0})
+
+    def test_the_songs_of_a_library_left_out_can_be_removed(self):
+        for song in self.fake.songs:
+            song["library"] = "2" if song["id"] in ("t96w", "t122") else "1"  # 2: long DJ mixes, say
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1", "2"]})
+        self.wait_done()
+        self.call("/api/songs/t122/marks", "POST", {"seconds": 12.0})
+        with self.assertRaises(urllib.error.HTTPError) as e:  # still being analysed
+            self.call("/api/libraries/2/songs", "DELETE")
+        self.assertEqual(e.exception.code, 409)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.assertEqual(self.call("/api/libraries/2/songs", "DELETE"), {"removed": 2})
+        self.assertEqual(sorted(s["id"] for s in self.call("/api/songs")), ["bad", "t140"])
+        self.assertEqual(self.call("/api/grids?ids=t122")["missing"], ["t122"])
+        libraries = {l["id"]: l for l in self.call("/api/libraries")}
+        self.assertEqual((libraries["2"]["songs"], libraries["1"]["songs"]), (0, 2))
+        self.assertEqual(self.app.store.marks("t122"), [])
 
     def test_the_libraries_of_0_9_0s_whole_library(self):
         self.start()

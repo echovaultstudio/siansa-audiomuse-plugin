@@ -155,6 +155,17 @@ class Store:
                                ("plugin", "song_id"), ("marks", "song_id")):
                 self.db.execute(f"DELETE FROM {table} WHERE {key}=?", (song_id,))
 
+    def remove_folder(self, folder):
+        """Forgets every song of library ``folder``: its results, marks and place in the queue. The number removed
+        (nothing changes on Navidrome)."""
+        with self.lock, self.db:
+            ids = [r[0] for r in self.db.execute("SELECT id FROM songs WHERE folder=?", (folder,))]
+            for table, key in (("genres", "song_id"), ("jobs", "song_id"), ("results", "song_id"), ("plugin", "song_id"),
+                               ("marks", "song_id")):
+                self.db.execute(f"DELETE FROM {table} WHERE {key} IN (SELECT id FROM songs WHERE folder=?)", (folder,))
+            self.db.execute("DELETE FROM songs WHERE folder=?", (folder,))
+            return len(ids)
+
     # ---- the queue ----
 
     def queue(self, song_id, force=False):
@@ -290,15 +301,16 @@ class Store:
         rows = self._rows("SELECT * FROM plugin WHERE song_id=?", (song_id,))
         return rows[0] if rows else None
 
-    def overview(self, model, find=None, failed=False, limit=None, song_id=None):
+    def overview(self, model, find=None, state=None, limit=None, song_id=None):
         """The songs with their job, result (no beats) and plugin readings, for the table: those whose name, artist,
-        album or genre has ``find`` in it, only the failed ones, at most ``limit`` of them, or just ``song_id``."""
+        album or genre has ``find`` in it, only those in ``state`` ("done", "failed"), at most ``limit`` of them, or just ``song_id``."""
         where, args = [], [model]
         if song_id is not None:
             where.append("s.id=?")
             args.append(song_id)
-        if failed:
-            where.append("j.state='failed'")
+        if state:
+            where.append("j.state=?")
+            args.append(state)
         for word in (find or "").split():
             like = "%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
             where.append("(s.title LIKE ? ESCAPE '\\' OR s.artist LIKE ? ESCAPE '\\' OR s.album LIKE ? ESCAPE '\\' OR "
