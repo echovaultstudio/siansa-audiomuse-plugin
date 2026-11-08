@@ -97,6 +97,10 @@ canvas { width: 100%; display: block; border-radius: 10px; background: var(--rai
 label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0.9rem; color: var(--muted); }
 .banner { border: 1px solid var(--bad); color: var(--bad); border-radius: 12px; padding: 10px 14px; }
 .banner[hidden] { display: none; }
+.banner { display: flex; gap: 12px; align-items: flex-start; }
+.banner span { flex: 1; }
+.banner button { padding: 2px 10px; border-color: currentColor; color: inherit; }
+.banner.warn { border-color: var(--warn); color: var(--warn); }
 </style>
 </head>
 <body>
@@ -107,7 +111,9 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
   </div>
 </header>
 <main class="wrap">
-  <div class="banner" id="banner" role="alert" hidden></div>
+  <div class="banner" id="offline" role="alert" hidden></div>
+  <div class="banner" id="banner" role="alert" hidden><span id="banner-text"></span><button id="banner-close" aria-label="Close">✕</button></div>
+  <div class="banner warn" id="device-note" role="status" hidden></div>
 
   <section class="card now" aria-label="What's happening">
     <div>
@@ -194,14 +200,17 @@ async function api(path, options = {}) {
   if (!r.ok) throw new Error(body?.error || r.statusText);
   return body;
 }
-function banner(text) { $("banner").hidden = !text; $("banner").textContent = text || ""; }
+// An error stays until it's closed (or the same action works next time); the page's refresh never clears it.
+function banner(text) { $("banner").hidden = !text; $("banner-text").textContent = text || ""; }
+$("banner-close").addEventListener("click", () => banner(null));
+function offline(text) { $("offline").hidden = !text; $("offline").textContent = text || ""; }
 
 // ---- status ----
 async function refreshStatus() {
   try {
     status = await api("api/status");
-    banner(null);
-  } catch (e) { banner("The service doesn't answer: " + e.message); return; }
+    offline(null);
+  } catch (e) { offline("The service doesn't answer: " + e.message); return; }
   const s = status, c = s.counts, total = c.songs || 0;
   const done = c.done || 0, failed = c.failed || 0, queued = c.queued || 0;
   const busy = BUSY.reduce((n, k) => n + (c[k] || 0), 0);
@@ -222,7 +231,7 @@ async function refreshStatus() {
     $("now-step").textContent = total ? "" : `Make a playlist called "${s.playlist}" in Navidrome, then Analyse playlist.`;
   }
   $("pause").textContent = s.paused ? "Carry on" : "Pause";
-  if (s.device_note) banner(s.device_note);
+  $("device-note").hidden = !s.device_note; $("device-note").textContent = s.device_note || "";
   const w = (n) => total ? (100 * n / total) + "%" : "0";
   $("progress").innerHTML = `<span class="done" style="width:${w(done)}"></span><span class="failed" style="width:${w(failed)}"></span><span class="busy" style="width:${w(busy)}"></span>`;
   const times = songs.filter((x) => x.result).map((x) => x.result.model_seconds).filter((x) => x);
