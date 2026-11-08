@@ -369,6 +369,29 @@ class ServiceTest(Base):
         self.assertIn("bpm", song["result"])
         self.assertNotIn(TOKEN, json.dumps(data))
 
+    def test_section_marks_are_kept_shown_and_exported(self):
+        self.start()
+        self.call("/api/scan", "POST", {})
+        self.wait_done()
+        added = self.call("/api/songs/t140/marks", "POST", {"seconds": 67.4})
+        self.call("/api/songs/t140/marks", "POST", {"seconds": 12.25})
+        marks = self.call("/api/songs/t140")["marks"]
+        self.assertEqual([m["seconds"] for m in marks], [12.25, 67.4])
+        self.assertEqual({s["id"]: s["marks"] for s in self.call("/api/songs")}["t140"], 2)
+        self.call("/api/analyse-all", "POST")  # analysing again keeps them
+        self.wait_done()
+        song = {s["id"]: s for s in self.call("/api/export.json")["songs"]}["t140"]
+        self.assertEqual(song["marks"], [12.25, 67.4])
+        left = self.call(f"/api/songs/t140/marks/{added['id']}", "DELETE")
+        self.assertEqual([m["seconds"] for m in left["marks"]], [12.25])
+        for bad in ({"seconds": "soon"}, {}, {"seconds": -1}):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.call("/api/songs/t140/marks", "POST", bad)
+            self.assertEqual(caught.exception.code, 400)
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.call("/api/songs/nope/marks", "POST", {"seconds": 1})
+        self.assertEqual(caught.exception.code, 404)
+
     def test_the_plugin_line_says_what_went_wrong(self):
         self.start()
         self.app.audiomuse.token = "wrong"

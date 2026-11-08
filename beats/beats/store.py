@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS plugin (
     intro_bar_ms REAL, outro_bar_ms REAL, fetched_at REAL
 );
 CREATE TABLE IF NOT EXISTS events (at REAL, level TEXT, message TEXT);
+CREATE TABLE IF NOT EXISTS marks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, song_id TEXT, seconds REAL, created_at REAL
+);
+CREATE INDEX IF NOT EXISTS marks_song ON marks (song_id);
 """
 
 RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "grid_bpm", "on_grid", "analysis_version", "downbeat_source", "grid_counted",
@@ -118,7 +122,7 @@ class Store:
     def remove(self, song_id):
         with self.lock, self.db:
             for table, key in (("songs", "id"), ("genres", "song_id"), ("jobs", "song_id"), ("results", "song_id"),
-                               ("plugin", "song_id")):
+                               ("plugin", "song_id"), ("marks", "song_id")):
                 self.db.execute(f"DELETE FROM {table} WHERE {key}=?", (song_id,))
 
     # ---- the queue ----
@@ -224,7 +228,28 @@ class Store:
             if all(v is None for v in row["plugin"].values()):
                 row["plugin"] = None
             row["genres"] = self.genres(row["id"])
+        counts = self.mark_counts()
+        for row in rows:
+            row["marks"] = counts.get(row["id"], 0)
         return rows
+
+    # ---- marks: where the owner heard a section start, to check the phrases against ----
+
+    def add_mark(self, song_id, seconds):
+        with self.lock, self.db:
+            cursor = self.db.execute("INSERT INTO marks (song_id, seconds, created_at) VALUES (?, ?, ?)",
+                                     (song_id, round(float(seconds), 3), time.time()))
+            return cursor.lastrowid
+
+    def marks(self, song_id):
+        return self._rows("SELECT id, seconds FROM marks WHERE song_id=? ORDER BY seconds", (song_id,))
+
+    def remove_mark(self, song_id, mark_id):
+        with self.lock, self.db:
+            return self.db.execute("DELETE FROM marks WHERE song_id=? AND id=?", (song_id, mark_id)).rowcount > 0
+
+    def mark_counts(self):
+        return {r["song_id"]: r["n"] for r in self._rows("SELECT song_id, COUNT(*) AS n FROM marks GROUP BY song_id")}
 
     # ---- events ----
 
