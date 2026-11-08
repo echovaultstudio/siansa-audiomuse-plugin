@@ -331,6 +331,9 @@ class ServiceTest(Base):
             self.call("/api/scan", "POST", {"playlist": "Nope"})
         self.assertEqual(e.exception.code, 502)
         self.assertIn("Beat test, Something else", json.loads(e.exception.read())["error"])
+        # …and it stays in Activity, where it can be read at leisure.
+        self.assertTrue(any(ev["level"] == "error" and 'No playlist called "Nope"' in ev["message"]
+                            for ev in self.call("/api/status")["events"]))
         self.assertEqual([p["name"] for p in self.call("/api/playlists")], ["Beat test", "Something else"])
 
     def test_pause_and_carry_on(self):

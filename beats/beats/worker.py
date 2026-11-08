@@ -55,11 +55,15 @@ class Worker:
         """Reads the playlist ``playlist_name`` from Navidrome, adds its songs, queues the new ones, and fetches the
         plugin's readings for them. Returns ``{"songs", "queued"}``."""
         with self.scan_lock:
-            found = self.navidrome.playlist_named(playlist_name)
-            if not found:
-                names = ", ".join(p["name"] for p in self.navidrome.playlists()) or "none"
-                raise SubsonicError(f'No playlist called "{playlist_name}" on Navidrome (its playlists: {names})')
-            songs = self.navidrome.playlist_songs(found["id"])
+            try:
+                found = self.navidrome.playlist_named(playlist_name)
+                if not found:
+                    names = ", ".join(p["name"] for p in self.navidrome.playlists()) or "none"
+                    raise SubsonicError(f'No playlist called "{playlist_name}" on Navidrome (its playlists: {names})')
+                songs = self.navidrome.playlist_songs(found["id"])
+            except SubsonicError as e:
+                self.store.event(f"Couldn't read the playlist: {e}", "error")
+                raise
             queued = 0
             for song in songs:
                 if not song.get("id"):
