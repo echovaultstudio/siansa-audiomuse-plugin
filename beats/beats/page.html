@@ -253,6 +253,9 @@ async function refreshStatus() {
     $("now-what").textContent = `${s.current.artist} – ${s.current.title}`;
     $("now-step").textContent = `${s.current.step} for ${fmt(s.current.for_seconds)} s` +
       (s.next ? ` · next: ${s.next.artist} – ${s.next.title} (${s.next.step})` : "");
+  } else if (s.regridding) {
+    $("now-what").textContent = "Working out songs again from their saved beats";
+    $("now-step").textContent = `${s.regridding.done} of ${s.regridding.total} (an update changed how; no model needed)`;
   } else if (s.next) {
     $("now-what").textContent = `${s.next.artist} – ${s.next.title}`;
     $("now-step").textContent = `${s.next.step} for ${fmt(s.next.for_seconds)} s`;
@@ -274,6 +277,7 @@ async function refreshStatus() {
   const avg = times.length ? times.reduce((a, b) => a + b, 0) / times.length : null;
   $("counts").innerHTML = `<span><b>${total}</b> songs</span><span><b>${done}</b> done</span><span><b>${queued + busy}</b> to go</span><span><b>${failed}</b> failed</span>` +
     (avg ? `<span>about <b>${fmt(avg)}</b> s a song in the model</span>` : "") +
+    (s.regridding ? `<span>working out again: <b>${s.regridding.done}</b> of ${s.regridding.total}</span>` : "") +
     (s.last_error ? `<span>last error: ${esc(s.last_error)}</span>` : "");
   $("events").innerHTML = s.events.map((e) => `<li class="${esc(e.level)}"><time>${new Date(e.at * 1000).toLocaleTimeString()}</time>${esc(e.message)}</li>`).join("") || `<li>Nothing yet.</li>`;
   const key = JSON.stringify(c) + (s.current ? s.current.id + s.current.step : "");
