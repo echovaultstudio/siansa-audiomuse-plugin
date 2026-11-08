@@ -14,7 +14,7 @@ import statistics
 
 from . import features, phrase
 
-ANALYSIS_VERSION = 4  # what's worked out from the beats: older results are worked out again from their saved beats
+ANALYSIS_VERSION = 5  # what's worked out from the beats: older results are worked out again from their saved beats
 END_SECONDS = 30.0  # each end, as the plugin's beats.SECONDS
 MIN_BEATS = 8  # fewer, and there's no tempo worth reporting
 GRID_MS = 30.0  # a beat this close to the straight grid sits on it
