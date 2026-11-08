@@ -10,7 +10,26 @@ import urllib.parse
 import urllib.request
 
 FIELDS = ("intro_bpm", "outro_bpm", "intro_steady", "outro_steady", "intro_bar_ms", "outro_bar_ms")
-BATCH = 200  # the plugin takes up to 500 ids a call
+MAX_IDS = 500  # the plugin takes up to 500 ids a call…
+URL_BUDGET = 3500  # …but AudioMuse-AI's web server turns away request lines over about 4 KB (HTTP 400), as the app knows
+PROFILES = "/plugins/siansa_analysis/api/profiles"
+
+
+def batches(ids, budget=URL_BUDGET, max_ids=MAX_IDS):
+    """``ids`` split so each request's address stays within ``budget`` bytes and ``max_ids`` ids."""
+    out, current, start = [], [], len(PROFILES) + len("?ids=")
+    length = start
+    for i in dict.fromkeys(i for i in ids if i):
+        size = len(urllib.parse.quote(i, safe=""))
+        add = size + (1 if current else 0)
+        if current and (length + add > budget or len(current) >= max_ids):
+            out.append(current)
+            current, length, add = [], start, size
+        current.append(i)
+        length += add
+    if current:
+        out.append(current)
+    return out
 
 
 class AudioMuseError(Exception):
@@ -36,7 +55,11 @@ class AudioMuse:
                 return json.load(response)
         except urllib.error.HTTPError as e:
             hint = " (check AUDIOMUSE_TOKEN)" if e.code in (401, 403) else ""
-            raise AudioMuseError(f"HTTP {e.code}{hint}") from None
+            try:
+                said = json.load(e).get("error") or ""
+            except Exception:
+                said = ""
+            raise AudioMuseError(f"HTTP {e.code}{hint}" + (f": {said}" if said else "")) from None
         except (urllib.error.URLError, OSError, ValueError) as e:
             raise AudioMuseError(str(getattr(e, "reason", e))) from None
 
@@ -46,10 +69,8 @@ class AudioMuse:
     def profiles(self, ids):
         """``{song id: {intro_bpm, …}}`` for the songs the plugin has measured; songs it hasn't are left out."""
         found = {}
-        ids = [i for i in ids if i]
-        for start in range(0, len(ids), BATCH):
-            chunk = ids[start:start + BATCH]
-            answer = self._get("/plugins/siansa_analysis/api/profiles?" + urllib.parse.urlencode({"ids": ",".join(chunk)}))
+        for chunk in batches(ids):
+            answer = self._get(PROFILES + "?ids=" + ",".join(urllib.parse.quote(i, safe="") for i in chunk))
             for p in answer.get("profiles") or []:
                 found[p.get("track_id")] = {k: p.get(k) for k in FIELDS}
         return found

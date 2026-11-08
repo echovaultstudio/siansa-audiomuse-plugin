@@ -65,6 +65,8 @@ class FakeServer:
                 q = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
                 fake.requests.append((url.path, q))
                 if url.path.startswith("/plugins/siansa_analysis/"):
+                    if len(self.requestline) > 4094:  # as AudioMuse-AI's web server (gunicorn's limit_request_line)
+                        return self.reply(400, {"error": "Request Line is too large"})
                     return self.plugin(url.path, q)
                 if not url.path.startswith("/rest/"):
                     return self.reply(404, {"error": "not found"})

@@ -136,6 +136,22 @@ class AudioMuseTest(Base):
         self.assertNotIn("t122", found)
         self.assertEqual(am.health()["plugin_version"], "0.5.7-fake")
 
+    def test_many_songs_are_asked_in_requests_short_enough_for_audiomuse(self):
+        # Navidrome's ids are 22 characters: 200 of them made a request line AudioMuse-AI turned away (HTTP 400).
+        ids = ["t140"] + [f"{n:022d}" for n in range(600)]
+        found = AudioMuse(self.fake.url, TOKEN).profiles(ids)
+        self.assertEqual(found["t140"]["intro_bpm"], 187.1)
+        asked = [q["ids"].split(",") for path, q in self.fake.requests if path.endswith("/api/profiles")]
+        self.assertGreater(len(asked), 3)
+        self.assertEqual(sum(len(a) for a in asked), len(ids))
+
+    def test_batches_keep_to_the_address_budget_and_the_id_limit(self):
+        from beats.audiomuse import PROFILES, batches
+        for chunk in batches([f"{n:022d}" for n in range(1000)]):
+            self.assertLessEqual(len(PROFILES + "?ids=" + ",".join(chunk)), 3500)
+        self.assertEqual([len(c) for c in batches([str(n) for n in range(1200)], budget=10 ** 6)], [500, 500, 200])
+        self.assertEqual(batches(["a", "", "a", "b"]), [["a", "b"]])
+
     def test_a_wrong_token_says_so(self):
         with self.assertRaisesRegex(AudioMuseError, "AUDIOMUSE_TOKEN"):
             AudioMuse(self.fake.url, "wrong").profiles(["t140"])
