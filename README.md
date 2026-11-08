@@ -22,6 +22,13 @@ AudioMuse-AI 3.6.4 or later; no extra packages.
 
 Details, the API and how it works: [plugins/SiansaAnalysis/README.md](plugins/SiansaAnalysis/README.md).
 
+## Siansa Beats
+
+[`beats/`](beats/README.md) is a test bench for [Beat This!](https://github.com/CPJKU/beat_this), a modern beat and
+downbeat tracker, on your own music: a Docker container (CPU, or an NVIDIA GPU) that reads a Navidrome playlist and
+shows its beats and bars next to this plugin's readings, to see whether it reads tempos better. Its image is
+`ghcr.io/echovaultstudio/siansa-beats` (`:latest` for the CPU, `:cuda` for a GPU).
+
 ## License
 
 [GNU Affero General Public License v3.0](LICENSE), like AudioMuse-AI.
