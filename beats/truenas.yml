@@ -11,7 +11,6 @@ services:
       NAVIDROME_URL: "<http://navidrome.local:4533>"
       NAVIDROME_USER: "<your Navidrome user>"
       NAVIDROME_PASSWORD: "<its password>"
-      PLAYLIST: "Beat test"
       AUDIOMUSE_URL: "<http://audiomuse.local:8000, or empty>"
       AUDIOMUSE_TOKEN: "<an AudioMuse-AI API token, or empty>"
       BEATS_MODEL: "final0"

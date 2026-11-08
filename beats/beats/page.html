@@ -46,6 +46,11 @@ main { padding: 16px 0 48px; display: grid; gap: 16px; }
 .progress .done { background: var(--amber); } .progress .failed { background: var(--bad); } .progress .busy { background: var(--frost); }
 .counts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 0.88rem; }
 .counts b { color: var(--text); font-variant-numeric: tabular-nums; }
+.libs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.libs .label { color: var(--muted); font-size: 0.9rem; margin-right: 4px; }
+.libs button[aria-pressed=true] { background: var(--amber); color: var(--on-amber); border-color: var(--amber); }
+.libs button .n:empty { display: none; }
+.libs button .n { opacity: 0.75; font-size: 0.8rem; margin-left: 6px; font-variant-numeric: tabular-nums; }
 .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 button, .btn { font: inherit; font-size: 0.9rem; border-radius: 999px; padding: 7px 14px; border: 1px solid var(--line-strong);
   background: transparent; color: var(--text); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
@@ -128,12 +133,10 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
       <div class="step" id="now-step"></div>
     </div>
     <div class="controls">
-      <input type="text" id="playlist" list="playlists" aria-label="Playlist" placeholder="Playlist">
-      <datalist id="playlists"></datalist>
-      <button class="primary" id="scan">Analyse playlist</button>
-      <button id="library" aria-pressed="false" title="Analyse every song on Navidrome too, after the playlist's, and look for new ones every 6 hours">Analyse whole library</button>
+      <button id="read" title="Read the chosen libraries from Navidrome now (it's done every 6 hours anyway)">Look for new songs</button>
       <button id="pause">Pause</button>
     </div>
+    <div class="libs" role="group" aria-label="Libraries to analyse"><span class="label">Libraries to analyse:</span><span id="libs" class="controls"><span class="sub">Asking Navidrome…</span></span></div>
     <div class="progress" id="progress" aria-hidden="true"></div>
     <div class="counts" id="counts"></div>
   </section>
@@ -166,10 +169,6 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
   <div class="split">
     <section class="card" aria-label="Songs">
       <div class="tools">
-        <div class="seg" role="group" aria-label="Songs from">
-          <button data-scope="playlist" aria-pressed="true">Playlist</button>
-          <button data-scope="library" aria-pressed="false">Whole library</button>
-        </div>
         <input type="search" class="grow" id="search" placeholder="Find a song, artist or genre" aria-label="Find">
         <div class="seg" role="group" aria-label="Show">
           <button data-filter="all" aria-pressed="true">All</button>
@@ -209,9 +208,9 @@ const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v)) ? "
 const pct = (v) => (v === null || v === undefined) ? "–" : Math.round(v * 100) + "%";
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const BUSY = ["downloading", "decoding", "ready", "analysing"];
-const LIBRARY_SHOWN = 200;  // songs of the whole library in the table at once: the search finds the rest
-let songs = [], filter = "all", scope = "playlist", selected = null, detail = null, lastCounts = "", status = null;
-let songsAsked = 0, songsTimer = null;
+const SHOWN = 200;  // songs in the table at once: the search finds the rest
+let songs = [], filter = "all", selected = null, detail = null, lastCounts = "", status = null;
+let songsAsked = 0, songsTimer = null, libraries = [];
 
 async function api(path, options = {}) {
   const r = await fetch(path, {headers: {"Content-Type": "application/json"}, ...options});
@@ -247,7 +246,6 @@ async function refreshStatus() {
     `<span class="pill ${PLUGIN_PILL[(s.plugin || {}).state] || "wait"}" title="${esc((s.plugin || {}).text || "")}">${pluginPill(s)}</span>`,
     `<span class="pill">v${esc(s.version)}</span>`,
   ].join("");
-  if (!$("playlist").value) $("playlist").value = s.playlist;
   if (s.current) {
     $("now-what").textContent = `${s.current.artist} – ${s.current.title}`;
     $("now-step").textContent = `${s.current.step} for ${fmt(s.current.for_seconds)} s` +
@@ -259,13 +257,11 @@ async function refreshStatus() {
     $("now-what").textContent = "Paused"; $("now-step").textContent = `${queued} waiting`;
   } else {
     $("now-what").textContent = total ? (queued ? "Starting the next song…" : "All done") : "No songs yet";
-    $("now-step").textContent = total ? "" : `Make a playlist called "${s.playlist}" in Navidrome, then Analyse playlist.`;
+    $("now-step").textContent = total ? "" : (libraries.some((l) => l.on) ? "Reading the libraries…" : "Choose the libraries to analyse below.");
   }
   $("pause").textContent = s.paused ? "Carry on" : "Pause";
-  const lib = s.library || {};
-  $("library").setAttribute("aria-pressed", !!lib.on);
-  $("library").textContent = lib.on ? "Whole library: on" : "Analyse whole library";
-  $("library").title = lib.on ? `Every song on Navidrome is analysed after the playlist's${lib.read_at ? "; last read " + new Date(lib.read_at * 1000).toLocaleString() : ""}. Tap to go back to just the playlist.` : "Analyse every song on Navidrome too, after the playlist's, and look for new ones every 6 hours";
+  const read = (s.libraries || {}).read_at;
+  $("read").title = "Read the chosen libraries from Navidrome now (it's done every 6 hours anyway)" + (read ? `. Last read ${new Date(read * 1000).toLocaleString()}.` : "");
   $("device-note").hidden = !s.device_note; $("device-note").textContent = s.device_note || "";
   const pluginTrouble = s.plugin && ["error", "warn"].includes(s.plugin.state) ? s.plugin.text : "";
   $("plugin-note").hidden = !pluginTrouble; $("plugin-note").textContent = pluginTrouble;
@@ -273,42 +269,39 @@ async function refreshStatus() {
   $("progress").innerHTML = `<span class="done" style="width:${w(done)}"></span><span class="failed" style="width:${w(failed)}"></span><span class="busy" style="width:${w(busy)}"></span>`;
   const times = songs.filter((x) => x.result).map((x) => x.result.model_seconds).filter((x) => x);
   const avg = times.length ? times.reduce((a, b) => a + b, 0) / times.length : null;
-  $("counts").innerHTML = `<span><b>${total}</b> songs${total !== (c.playlist || 0) ? ` (<b>${c.playlist || 0}</b> in the playlist)` : ""}</span><span><b>${done}</b> done</span><span><b>${queued + busy}</b> to go</span><span><b>${failed}</b> failed</span>` +
+  $("counts").innerHTML = `<span><b>${total}</b> songs</span><span><b>${done}</b> done</span><span><b>${queued + busy}</b> to go</span><span><b>${failed}</b> failed</span>` +
     (avg ? `<span>about <b>${fmt(avg)}</b> s a song in the model</span>` : "") +
     (s.last_error ? `<span>last error: ${esc(s.last_error)}</span>` : "");
   $("events").innerHTML = s.events.map((e) => `<li class="${esc(e.level)}"><time>${new Date(e.at * 1000).toLocaleTimeString()}</time>${esc(e.message)}</li>`).join("") || `<li>Nothing yet.</li>`;
   const key = JSON.stringify(c) + (s.current ? s.current.id + s.current.step : "");
-  // The whole library is a big list: asked again at most every 15 s while songs are being analysed.
-  if (key !== lastCounts && (scope === "playlist" || Date.now() - songsAsked > 15000)) { lastCounts = key; refreshSongs(); }
+  // A library is a big list: asked again at most every 15 s while songs are being analysed.
+  if (key !== lastCounts && Date.now() - songsAsked > 15000) { lastCounts = key; refreshSongs(); refreshLibraries(); }
 }
 
 // ---- the table ----
 function songsPath() {
-  if (scope === "playlist") return "api/songs";
-  const q = new URLSearchParams({scope, limit: LIBRARY_SHOWN, show: filter});
+  const q = new URLSearchParams({limit: SHOWN, show: filter});
   if ($("search").value.trim()) q.set("find", $("search").value.trim());
   return "api/songs?" + q;
 }
 async function refreshSongs() {
   songsAsked = Date.now();
-  const asked = scope + songsPath();
+  const asked = songsPath();
   let found;
   try { found = await api(songsPath()); } catch (e) { return; }
-  if (asked !== scope + songsPath()) return;  // the scope or search changed meanwhile: a newer answer is on its way
+  if (asked !== songsPath()) return;  // the search changed meanwhile: a newer answer is on its way
   songs = found;
   drawRows();
   if (selected && detail && detail.state !== songs.find((s) => s.id === selected)?.state) openSong(selected, false);
 }
 function differs(s) { return (s.verdict || []).some(([level]) => level === "warn"); }
 function drawRows() {
-  const q = scope === "playlist" ? $("search").value.trim().toLowerCase() : "";  // the library is searched by the service
-  const total = status ? (scope === "playlist" ? status.counts.playlist : status.counts.songs) : 0;
-  $("shown-note").hidden = scope === "playlist" || songs.length < LIBRARY_SHOWN;
+  const total = status ? status.counts.songs : 0;
+  $("shown-note").hidden = songs.length < SHOWN;
   $("shown-note").textContent = `Showing the first ${songs.length} of ${total} songs: search to find others.`;
-  const shown = songs.filter((s) => filter === "all" || (filter === "differ" ? differs(s) : s.state === "failed"))
-    .filter((s) => !q || [s.title, s.artist, s.album, ...s.genres.map((g) => g.label)].join(" ").toLowerCase().includes(q));
+  const shown = songs;  // found and filtered by the service
   if (!shown.length) {
-    $("rows").innerHTML = `<tr><td colspan="9" class="empty">${songs.length || (scope === "library" && ($("search").value.trim() || filter !== "all")) ? "Nothing matches." : scope === "library" ? "No songs yet: Analyse whole library reads them from Navidrome." : "No songs yet."}</td></tr>`;
+    $("rows").innerHTML = `<tr><td colspan="9" class="empty">${$("search").value.trim() || filter !== "all" ? "Nothing matches." : "No songs yet: choose the libraries to analyse above."}</td></tr>`;
     return;
   }
   $("rows").innerHTML = shown.map((s) => {
@@ -329,7 +322,6 @@ function drawRows() {
 }
 $("rows").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-id]"); if (tr) openSong(tr.dataset.id, true); });
 function songsChanged() {
-  if (scope === "playlist") return drawRows();
   clearTimeout(songsTimer);
   songsTimer = setTimeout(refreshSongs, 250);
 }
@@ -339,14 +331,36 @@ document.querySelectorAll("[data-filter]").forEach((b) => b.addEventListener("cl
   document.querySelectorAll("[data-filter]").forEach((x) => x.setAttribute("aria-pressed", x === b));
   songsChanged();
 }));
-document.querySelectorAll("[data-scope]").forEach((b) => b.addEventListener("click", () => {
-  scope = b.dataset.scope;
-  document.querySelectorAll("[data-scope]").forEach((x) => x.setAttribute("aria-pressed", x === b));
-  $("export-csv").href = "api/export.csv?scope=" + scope;
-  $("export-json").href = "api/export.json?scope=" + scope;
-  $("all-again").textContent = scope === "playlist" ? "Analyse every song again" : "Analyse the whole library again";
-  songs = []; drawRows(); refreshSongs();
-}));
+function exportLinks() {
+  const q = new URLSearchParams({show: filter});
+  if ($("search").value.trim()) q.set("find", $("search").value.trim());
+  $("export-csv").href = "api/export.csv?" + q;
+  $("export-json").href = "api/export.json?" + q;
+}
+$("search").addEventListener("input", exportLinks);
+document.querySelectorAll("[data-filter]").forEach((b) => b.addEventListener("click", exportLinks));
+
+// ---- the libraries ----
+async function refreshLibraries() {
+  try { libraries = await api("api/libraries"); } catch (e) { $("libs").innerHTML = `<span class="sub">Navidrome doesn't answer: ${esc(e.message)}</span>`; return; }
+  $("libs").innerHTML = libraries.map((l) => `<button data-lib="${esc(l.id)}" aria-pressed="${l.on}" title="${l.on ? "Analysed: tap to leave it out (its songs not yet done leave the queue)" : "Left out: tap to analyse it"}">${esc(l.name)}<span class="n">${l.songs ? `${l.done} of ${l.songs}` : ""}</span></button>`).join("") || `<span class="sub">Navidrome has no libraries.</span>`;
+}
+$("libs").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-lib]");
+  if (!b) return;
+  const ids = libraries.filter((l) => (l.id === b.dataset.lib ? !l.on : l.on)).map((l) => l.id);
+  $("libs").querySelectorAll("button").forEach((x) => { x.disabled = true; });
+  b.lastChild.textContent = b.getAttribute("aria-pressed") === "true" ? "" : "reading…";
+  try { await api("api/libraries", {method: "POST", body: JSON.stringify({ids})}); banner(null); }
+  catch (err) { banner(err.message); }
+  finally { await refreshLibraries(); lastCounts = ""; songsAsked = 0; refreshStatus(); }
+});
+$("read").addEventListener("click", async () => {
+  $("read").disabled = true;
+  try { await api("api/libraries/read", {method: "POST"}); banner(null); } catch (e) { banner(e.message); }
+  finally { $("read").disabled = false; await refreshLibraries(); refreshStatus(); }
+});
+
 
 // ---- one song ----
 async function openSong(id, newSong, fromHistory) {
@@ -586,28 +600,14 @@ setInterval(scheduleClicks, 60);
 (function frame() { drawBeatView(); if (detail && !$("player").paused) drawCurve(); requestAnimationFrame(frame); })();
 
 // ---- controls ----
-$("scan").addEventListener("click", async () => {
-  $("scan").disabled = true;
-  try { const r = await api("api/scan", {method: "POST", body: JSON.stringify({playlist: $("playlist").value})}); banner(null); }
-  catch (e) { banner(e.message); }
-  finally { $("scan").disabled = false; refreshStatus(); }
-});
 $("pause").addEventListener("click", async () => { await api(status?.paused ? "api/resume" : "api/pause", {method: "POST"}); refreshStatus(); });
 $("all-again").addEventListener("click", async () => {
-  if (confirm(scope === "playlist" ? "Analyse every song of the playlist again?" : "Analyse every song of the whole library again? That can take days.")) {
-    await api("api/analyse-all", {method: "POST", body: JSON.stringify({scope})}); refreshStatus();
+  if (confirm("Analyse every song again? For a big library that can take days.")) {
+    await api("api/analyse-all", {method: "POST"}); refreshStatus();
   }
 });
-$("library").addEventListener("click", async () => {
-  const on = !(status && status.library && status.library.on);
-  if (on && !confirm("Analyse every song on Navidrome? The playlist's songs go first; the rest can take a day or more, and new songs are found every 6 hours.")) return;
-  $("library").disabled = true;
-  try { await api("api/library", {method: "POST", body: JSON.stringify({on})}); banner(null); }
-  catch (e) { banner(e.message); }
-  finally { $("library").disabled = false; refreshStatus(); }
-});
-$("plugin-refresh").addEventListener("click", async () => { try { await api("api/plugin/refresh", {method: "POST", body: JSON.stringify({scope})}); } catch (e) { banner(e.message); } lastCounts = ""; refreshStatus(); });
-api("api/playlists").then((lists) => { $("playlists").innerHTML = lists.map((p) => `<option value="${esc(p.name)}">${p.songs} songs</option>`).join(""); }).catch(() => {});
+$("plugin-refresh").addEventListener("click", async () => { try { await api("api/plugin/refresh", {method: "POST"}); } catch (e) { banner(e.message); } lastCounts = ""; refreshStatus(); });
+refreshLibraries();
 refreshStatus();
 setInterval(refreshStatus, 2000);
 { const m = location.hash.match(/^#song=(.+)$/); if (m) { history.replaceState({song: decodeURIComponent(m[1])}, "", location.hash); openSong(decodeURIComponent(m[1]), true, true); } }

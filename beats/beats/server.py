@@ -1,9 +1,9 @@
-"""Siansa Beats: Beat This! for a test library from Navidrome, with a page to watch it and compare its readings.
+"""Siansa Beats: Beat This! for the songs of the chosen Navidrome libraries, with a page to watch it and compare
+its readings.
 
 Run with ``python -m beats.server``. Set up with environment variables (see the README):
 
     NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASSWORD   the music server (read only)
-    PLAYLIST                                             the test library's playlist (default "Beat test")
     AUDIOMUSE_URL, AUDIOMUSE_TOKEN                       optional: the Siansa plugin's readings, for comparison
     BEATS_MODEL (final0 | small0), BEATS_DEVICE (auto | cpu | cuda | cuda:N), BEATS_FLOAT16, BEATS_THREADS
     BEATS_PASSWORD                                       optional: the page and API ask for it (user "siansa")
@@ -13,24 +13,22 @@ API (JSON):
 
     GET  /api/health                  {"status": "ok", "model", "model_loaded"}
     GET  /api/status                  the queue, what's being done, setup and recent activity
-    GET  /api/playlists               Navidrome's playlists
-    GET  /api/songs                   the songs with their readings and what they say together: the playlist's
-                                      (?scope=playlist, the default) or the library's (?scope=library), with
-                                      ?find=, ?show=differ|failed and ?limit= (at most 1000 for the library)
+    GET  /api/libraries               Navidrome's libraries, each with "on" (analysed) and its songs here and done
+    GET  /api/songs                   the songs with their readings and what they say together, with ?find=,
+                                      ?show=differ|failed and ?limit= (200 when not given, at most 1000)
     GET  /api/songs/<id>              one song, with every beat and downbeat and its tempo along the song
     GET  /api/beats/<id>              just the beat grid (the shape the plugin will read later)
     GET  /api/audio/<id>              the song for the page's player (Navidrome's MP3, passed through)
     GET  /api/export.csv              the table as CSV
     GET  /api/grids?ids=a,b           each song's beat grid at both ends, as the Siansa app reads the plugin's
-    GET  /api/export.json             every song's beats and sound levels, to tune the grid and phrases on
-                                      (?scope=playlist, the default, or ?scope=library; the CSV takes it too)
+    GET  /api/export.json             the songs' beats and sound levels, to tune the grid and phrases on (?find=
+                                      and ?show= as the table, every song without them; the CSV takes them too)
     POST /api/songs/<id>/marks        {"seconds": 67.4}: the owner heard a section start there
     DELETE /api/songs/<id>/marks/<n>  takes a mark away
-    POST /api/scan {"playlist"}       read the playlist, queue its new songs
     POST /api/songs/<id>/analyse      analyse it again
-    POST /api/library {"on"}          analyse every song on Navidrome too (read again every 6 hours), or not
-    POST /api/library/read            read the whole library now, for new songs
-    POST /api/analyse-all {"scope"}   analyse every song (of the playlist or the library) again
+    POST /api/libraries {"ids"}       analyse these libraries (and no others); read them now, and every 6 hours
+    POST /api/libraries/read          read the chosen libraries now, for new songs
+    POST /api/analyse-all             analyse every song again
     POST /api/plugin/refresh          read the plugin's readings again
     POST /api/pause, /api/resume
     DELETE /api/songs/<id>            forget it (nothing changes on Navidrome)
@@ -53,7 +51,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import __version__, grid
 from .audiomuse import AudioMuse, AudioMuseError
-from .store import SCOPES, Store
+from .store import Store
 from .subsonic import Subsonic, SubsonicError
 from .worker import Worker
 
@@ -67,7 +65,6 @@ class Config:
         self.navidrome_url = env.get("NAVIDROME_URL", "")
         self.navidrome_user = env.get("NAVIDROME_USER", "")
         self.navidrome_password = env.get("NAVIDROME_PASSWORD", "")
-        self.playlist = env.get("PLAYLIST", "Beat test")
         self.audiomuse_url = env.get("AUDIOMUSE_URL", "")
         self.audiomuse_token = env.get("AUDIOMUSE_TOKEN", "")
         self.model = env.get("BEATS_MODEL", "final0")
@@ -106,14 +103,13 @@ class App:
         row["genre_range"] = list(found[:2]) if found else None
         return row
 
-    LIBRARY_LIMIT = 1000  # songs at most in one answer for the whole library: the page asks for fewer
+    SONGS_SHOWN, SONGS_MOST = 200, 1000  # songs in one answer for the table, unless asked for more (at most)
 
-    def songs(self, scope="playlist", find=None, show="all", limit=None):
-        """The table's songs: the playlist's (all of them) or the library's (at most ``limit``)."""
-        if scope == "library":
-            limit = min(int(limit or self.LIBRARY_LIMIT), self.LIBRARY_LIMIT)
-        rows = self.store.overview(self.config.model, scope, find, show == "failed",
-                                   None if show == "differ" else limit)
+    def songs(self, find=None, show="all", limit=None):
+        """The table's songs: those ``find`` finds, of those to ``show`` (all, "differ" or "failed"), at most
+        ``limit`` (``0``: every one, for the exports)."""
+        limit = None if limit == 0 else min(int(limit or self.SONGS_SHOWN), self.SONGS_MOST)
+        rows = self.store.overview(self.config.model, find, show == "failed", None if show == "differ" else limit)
         rows = [self.song_row(r) for r in rows]
         if show == "differ":
             rows = [r for r in rows if any(level == "warn" for level, _ in r["verdict"])]
@@ -145,12 +141,12 @@ class App:
             beats, bpm, per_bar = full["beats"], full["bpm"], full.get("beats_per_bar") or 4
         return grid.with_sound(grid.steady_grid(beats, full["downbeats"], bpm, per_bar), full.get("levels"))
 
-    def export(self, scope="playlist"):
-        """Every analysed song (of the playlist or the library) with what the grid and phrases are worked out from
-        (the model's beats and downbeats, the sound's levels) and what they came to: to tune them on real music. Song
-        names and genres, no addresses."""
+    def export(self, find=None, show="all"):
+        """The analysed songs the table finds (every one without ``find`` and ``show``) with what the grid and
+        phrases are worked out from (the model's beats and downbeats, the sound's levels) and what they came to: to
+        tune them on real music. Song names and genres, no addresses."""
         out = []
-        for row in self.store.overview(self.config.model, scope):
+        for row in self.songs(find, show, 0):
             full = self.store.result(row["id"], self.config.model, with_beats=True)
             if not full:
                 continue
@@ -160,7 +156,7 @@ class App:
                         "result": {k: v for k, v in full.items() if k not in ("beats", "downbeats", "levels")},
                         "beats": full["beats"], "downbeats": full["downbeats"], "levels": full.get("levels"),
                         "marks": [m["seconds"] for m in self.store.marks(row["id"])]})
-        return {"version": __version__, "model": self.config.model, "scope": scope, "songs": out}
+        return {"version": __version__, "model": self.config.model, "songs": out}
 
     def beats(self, song_id):
         """The beat grid as the plugin will read it: the steady grid when the song is at one tempo (``steady``
@@ -194,7 +190,7 @@ class App:
             "counts": counts,
             "current": current,
             "next": preparing,
-            "library": {"on": worker.library, "read_at": self.store.setting("library_read_at")},
+            "libraries": {"chosen": self.store.setting("folders") or [], "read_at": self.store.setting("library_read_at")},
             "paused": worker.paused,
             "last_error": worker.last_error,
             "model": self.config.model,
@@ -204,7 +200,6 @@ class App:
             "float16": self.config.float16,
             "model_loaded": self.tracker_loaded(),
             "model_load_seconds": getattr(self.tracker, "load_seconds", None),
-            "playlist": self.config.playlist,
             "navidrome": self.config.navidrome_url or None,
             "audiomuse": self.config.audiomuse_url or None,
             "plugin": worker.plugin_state,
@@ -215,7 +210,7 @@ class App:
     def tracker_loaded(self):
         return bool(getattr(self.tracker, "loaded", True))
 
-    def csv(self, scope="playlist"):
+    def csv(self, find=None, show="all"):
         out = io.StringIO()
         columns = ["artist", "title", "album", "genres", "tag_bpm", "plugin_intro_bpm", "plugin_outro_bpm", "bpm",
                    "main_share", "bpm_fit", "grid_bpm", "on_grid", "downbeat_source", "phrase_first_ms", "phrase_bars", "phrase_count",
@@ -224,7 +219,7 @@ class App:
                    "model_seconds", "state", "notes"]
         w = csv.writer(out)
         w.writerow(columns)
-        for row in (self.song_row(r) for r in self.store.overview(self.config.model, scope)):
+        for row in self.songs(find, show, 0):
             r, p = row["result"] or {}, row["plugin"] or {}
             w.writerow([row["artist"], row["title"], row["album"], " / ".join(g["label"] for g in row["genres"]),
                         row["tag_bpm"], p.get("intro_bpm"), p.get("outro_bpm"), _round(r.get("bpm")),
@@ -322,16 +317,15 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(HTTPStatus.OK, f.read(), "text/html; charset=utf-8")
             if path == "/api/status":
                 return self._json(app.status())
-            if path == "/api/playlists":
-                return self._json(app.navidrome.playlists())
-            scope = _scope(query)
+            if path == "/api/libraries":
+                return self._json(app.worker.libraries())
+            find, show = (query.get("find") or [""])[0], (query.get("show") or ["all"])[0]
             if path == "/api/songs":
                 try:
                     limit = int((query.get("limit") or ["0"])[0] or 0)
                 except ValueError:
                     return self._error(HTTPStatus.BAD_REQUEST, "limit is a number")
-                return self._json(app.songs(scope, (query.get("find") or [""])[0], (query.get("show") or ["all"])[0],
-                                            limit or None))
+                return self._json(app.songs(find, show, limit or None))
             if path == "/api/grids":
                 ids = [i for i in dict.fromkeys(p.strip() for p in (query.get("ids") or [""])[0].split(",")) if i]
                 if len(ids) > 2000:
@@ -340,11 +334,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"version": __version__, "grids": [{"track_id": i, **found[i]} for i in ids if i in found],
                                    "missing": [i for i in ids if i not in found]})
             if path == "/api/export.json":
-                body = json.dumps(app.export(scope)).encode()
+                body = json.dumps(app.export(find, show)).encode()
                 return self._send(HTTPStatus.OK, body, "application/json",
                                   {"Content-Disposition": 'attachment; filename="siansa-beats-data.json"'})
             if path == "/api/export.csv":
-                return self._send(HTTPStatus.OK, app.csv(scope), "text/csv; charset=utf-8",
+                return self._send(HTTPStatus.OK, app.csv(find, show), "text/csv; charset=utf-8",
                                   {"Content-Disposition": 'attachment; filename="siansa-beats.csv"'})
             m = re.fullmatch(r"/api/songs/([^/]+)", path)
             if m:
@@ -367,21 +361,23 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         app, body = self.app, self._body()
         try:
-            if path == "/api/scan":
-                return self._json(app.worker.scan(body.get("playlist") or app.config.playlist))
-            if path == "/api/library":
-                return self._json(app.worker.set_library(bool(body.get("on"))))
-            if path == "/api/library/read":
-                return self._json(app.worker.scan_library())
-            scope = body.get("scope") if body.get("scope") in SCOPES else "playlist"
+            if path == "/api/libraries":
+                ids = body.get("ids")
+                if not isinstance(ids, list):
+                    return self._error(HTTPStatus.BAD_REQUEST, 'ids needed: a list of library ids ([] for none)')
+                try:
+                    return self._json(app.worker.choose(ids))
+                except ValueError as e:
+                    return self._error(HTTPStatus.BAD_REQUEST, str(e))
+            if path == "/api/libraries/read":
+                return self._json(app.worker.read_libraries())
             if path == "/api/analyse-all":
-                queued = sum(app.store.queue(r["id"], force=True) for r in app.store.overview(app.config.model, scope))
-                app.store.event(f"Analysing every song {'of the library' if scope == 'library' else 'of the playlist'} "
-                                f"again: {queued} queued")
+                queued = sum(app.store.queue(r["id"], force=True) for r in app.store.overview(app.config.model))
+                app.store.event(f"Analysing every song again: {queued} queued")
                 app.worker.wake()
                 return self._json({"queued": queued})
             if path == "/api/plugin/refresh":
-                ids = [r["id"] for r in app.store.overview(app.config.model, scope)]
+                ids = [r["id"] for r in app.store.overview(app.config.model)]
                 return self._json({"found": app.worker.refresh_plugin(ids)})
             if path in ("/api/pause", "/api/resume"):
                 app.worker.pause(path == "/api/pause")
@@ -456,11 +452,6 @@ class Handler(BaseHTTPRequestHandler):
                 pass  # the listener moved on (seeking)
 
 
-def _scope(query):
-    scope = (query.get("scope") or ["playlist"])[0]
-    return scope if scope in SCOPES else "playlist"
-
-
 def _id(text):
     import urllib.parse
 
@@ -479,8 +470,7 @@ def main():
     app = App(config)
     app.worker.start()
     app.store.event(f"Started: model {config.model}, device {config.device}"
-                    f"{' (half precision on a GPU)' if config.float16 else ''}, playlist \"{config.playlist}\""
-                    f"{' and the whole library' if app.worker.library else ''}")
+                    f"{' (half precision on a GPU)' if config.float16 else ''}")
     if not app.navidrome.configured:
         app.store.event("Navidrome isn't set up: set NAVIDROME_URL, NAVIDROME_USER and NAVIDROME_PASSWORD", "error")
     else:

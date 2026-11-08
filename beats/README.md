@@ -1,7 +1,7 @@
 # Siansa Beats
 
 A test of [Beat This!](https://github.com/CPJKU/beat_this) (CPJKU, 2024), the beat and downbeat tracker, on your own
-music. It reads the songs of one Navidrome playlist, finds every beat and downbeat in each, and shows them on a page:
+music. It reads the songs of the Navidrome libraries you choose, finds every beat and downbeat in each, and shows them on a page:
 its tempo and bars next to the Siansa plugin's current readings, the file's BPM tag and the genre's usual tempos, so
 misread songs stand out. You can play any song with a click on each beat to hear whether they're right.
 
@@ -11,7 +11,7 @@ AudioMuse-AI or the plugin. If Beat This! proves better, the plugin can later as
 
 | | |
 |---|---|
-| **Reads** | One Navidrome playlist (default **Beat test**), or the whole library when asked: each song's original file, BPM tag and genre. Optionally the Siansa plugin's readings from AudioMuse-AI. |
+| **Reads** | The Navidrome libraries chosen on its page (all of them, or leaving some out, as compilations): each song's original file, BPM tag and genre. Optionally the Siansa plugin's readings from AudioMuse-AI. |
 | **Finds** | Every beat and downbeat (Beat This!, the `final0` model, on the CPU or an NVIDIA GPU), and from them the tempo of the whole song and of each end (the first and last 30 seconds, as the plugin measures), how steady it is, the beats a bar and the first downbeat. |
 | **Keeps** | `/data/beats.db` (SQLite) in the container's volume. Each song is downloaded to `/data` while it's read, then deleted. |
 | **Shows** | A page at port 8090: what it's doing, a table of every song with what the readings say together, and a page per song with its beats, a player with clicks on the beats, and its tempo along the song. |
@@ -21,11 +21,9 @@ AudioMuse-AI or the plugin. If Beat This! proves better, the plugin can later as
 You need a Docker server on the same network as Navidrome, with about 3 GB of disk for the image and 2–3 GB of
 memory free while it works.
 
-1. **Make the test library.** In Navidrome, make a playlist called **Beat test** with about 30 songs. A good mix:
-   - songs you know are misread today (Control by Ecsape, read at 187 BPM instead of about 140);
-   - steady dance music (house, techno, trance), and some drum & bass;
-   - a few live or acoustic songs (a drummer, not a drum machine);
-   - something in 3/4 (a waltz) or with a tempo change.
+1. **Know your libraries.** Siansa Beats analyses the Navidrome libraries you tick on its page (Navidrome's
+   Settings › Libraries lists them), so you can leave some out, such as compilations or audiobooks. A song takes a
+   few seconds on a GPU, much longer on the CPU: try one small library first.
 
 2. **Get the two files** into a folder on the server. The image is public, so no login is needed:
 
@@ -61,7 +59,7 @@ and the CPU when it isn't. The page's first pill says which, with the GPU's name
 
 1. **The NVIDIA driver on TrueNAS** (once): Apps › Configuration › Settings › tick **Install NVIDIA Drivers**,
    Save. `nvidia-smi` in System › Shell should then list the card. (Driver 525 or newer; TrueNAS's is.)
-2. **Make the playlist** in Navidrome, as in step 1 above.
+2. **Know your libraries**, as in step 1 above.
 3. **Install it:** Apps › Discover Apps › ⋮ › **Install via YAML**. Name it `siansa-beats`, paste
    [`truenas.yml`](truenas.yml) (or [raw](https://raw.githubusercontent.com/echovaultstudio/siansa-audiomuse-plugin/main/beats/truenas.yml)), fill in the values marked `<…>` (Navidrome's address, user and password;
    AudioMuse-AI's address and token, or empty), and Save.
@@ -82,7 +80,8 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
 
 ## Use it
 
-1. Press **Analyse playlist**. It reads the playlist and works through it a song at a time; the top shows the song
+1. Tick the **libraries to analyse**. It reads their songs from Navidrome and works through them a song at a time;
+   the top shows the song
    and the step (downloading, decoding, loading the model, analysing), and **Activity** what's been done, with the
    time each step took. The first song takes longer while the model loads.
 2. **The table**, a row a song:
@@ -143,21 +142,20 @@ addresses or passwords): what the grid and phrases are worked out from, to tune 
 `:dev-cuda` (GPU): put that tag in the YAML instead of `latest` / `cuda` and restart. It keeps the same data; going
 back to `:cuda` keeps it too.
 
-To add songs, add them to the playlist and press **Analyse playlist** again: only the new ones are read.
-
-**The whole library.** **Analyse whole library** reads every song on Navidrome and analyses them all, after the
-playlist's (which always go first). It stays on across restarts and reads the library again every 6 hours for new
-songs; press it again to go back to the playlist alone (the library's songs not yet analysed leave the queue, the
-ones done stay). The next song is downloaded and decoded while the model works on this one, so the model rarely
-waits for the network; the top says how long each song takes, to judge how long the library will. The table shows the **Playlist** or the **Whole library** (the first
-200, the search finding the rest), and **Export CSV** and **Download data** take the songs it shows.
+**Libraries.** Each ticked library shows how many of its songs are done. Untick one to leave it out: its songs not
+yet analysed leave the queue, the ones done stay. The choice is kept across restarts, and the ticked libraries are
+read again every 6 hours for new songs (**Look for new songs** does it now). The next song is downloaded and decoded
+while the model works on this one, so the model rarely waits for the network; the top says how long each song takes,
+to judge how long a library will. The table shows the first 200 songs, the search finding the rest, and **Export
+CSV** and **Download data** take the songs it finds (every song when nothing is searched: for a big library the data
+is large).
 
 ## Test it
 
 Every change is tested by GitHub Actions (`.github/workflows/beats.yml` in this repository):
 
 - **Without the model**: the tempo, bar and comparison maths (`tests/test_grid.py`), and the whole service against
-  a fake Navidrome and AudioMuse-AI (`tests/test_service.py`): the token login, playlists, the queue, failures, the
+  a fake Navidrome and AudioMuse-AI (`tests/test_service.py`): the token login, libraries, the queue, failures, the
   page's API, the audio passing through with seeking, the CSV, pause and the password.
 - **CPU or GPU** (`tests/test_analyser.py`): which device each `BEATS_DEVICE` gives, and the fallback to the CPU,
   with a note, when a GPU is asked for but missing.
@@ -179,7 +177,7 @@ On the server, after setting it up:
 
 1. `docker compose ps` says **healthy**, and http://\<server\>:8090/api/health answers `"status": "ok"`.
 2. The page's pills are green for Navidrome (and AudioMuse-AI if you set it).
-3. **Analyse playlist**: the songs appear, the first one loads the model (the pill then says how long it took),
+3. **Tick a library**: the songs appear, the first one loads the model (the pill then says how long it took),
    and the rest follow. A song that fails says why in its row and in Activity, and the queue goes on.
 4. Open Control (or another song you know): play it with clicks on, and check the clicks sit on the beat.
 
@@ -202,7 +200,6 @@ On the server, after setting it up:
 | Variable | Default | |
 |---|---|---|
 | `NAVIDROME_URL`, `NAVIDROME_USER`, `NAVIDROME_PASSWORD` | | Navidrome, read only. The password never leaves the container: requests carry a salted token. |
-| `PLAYLIST` | `Beat test` | The test library's playlist (the page can name another). |
 | `AUDIOMUSE_URL`, `AUDIOMUSE_TOKEN` | empty | The Siansa plugin's readings, for the comparison. |
 | `BEATS_MODEL` | `final0` | `small0` is smaller and faster, a little less exact. Both are in the image. |
 | `BEATS_DEVICE` | `auto` | `auto` (the GPU when the container has one), `cpu`, `cuda`, `cuda:N`. Needs the `cuda` image for a GPU. |
@@ -213,10 +210,9 @@ On the server, after setting it up:
 
 ## API
 
-`GET /api/health`, `/api/status`, `/api/playlists`, `/api/songs`, `/api/songs/<id>` (with every beat),
+`GET /api/health`, `/api/status`, `/api/libraries`, `/api/songs`, `/api/songs/<id>` (with every beat),
 `/api/beats/<id>`, `/api/audio/<id>`, `/api/grids?ids=`, `/api/export.csv`, `/api/export.json`;
-`POST /api/scan {"playlist"}`, `/api/library {"on"}`, `/api/library/read`, `/api/songs/<id>/analyse`,
-`/api/analyse-all {"scope"}`, `/api/plugin/refresh`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`. See
+`POST /api/libraries {"ids"}`, `/api/libraries/read`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/plugin/refresh`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`. See
 `beats/server.py`.
 
 Beat This! is by Francesco Foscarin, Jan Schlüter and Gerhard Widmer (ISMIR 2024), under the MIT licence.

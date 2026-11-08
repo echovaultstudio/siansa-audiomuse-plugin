@@ -1,4 +1,4 @@
-"""Navidrome (or any OpenSubsonic server), read only: playlists, songs and their audio, as the Siansa app asks.
+"""Navidrome (or any OpenSubsonic server), read only: its libraries, their songs and their audio.
 
 Logs in with a salted token (``t``/``s``), never sending the password itself. Nothing on the server is changed.
 """
@@ -61,39 +61,30 @@ class Subsonic:
         answer = self._get("ping")
         return {"version": answer.get("serverVersion") or answer.get("version"), "type": answer.get("type")}
 
-    def playlists(self):
-        """``[{id, name, songs}]``."""
-        lists = (self._get("getPlaylists").get("playlists") or {}).get("playlist") or []
-        return [{"id": p["id"], "name": p.get("name", ""), "songs": p.get("songCount", 0)} for p in lists]
+    def libraries(self):
+        """Navidrome's libraries (Subsonic's music folders): ``[{id, name}]``, ids as text."""
+        folders = (self._get("getMusicFolders").get("musicFolders") or {}).get("musicFolder") or []
+        return [{"id": str(f["id"]), "name": f.get("name") or str(f["id"])} for f in folders if f.get("id") is not None]
 
-    def playlist_named(self, name):
-        """The playlist called ``name`` (case doesn't matter), or ``None``."""
-        for p in self.playlists():
-            if p["name"].strip().lower() == (name or "").strip().lower():
-                return p
-        return None
-
-    def playlist_songs(self, playlist_id):
-        entries = (self._get("getPlaylist", id=playlist_id).get("playlist") or {}).get("entry") or []
-        return [song_from(e) for e in entries]
-
-    def all_songs(self, page=500):
-        """Every song on the server, ``page`` at a time: ``search3`` with an empty query (as clients that sync the
-        whole library ask Navidrome), or album by album when the server finds nothing for an empty query."""
+    def all_songs(self, library=None, page=500):
+        """Every song in ``library`` (an id from :meth:`libraries`; ``None``: every library), ``page`` at a time:
+        ``search3`` with an empty query (as clients that sync the whole library ask Navidrome), or album by album
+        when the server finds nothing for an empty query."""
         songs, offset = [], 0
         while True:
             found = (self._get("search3", query="", songCount=page, songOffset=offset, artistCount=0,
-                               albumCount=0).get("searchResult3") or {}).get("song") or []
+                               albumCount=0, musicFolderId=library).get("searchResult3") or {}).get("song") or []
             songs += [song_from(e) for e in found]
             if len(found) < page:
                 break
             offset += page
-        return songs or self._songs_by_album()
+        return songs or self._songs_by_album(library)
 
-    def _songs_by_album(self, page=500):
+    def _songs_by_album(self, library, page=500):
         songs, offset = [], 0
         while True:
-            albums = (self._get("getAlbumList2", type="alphabeticalByName", size=page, offset=offset)
+            albums = (self._get("getAlbumList2", type="alphabeticalByName", size=page, offset=offset,
+                                musicFolderId=library)
                       .get("albumList2") or {}).get("album") or []
             for album in albums:
                 songs += [song_from(e) for e in (self._get("getAlbum", id=album["id"]).get("album") or {}).get("song") or []]

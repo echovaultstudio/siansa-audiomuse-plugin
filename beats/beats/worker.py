@@ -5,8 +5,8 @@ and its beats turned into the readings :mod:`grid` works out. The temporary file
 threads share the work: one downloads, decodes and measures the next song while the other runs the model on this
 one, so the model (the GPU) rarely waits for the network.
 
-With the whole library turned on, every song on Navidrome is queued after the playlist's, and Navidrome is read
-again every few hours for new ones.
+The songs come from the Navidrome libraries chosen on the page (all, or some: leaving out compilations, say). They're
+read again every few hours for new songs.
 """
 
 import os
@@ -22,7 +22,7 @@ from .audiomuse import AudioMuseError
 from .subsonic import SubsonicError
 
 
-LIBRARY_RESCAN_SECONDS = 6 * 3600  # how often the whole library is read again for new songs
+LIBRARY_RESCAN_SECONDS = 6 * 3600  # how often the chosen libraries are read again for new songs
 
 
 class Worker:
@@ -68,72 +68,72 @@ class Worker:
         self.store.event("Paused" if paused else "Carrying on")
         self.wake()
 
-    def scan(self, playlist_name):
-        """Reads the playlist ``playlist_name`` from Navidrome, adds its songs, queues the new ones, and fetches the
-        plugin's readings for them. Returns ``{"songs", "queued"}``."""
-        with self.scan_lock:
-            try:
-                found = self.navidrome.playlist_named(playlist_name)
-                if not found:
-                    names = ", ".join(p["name"] for p in self.navidrome.playlists()) or "none"
-                    raise SubsonicError(f'No playlist called "{playlist_name}" on Navidrome (its playlists: {names})')
-                songs = self.navidrome.playlist_songs(found["id"])
-            except SubsonicError as e:
-                self.store.event(f"Couldn't read the playlist: {e}", "error")
-                raise
-            queued = 0
-            for song in songs:
-                if not song.get("id"):
-                    continue
-                self.store.add_song(song, playlist=found["name"])
-                queued += self.store.queue(song["id"])
-            self.store.event(f'Playlist "{found["name"]}": {len(songs)} songs, {queued} new in the queue')
-            self.refresh_plugin([s["id"] for s in songs if s.get("id")])
-            self.wake()
-            return {"songs": len(songs), "queued": queued}
+    def chosen(self):
+        """The ids of the Navidrome libraries to analyse (kept across restarts): none until some are chosen."""
+        folders = self.store.setting("folders")
+        if folders is None and self.store.setting("library"):  # 0.9.0's "whole library": every library
+            folders = [f["id"] for f in self.navidrome.libraries()]
+            self.store.set_setting("folders", folders)
+        return [str(f) for f in folders or []]
 
-    @property
-    def library(self):
-        """Whether every song on Navidrome is analysed, not just the playlist's (kept across restarts)."""
-        return bool(self.store.setting("library", False))
+    def libraries(self):
+        """Navidrome's libraries, each with whether it's chosen and how many of its songs are here and analysed."""
+        chosen, counts = set(self.chosen()), self.store.folder_counts()
+        return [{**f, "on": f["id"] in chosen, **counts.get(f["id"], {"songs": 0, "done": 0})}
+                for f in self.navidrome.libraries()]
 
-    def set_library(self, on):
-        """Turns the whole library on (reads it now) or off (its songs not yet analysed leave the queue)."""
-        self.store.set_setting("library", bool(on))
-        if on:
-            self.store.event("Analysing the whole library: reading every song from Navidrome")
-            return self.scan_library()
-        taken = self.store.unqueue_library()
-        self.store.event(f"Just the playlist again: {taken} library songs taken out of the queue")
-        return {"songs": None, "queued": -taken}
+    def choose(self, ids):
+        """Analyses the libraries ``ids`` (and no others): reads them now; the others' songs not yet analysed leave
+        the queue (those done stay). Returns ``{"songs", "queued"}``."""
+        known = {f["id"]: f["name"] for f in self.navidrome.libraries()}
+        ids = [str(i) for i in dict.fromkeys(ids)]
+        unknown = [i for i in ids if i not in known]
+        if unknown:
+            raise ValueError(f"No library {', '.join(unknown)} on Navidrome (its libraries: "
+                             f"{', '.join(f'{k} {v}' for k, v in known.items()) or 'none'})")
+        self.store.set_setting("folders", ids)
+        taken = self.store.unqueue_except(ids)
+        names = ", ".join(known[i] for i in ids) or "none"
+        self.store.event(f"Libraries to analyse: {names}" + (f" ({taken} songs of the others left the queue)" if taken else ""))
+        return self.read_libraries() if ids else {"songs": 0, "queued": 0}
 
-    def scan_library(self):
-        """Reads every song from Navidrome, adds them and queues the new ones (after the playlist's). Returns
+    def read_libraries(self):
+        """Reads every song of the chosen libraries from Navidrome, adds them and queues the new ones. Returns
         ``{"songs", "queued"}``."""
         with self.scan_lock:
             started = time.monotonic()
-            try:
-                songs = [s for s in self.navidrome.all_songs() if s.get("id")]
-            except SubsonicError as e:
-                self.store.event(f"Couldn't read the library: {e}", "error")
-                raise
-            queued = self.store.add_songs(songs)
+            names = {f["id"]: f["name"] for f in self.navidrome.libraries()}
+            total, queued = 0, []
+            for folder in self.chosen():
+                try:
+                    songs = [s for s in self.navidrome.all_songs(folder) if s.get("id")]
+                except SubsonicError as e:
+                    self.store.event(f"Couldn't read the library {names.get(folder, folder)}: {e}", "error")
+                    raise
+                added = self.store.add_songs(songs, folder)
+                total += len(songs)
+                queued += added
+                self.store.event(f"Library {names.get(folder, folder)}: {len(songs)} songs, {len(added)} new in the queue")
             self.store.set_setting("library_read_at", time.time())
-            self.store.event(f"Library: {len(songs)} songs on Navidrome, {queued} new in the queue "
-                             f"(read in {time.monotonic() - started:.0f}s)")
+            self.store.event(f"Read the libraries in {time.monotonic() - started:.0f}s")
             self.wake()
-            return {"songs": len(songs), "queued": queued}
+            if queued:  # the plugin's readings of the new songs, for comparison: in the background, as they can be many
+                threading.Thread(target=self.refresh_plugin, args=(queued,), name="plugin", daemon=True).start()
+            return {"songs": total, "queued": len(queued)}
 
     def _library_loop(self):
-        """Reads the whole library again every few hours while it's on, for songs added to Navidrome since."""
+        """Reads the chosen libraries again every few hours, for songs added to Navidrome since."""
         while not self._stop.wait(60.0):
-            if not self.library:
+            try:
+                if not self.chosen():
+                    continue
+            except SubsonicError:
                 continue
             last = self.store.setting("library_read_at", 0) or 0
             if time.time() - last < LIBRARY_RESCAN_SECONDS:
                 continue
             try:
-                self.scan_library()
+                self.read_libraries()
             except Exception as e:  # Navidrome away: try again next time
                 self.store.set_setting("library_read_at", time.time())
                 if not isinstance(e, SubsonicError):
