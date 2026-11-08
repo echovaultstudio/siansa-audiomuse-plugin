@@ -107,6 +107,16 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
      Its bars come from a vote of the model's downbeats and then follow every 4 beats, so the phrase can't wander.
      Pick **the model's beats** to hear what Beat This! heard; the other set shows as small ticks along the bottom
      of the beat view;
+   - **bars and phrases come from the sound too.** While a song is analysed, Siansa Beats measures how loud its sub
+     bass, bass, mids and highs are along it (kept small in the database, so it's worked out again without
+     downloading the song). In dance music a new section (the bass coming in, the drop, the hats stopping) starts
+     on beat 1 of a bar and at the start of a phrase. So the big changes check the model's downbeats: when three or
+     more agree on another beat, the bars move there (**Bars moved** in the notes, worth a listen). And the bar of
+     every 8 they land on is where the **phrases** start: a green mark in the beat view, ticks along the top of the
+     chart, and a third, higher click. When fewer than half the big changes fall on one bar of 8, the song says
+     **No clear phrases** rather than guessing;
+   - a song read at half its genre's speed (drum & bass at 87) gets its grid at the genre's (174), as a DJ counts
+     it, so its bars and phrases are right too;
    - the beat view shows 8 seconds around what's playing, downbeats in amber with their bar number. Tap it to jump;
    - the chart shows the tempo along the song (amber), the BPM tag (green), the plugin's intro and outro (red),
      the ends the plugin measures (shaded) and the genre's range (green band). Tap it to jump there;
@@ -164,7 +174,9 @@ On the server, after setting it up:
 - It doesn't feed the plugin yet. `GET /api/beats/<song id>` already gives a song's grid in the shape the plugin
   would read: the steady grid when the song is at one tempo (`"steady": true`), else the model's beats, with the
   model's own in `model_beats` and `model_downbeats`.
-- Phrases (8 or 16 bars) aren't found yet: the bars are even, but which bar starts a phrase isn't known.
+- Phrases are 8 or 16 bars: 16 when three quarters of the big changes (at least 4) fall on every other start of
+  8. A song whose sections don't change its sound much (a long, even techno track) may have no clear phrases.
+- Songs analysed before 0.5.0 are analysed again once, on start, to measure their sound (a few seconds each).
 
 ## Settings
 

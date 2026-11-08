@@ -12,7 +12,9 @@ Pure Python, so it's tested without numpy or the model.
 import math
 import statistics
 
-ANALYSIS_VERSION = 3  # what's worked out from the beats: older results are worked out again from their saved beats
+from . import features, phrase
+
+ANALYSIS_VERSION = 4  # what's worked out from the beats: older results are worked out again from their saved beats
 END_SECONDS = 30.0  # each end, as the plugin's beats.SECONDS
 MIN_BEATS = 8  # fewer, and there's no tempo worth reporting
 GRID_MS = 30.0  # a beat this close to the straight grid sits on it
@@ -207,12 +209,37 @@ def steady_grid(beats, downbeats, bpm, per_bar=4):
     return {
         "bpm": 60.0 / period,
         "on_grid": share,
-        "beats": [round(b, 3) for b in grid_beats],
-        "downbeats": [round(b, 3) for b in grid_downs],
+        "beats": [round(b, 3) or 0.0 for b in grid_beats],  # "or 0.0": no -0.0
+        "downbeats": [round(b, 3) or 0.0 for b in grid_downs],
         "per_bar": per_bar,
         "bar_share": max(tally) / voted if voted else 0.0,
         "first_downbeat_ms": round(grid_downs[0] * 1000.0) if grid_downs else None,
     }
+
+
+def with_sound(steady, levels):
+    """``steady`` (a :func:`steady_grid`) with its bars checked against where the music changes, and its phrases,
+    from the song's ``levels`` (:func:`beats.features.measure`). Without levels it's returned as it is, with
+    ``downbeat_source`` ``"model"`` and no phrases."""
+    if not steady:
+        return steady
+    steady = dict(steady, downbeat_source="model", phrases=[], phrase_bars=phrase.PHRASE_BARS, phrase_big=None,
+                  phrase_big_on=None, changes_share=None)
+    hop, frames = features.unpack(levels)
+    beat_levels = phrase.per_beat(hop, frames, steady["beats"])
+    per_bar = steady["per_bar"]
+    if len(beat_levels) < 8 * per_bar:
+        return steady
+    vote = steady["beats"].index(steady["downbeats"][0]) % per_bar if steady["downbeats"] else 0
+    start, source, details = phrase.downbeats(beat_levels, per_bar, vote, steady["bar_share"])
+    downs = steady["beats"][start::per_bar]
+    found, about = phrase.phrases(phrase.bars_of(beat_levels, start, per_bar))
+    steady.update(
+        downbeats=downs, downbeat_source=source, changes_share=details["changes_share"],
+        first_downbeat_ms=round(downs[0] * 1000.0) if downs else None,
+        phrases=downs[found::about["bars"]] if found is not None else [], phrase_bars=about["bars"],
+        phrase_big=about["big"], phrase_big_on=about["big_on"])
+    return steady
 
 
 def _offset(t, origin, period):
@@ -303,9 +330,21 @@ def genre_fit(bpm, low, high):
     return "outside"
 
 
-def analyse(beats, downbeats, duration):
-    """Everything Siansa's comparison shows for one song, from Beat This!'s beats and downbeats (seconds) and the
-    song's length (seconds)."""
+def doubled(beats, period):
+    """``beats`` with a beat put between each two a ``period`` apart: a song read at half speed, counted as a
+    DJ counts it."""
+    out = []
+    for a, b in zip(beats, beats[1:]):
+        out.append(a)
+        if abs((b - a) / period - 1.0) < 0.25:
+            out.append((a + b) / 2.0)
+    return out + beats[-1:]
+
+
+def analyse(beats, downbeats, duration, levels=None, genres=()):
+    """Everything Siansa's comparison shows for one song, from Beat This!'s beats and downbeats (seconds), the
+    song's length (seconds), its sound's ``levels`` (:func:`beats.features.measure`, for bars and phrases) and its
+    ``genres`` (a song read at half its genre's speed gets its grid at the genre's: 87 is 174 for drum & bass)."""
     whole = tempo(beats) or {}
     main, main_share = main_tempo(beats)
     fit = whole.get("bpm")
@@ -317,7 +356,13 @@ def analyse(beats, downbeats, duration):
     intro_bpm, intro_share, _ = end_tempo(beats, 0.0, intro_end)
     outro_bpm, outro_share, _ = end_tempo(beats, outro_start, duration + 1.0)
     per_bar, bar_share = bars(beats, downbeats)
-    steady = steady_grid(beats, downbeats, bpm, per_bar or 4) or {}
+    counted = "same"
+    found = genre_range(genres)
+    if bpm and found and genre_fit(bpm, found[0], found[1]) == "half":
+        counted = "double"
+        steady = with_sound(steady_grid(doubled(beats, 60.0 / bpm), downbeats, bpm * 2, 4), levels) or {}
+    else:
+        steady = with_sound(steady_grid(beats, downbeats, bpm, per_bar or 4), levels) or {}
     if steady:  # the even grid's bars, not the model's downbeats, which wander in breakdowns
         per_bar = steady["per_bar"]
     return {
@@ -338,6 +383,14 @@ def analyse(beats, downbeats, duration):
                                         round(min(downbeats) * 1000.0) if len(downbeats) else None),
         "grid_bpm": steady.get("bpm"),
         "on_grid": steady.get("on_grid"),
+        "downbeat_source": steady.get("downbeat_source"),
+        "grid_counted": counted if steady else None,
+        "changes_share": steady.get("changes_share"),
+        "phrase_first_ms": round(steady["phrases"][0] * 1000.0) if steady.get("phrases") else None,
+        "phrase_count": len(steady["phrases"]) if steady.get("phrases") is not None and levels else None,
+        "phrase_bars": steady.get("phrase_bars") if steady.get("phrases") else None,
+        "phrase_big": steady.get("phrase_big"),
+        "phrase_big_on": steady.get("phrase_big_on"),
         "beat_count": len(beats),
         "downbeat_count": len(downbeats),
         "analysis_version": ANALYSIS_VERSION,
@@ -390,6 +443,12 @@ def verdict(result, tag_bpm=None, plugin=None, genres=()):
             notes.append(("info", f"{name} at {r} time ({theirs:.1f})"))
         elif r and r != "same":  # how the song is made, not two readings disagreeing: noted, not flagged
             notes.append(("info", f"{name} at {theirs:.1f}, not the song's {bpm:.1f}"))
+    if result.get("downbeat_source") == "changes":
+        notes.append(("warn", "Bars moved: the model's downbeats and the music's changes disagree"))
+    if result.get("phrase_count") == 0 and result.get("on_grid"):
+        big, on = result.get("phrase_big") or 0, result.get("phrase_big_on") or 0
+        notes.append(("warn", f"No clear phrases ({on} of {big} big changes on one bar of 8)" if big else
+                      "No clear phrases (no big changes)"))
     if result.get("on_grid") is None and "on_grid" in result:
         notes.append(("info", "Not at one tempo: no steady grid"))
     if (result.get("steady") or 0) < 0.6:

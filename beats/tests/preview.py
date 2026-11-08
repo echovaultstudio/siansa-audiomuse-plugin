@@ -28,15 +28,15 @@ def main(folder, port=8090):
             by_hash[hashlib.sha1(f.read()).hexdigest()] = song
 
     class Samples:
-        def __init__(self, song):
-            self.song = song
+        def __init__(self, song, path):
+            self.song, self.path = song, path
 
         def __len__(self):
             return int(self.song["duration"] * 22_050)
 
     def decode(path):
         with open(path, "rb") as f:
-            return Samples(by_hash[hashlib.sha1(f.read()).hexdigest()])
+            return Samples(by_hash[hashlib.sha1(f.read()).hexdigest()], path)
 
     class Tracker:
         loaded, load_seconds, device, device_name, device_note = True, 0.0, "cpu", "a stand-in", None
@@ -46,7 +46,7 @@ def main(folder, port=8090):
             rng = random.Random(song["id"])
             bpm = song["expect_bpm"] / (2 if song["expect_bpm"] > 170 else 1)
             period = 60.0 / bpm
-            beats = [round((0.25 + i * period) / 0.02) * 0.02 for i in range(int((song["duration"] - 0.5) / period))]
+            beats = [round((i * period) / 0.02) * 0.02 for i in range(int((song["duration"] - 0.5) / period))]
             beats = [b for b in beats if rng.random() > 0.02]
             return beats, beats[::song["expect_bar"]]
 
@@ -54,7 +54,12 @@ def main(folder, port=8090):
     data = tempfile.mkdtemp(prefix="beats-preview-")
     env = {"NAVIDROME_URL": fake.url, "NAVIDROME_USER": USER, "NAVIDROME_PASSWORD": PASSWORD,
            "AUDIOMUSE_URL": fake.url, "AUDIOMUSE_TOKEN": TOKEN, "DATA_DIR": data, "PORT": str(port)}
-    app = App(Config(env), tracker=Tracker(), decode=decode)
+    def measure(samples):  # the real sound, for the phrases: needs ffmpeg and numpy
+        from beats import analyser, features
+
+        return features.measure(analyser.decode(samples.path))
+
+    app = App(Config(env), tracker=Tracker(), decode=decode, measure=measure)
     app.worker.start()
     app.store.event("Preview: a stand-in instead of the model")
     print(f"Preview on http://127.0.0.1:{port} (fake Navidrome {fake.url}, data {data})", flush=True)
