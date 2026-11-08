@@ -51,11 +51,11 @@ CREATE INDEX IF NOT EXISTS marks_song ON marks (song_id);
 """
 
 RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "grid_bpm", "on_grid", "analysis_version", "downbeat_source", "grid_counted",
-                 "changes_share", "phrase_first_ms", "phrase_count", "phrase_bars", "phrase_big", "phrase_big_on", "bpm_median", "steady", "grid_ms", "grid_share", "intro_bpm", "intro_steady", "outro_bpm",
+                 "changes_share", "phrase_first_ms", "phrase_count", "phrase_bars", "phrase_big", "phrase_big_on", "sections", "bpm_median", "steady", "grid_ms", "grid_share", "intro_bpm", "intro_steady", "outro_bpm",
                  "outro_steady", "beats_per_bar", "bar_share", "first_downbeat_ms", "beat_count", "downbeat_count",
                  "download_seconds", "decode_seconds", "model_seconds")
 PLUGIN_FIELDS = ("intro_bpm", "outro_bpm", "intro_steady", "outro_steady", "intro_bar_ms", "outro_bar_ms")
-BUSY = ("downloading", "decoding", "analysing")
+BUSY = ("downloading", "decoding", "analysing", "sections")
 
 
 class Store:
@@ -71,7 +71,8 @@ class Store:
             for column, kind in (("bpm_fit", "REAL"), ("main_share", "REAL"), ("grid_bpm", "REAL"), ("on_grid", "REAL"),
                                  ("analysis_version", "REAL"), ("downbeat_source", "TEXT"), ("grid_counted", "TEXT"), ("changes_share", "REAL"),
                                  ("phrase_first_ms", "REAL"), ("phrase_count", "INTEGER"), ("phrase_bars", "INTEGER"), ("phrase_big", "INTEGER"),
-                                 ("phrase_big_on", "INTEGER"), ("levels", "TEXT")):
+                                 ("phrase_big_on", "INTEGER"), ("levels", "TEXT"), ("structure", "TEXT"),
+                                 ("sections", "INTEGER")):
                 if column not in columns:
                     self.db.execute(f"ALTER TABLE results ADD COLUMN {column} {kind}")
             if self.db.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
@@ -161,16 +162,18 @@ class Store:
 
     # ---- results ----
 
-    def save_result(self, song_id, model, values, beats, downbeats, levels=None):
+    def save_result(self, song_id, model, values, beats, downbeats, levels=None, structure=None):
         """``levels``: the sound's levels (:func:`beats.features.measure`); ``None`` saves an empty ``""``, so a
         song whose sound couldn't be measured isn't asked for again."""
         with self.lock, self.db:
             self.db.execute(
                 f"INSERT OR REPLACE INTO results (song_id, model, {', '.join(RESULT_FIELDS)}, analysed_at, beats, downbeats,"
-                f" levels) VALUES (?, ?, {', '.join('?' for _ in RESULT_FIELDS)}, ?, ?, ?, ?)",
+                f" levels, structure) VALUES (?, ?, {', '.join('?' for _ in RESULT_FIELDS)}, ?, ?, ?, ?, ?)",
                 (song_id, model, *[values.get(f) for f in RESULT_FIELDS], time.time(),
                  json.dumps([round(b, 3) for b in beats]), json.dumps([round(b, 3) for b in downbeats]),
-                 json.dumps(levels) if levels else ""))
+                 json.dumps(levels) if levels else "",
+                 # None: not asked (Siansa Structure not set up or not reachable), asked again later; "": it failed
+                 None if structure is None else (json.dumps(structure) if structure else "")))
 
     def result(self, song_id, model, with_beats=False):
         rows = self._rows("SELECT * FROM results WHERE song_id=? AND model=?", (song_id, model))
@@ -178,9 +181,11 @@ class Store:
             return None
         row = rows[0]
         beats, downbeats, levels = row.pop("beats"), row.pop("downbeats"), row.pop("levels", None)
+        structure = row.pop("structure", None)
         if with_beats:
             row["beats"], row["downbeats"] = json.loads(beats or "[]"), json.loads(downbeats or "[]")
             row["levels"] = json.loads(levels) if levels else None
+            row["structure"] = json.loads(structure) if structure else None
         return row
 
     def stale_results(self, version):
@@ -193,6 +198,10 @@ class Store:
     def without_levels(self):
         """Songs analysed before their sound was measured (0.5.0), to be analysed again for their phrases."""
         return [r["song_id"] for r in self._rows("SELECT song_id FROM results WHERE levels IS NULL")]
+
+    def without_structure(self):
+        """Songs not yet asked to Siansa Structure (or not reachable then), to be analysed again for their sections."""
+        return [r["song_id"] for r in self._rows("SELECT song_id FROM results WHERE structure IS NULL")]
 
     def update_result(self, song_id, model, values):
         """Rewrites the readings worked out from the beats, keeping the beats and the times."""

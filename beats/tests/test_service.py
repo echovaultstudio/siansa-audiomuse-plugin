@@ -15,6 +15,7 @@ import urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
 from beats import grid  # noqa: E402
+from beats.structure import StructureError  # noqa: E402
 from beats.audiomuse import AudioMuse, AudioMuseError  # noqa: E402
 from beats.server import App, Config, make_server  # noqa: E402
 from beats.store import Store  # noqa: E402
@@ -240,13 +241,36 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(db.events(limit=1)[0]["message"], f"e{store.EVENTS_KEPT + 19}")
 
 
+class FakeStructure:
+    """Stands in for Siansa Structure: the same sections for every song, or ``fail``."""
+
+    def __init__(self, fail=None):
+        self.fail, self.asked, self.suffixes = fail, 0, set()
+
+    configured = True
+
+    def health(self):
+        if self.fail:
+            raise self.fail
+        return {"status": "ok", "version": "0.1.0"}
+
+    def analyse(self, path, suffix=""):
+        if self.fail:
+            raise self.fail
+        self.asked += 1
+        self.suffixes.add(suffix)
+        return {"bpm": 140, "beats": [0.5, 0.93], "downbeats": [0.5], "seconds": 21.0, "device": "cuda",
+                "segments": [{"start": 0.0, "end": 0.5, "label": "start"}, {"start": 0.5, "end": 20.0, "label": "intro"},
+                             {"start": 20.0, "end": 60.0, "label": "chorus"}, {"start": 60.0, "end": 61.0, "label": "end"}]}
+
+
 class ServiceTest(Base):
-    def start(self, password=""):
+    def start(self, password="", structure=None):
         env = {"NAVIDROME_URL": self.fake.url, "NAVIDROME_USER": USER, "NAVIDROME_PASSWORD": PASSWORD,
                "AUDIOMUSE_URL": self.fake.url, "AUDIOMUSE_TOKEN": TOKEN, "DATA_DIR": os.path.join(self.tmp, "data"),
                "BEATS_PASSWORD": password, "PORT": "0"}
         self.tracker = FakeTracker()
-        self.app = App(Config(env), tracker=self.tracker, decode=fake_decode)
+        self.app = App(Config(env), tracker=self.tracker, decode=fake_decode, structure=structure)
         self.server = make_server(self.app, host="127.0.0.1", port=0)
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
         import threading
@@ -391,6 +415,42 @@ class ServiceTest(Base):
         with self.assertRaises(urllib.error.HTTPError) as caught:
             self.call("/api/songs/nope/marks", "POST", {"seconds": 1})
         self.assertEqual(caught.exception.code, 404)
+
+    def test_sections_from_siansa_structure_are_kept_shown_and_exported(self):
+        structure = FakeStructure()
+        self.start(structure=structure)
+        self.call("/api/scan", "POST", {})
+        self.wait_done()
+        self.assertEqual(structure.asked, 3)
+        self.assertEqual(structure.suffixes, {"flac"})
+        detail = self.call("/api/songs/t140")
+        self.assertEqual([x["label"] for x in detail["structure"]["segments"]], ["start", "intro", "chorus", "end"])
+        self.assertEqual({s["id"]: s for s in self.call("/api/songs")}["t140"]["result"]["sections"], 2)
+        song = {s["id"]: s for s in self.call("/api/export.json")["songs"]}["t140"]
+        self.assertEqual(song["structure"]["bpm"], 140)
+        self.assertEqual(self.call("/api/status")["structure"]["state"], "ok")
+
+    def test_siansa_structure_down_doesnt_fail_a_song_and_is_asked_again(self):
+        structure = FakeStructure(fail=StructureError("Nothing answers at structure:8091: is Siansa Structure running?"))
+        self.start(structure=structure)
+        self.call("/api/scan", "POST", {})
+        self.wait_done()
+        songs = self.call("/api/songs")
+        self.assertTrue(all(s["state"] == "done" for s in songs if s["result"]))
+        self.assertEqual(self.call("/api/status")["structure"]["state"], "error")
+        self.assertEqual(len(self.app.store.without_structure()), 3)  # asked again when it answers
+        structure.fail = None
+        self.app.worker.check_structure()
+        self.wait_done()
+        self.assertEqual(self.app.store.without_structure(), [])
+
+    def test_a_song_siansa_structure_fails_on_isnt_asked_again(self):
+        structure = FakeStructure(fail=StructureError("HTTP 500: RuntimeError: the song is too short"))
+        self.start(structure=structure)
+        self.call("/api/scan", "POST", {})
+        self.wait_done()
+        self.assertEqual(self.app.store.without_structure(), [])
+        self.assertIsNone(self.call("/api/songs/t140")["structure"])
 
     def test_the_plugin_line_says_what_went_wrong(self):
         self.start()

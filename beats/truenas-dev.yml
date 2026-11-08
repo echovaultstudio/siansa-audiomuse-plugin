@@ -1,0 +1,55 @@
+# Siansa Beats' dev version with Siansa Structure (All-In-One's sections) on TrueNAS with an NVIDIA GPU. Like
+# truenas.yml, with the :dev-cuda image and a second service. Keep your values from truenas.yml; the data volume is
+# the same, so going back to truenas.yml keeps everything (marks too). See README.md ("Trying the dev version").
+services:
+  beats:
+    image: ghcr.io/echovaultstudio/siansa-beats:dev-cuda
+    container_name: siansa-beats
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "8090:8090"
+    environment:
+      NAVIDROME_URL: "<http://navidrome.local:4533>"
+      NAVIDROME_USER: "<your Navidrome user>"
+      NAVIDROME_PASSWORD: "<its password>"
+      PLAYLIST: "Beat test"
+      AUDIOMUSE_URL: "<http://audiomuse.local:8000, or empty>"
+      AUDIOMUSE_TOKEN: "<an AudioMuse-AI API token, or empty>"
+      STRUCTURE_URL: "http://structure:8091"
+      BEATS_MODEL: "final0"
+      BEATS_DEVICE: "auto"
+      BEATS_FLOAT16: "0"
+      BEATS_PASSWORD: ""
+      NVIDIA_VISIBLE_DEVICES: "all"
+    volumes:
+      - beats-data:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # All-In-One, in its own container: Siansa Beats sends it each song as it analyses it (about 20-40 s a song on a
+  # small GPU, as it first separates the drums, bass, vocals and the rest). Leave it out and Siansa Beats works as
+  # before.
+  structure:
+    image: ghcr.io/echovaultstudio/siansa-structure:dev-cuda
+    container_name: siansa-structure
+    restart: unless-stopped
+    pull_policy: always
+    environment:
+      STRUCTURE_DEVICE: "auto"
+      NVIDIA_VISIBLE_DEVICES: "all"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  beats-data:
