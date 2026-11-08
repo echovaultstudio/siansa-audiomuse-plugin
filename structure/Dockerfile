@@ -23,6 +23,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # The versions stay put: every later install is held to them, so Demucs or All-In-One can't pull another torch.
+# python:3.10's pip is too old for PyTorch's index (it rejects "Jinja2" asked for as "jinja2").
+RUN pip install --upgrade pip==24.2
 RUN printf 'torch==2.3.1\ntorchaudio==2.3.1\nnumpy==1.26.4\n' > /constraints.txt
 RUN pip install --index-url "$TORCH_INDEX" torch==2.3.1 torchaudio==2.3.1 \
  && pip install -c /constraints.txt numpy==1.26.4 cython==3.0.11 scipy==1.13.1 mido==1.3.2
