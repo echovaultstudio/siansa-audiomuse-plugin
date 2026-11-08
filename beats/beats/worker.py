@@ -12,20 +12,16 @@ import traceback
 
 from . import grid
 from . import features
-from .structure import Structure, StructureError, section_starts
 from .audiomuse import AudioMuseError
 from .subsonic import SubsonicError
 
 
 class Worker:
-    def __init__(self, store, navidrome, audiomuse, tracker, decode, data_dir, model_name, measure=None,
-                 structure=None):
+    def __init__(self, store, navidrome, audiomuse, tracker, decode, data_dir, model_name, measure=None):
         self.store = store
         self.navidrome = navidrome
         self.audiomuse = audiomuse
         self.measure = measure or features.measure
-        self.structure = structure or Structure("")
-        self.structure_state = {"state": "off", "text": "Set STRUCTURE_URL to Siansa Structure to compare with All-In-One"}
         self.plugin_state = {"state": "waiting", "text": "Not asked yet"}
         self.tracker = tracker  # (samples) -> (beats, downbeats)
         self.decode = decode  # (path) -> samples
@@ -102,41 +98,6 @@ class Worker:
             self.store.event(f"Analysing {len(unheard)} songs again to measure their sound, for their phrases")
             self.wake()
         return len(stale)
-
-    def sections(self, song, path):
-        """All-In-One's sections of the song at ``path`` from Siansa Structure: a dict, ``{}`` when it failed on this
-        song (not asked again), or ``None`` when it isn't set up or can't be reached (asked again on the next start)."""
-        if not self.structure.configured:
-            return None
-        self._step(song["id"], "sections")
-        try:
-            found = self.structure.analyse(path, song.get("suffix"))
-        except StructureError as e:
-            text = str(e)
-            reachable = text.startswith("HTTP 5")
-            self.structure_state = {"state": "error", "text": f"Siansa Structure: {text}"}
-            self.store.event(f"{song['artist']} – {song['title']}: no sections: {text}", "warn")
-            return {} if reachable else None
-        self.structure_state = {"state": "ok", "text": f"Siansa Structure answers ({found.get('device', '?')})"}
-        return found
-
-    def check_structure(self):
-        if not self.structure.configured:
-            return self.structure_state
-        try:
-            health = self.structure.health()
-            self.structure_state = {"state": "ok", "text": f"Siansa Structure {health.get('version', '?')} answers"}
-            self.store.event(self.structure_state["text"])
-            missing = self.store.without_structure()
-            for song_id in missing:
-                self.store.queue(song_id, force=True)
-            if missing:
-                self.store.event(f"Analysing {len(missing)} songs again for their sections (All-In-One)")
-                self.wake()
-        except StructureError as e:
-            self.structure_state = {"state": "error", "text": f"Siansa Structure doesn't answer: {e}"}
-            self.store.event(self.structure_state["text"], "warn")
-        return self.structure_state
 
     def check_plugin(self):
         """Asks the Siansa plugin whether it's there, for the page's plugin line."""
@@ -245,10 +206,7 @@ class Worker:
             genres = [g["label"] for g in self.store.genres(song_id)]
             values = grid.analyse(beats, downbeats, duration or song["duration"], levels, genres)
             values.update(download_seconds=download_seconds, decode_seconds=decode_seconds, model_seconds=model_seconds)
-            structure = self.sections(song, path)
-            if structure:
-                values["sections"] = len(section_starts(structure))
-            self.store.save_result(song_id, self.model_name, values, beats, downbeats, levels, structure)
+            self.store.save_result(song_id, self.model_name, values, beats, downbeats, levels)
             self.store.set_state(song_id, "done")
             bpm = f"{values['bpm']:.2f} BPM" if values.get("bpm") else "no steady beat"
             self.store.event(f"{song['artist']} – {song['title']}: {bpm}, {len(beats)} beats, "
