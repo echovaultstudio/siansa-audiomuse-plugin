@@ -14,7 +14,7 @@ import statistics
 
 from . import features, phrase
 
-ANALYSIS_VERSION = 5  # what's worked out from the beats: older results are worked out again from their saved beats
+ANALYSIS_VERSION = 6  # what's worked out from the beats: older results are worked out again from their saved beats
 END_SECONDS = 30.0  # each end, as the plugin's beats.SECONDS
 MIN_BEATS = 8  # fewer, and there's no tempo worth reporting
 GRID_MS = 30.0  # a beat this close to the straight grid sits on it
@@ -229,27 +229,49 @@ def steady_grid(beats, downbeats, bpm, per_bar=4):
     }
 
 
+PHRASE_SHIFTS = (0, 4)  # where the sound may put a normal track's phrases: from bar 1, or a 4-bar intro later
+
+
 def with_sound(steady, levels):
     """``steady`` (a :func:`steady_grid`) with its bars checked against where the music changes, and its phrases,
     from the song's ``levels`` (:func:`beats.features.measure`). Without levels it's returned as it is, with
-    ``downbeat_source`` ``"model"`` and no phrases."""
+    ``downbeat_source`` ``"model"`` and phrases every 8 bars from bar 1.
+
+    The phrases (``phrase_source``): a dance track is made in 8-bar blocks from its first bar, so they're every 8
+    bars from bar 1 (``"bar 1"``), unless the sound says clearly that they start 4 bars later or run 16 bars
+    (``"sound"``): the owner's marks (21 of 22 on bar 1 + 8k where the bars were clear) and the songs where the
+    sound was sure (61 of 78 on bar 1, 9 more 4 bars later) both say so. A track from a mixed CD (``from_mix``:
+    full volume at both ends, cut wherever the DJ put the track marker) has no bar 1 to count from: its phrases
+    come from the sound or there are none (``"mix: sound"``, ``"mix: none"``)."""
     if not steady:
         return steady
-    steady = dict(steady, downbeat_source="model", phrases=[], phrase_bars=phrase.PHRASE_BARS, phrase_big=None,
+    steady = dict(steady, downbeat_source="model", phrases=steady["downbeats"][::phrase.PHRASE_BARS],
+                  phrase_bars=phrase.PHRASE_BARS, phrase_source="bar 1", from_mix=None, phrase_big=None,
                   phrase_big_on=None, changes_share=None)
     hop, frames = features.unpack(levels)
+    if frames:
+        steady["from_mix"] = features.full_volume_ends(hop, frames)
     beat_levels = phrase.per_beat(hop, frames, steady["beats"])
     per_bar = steady["per_bar"]
     if len(beat_levels) < 8 * per_bar:
+        if steady["from_mix"]:
+            steady.update(phrases=[], phrase_source="mix: none")
         return steady
     vote = steady["beats"].index(steady["downbeats"][0]) % per_bar if steady["downbeats"] else 0
     start, source, details = phrase.downbeats(beat_levels, per_bar, vote, steady["bar_share"])
     downs = steady["beats"][start::per_bar]
     found, about = phrase.phrases(phrase.bars_of(beat_levels, start, per_bar))
+    if steady["from_mix"]:
+        phrases = downs[found::about["bars"]] if found is not None else []
+        bars, origin = about["bars"], "mix: sound" if found is not None else "mix: none"
+    elif found is not None and found % 8 in PHRASE_SHIFTS:
+        phrases, bars, origin = downs[found::about["bars"]], about["bars"], "sound"
+    else:
+        phrases, bars, origin = downs[::phrase.PHRASE_BARS], phrase.PHRASE_BARS, "bar 1"
     steady.update(
         downbeats=downs, downbeat_source=source, changes_share=details["changes_share"],
         first_downbeat_ms=round(downs[0] * 1000.0) if downs else None,
-        phrases=downs[found::about["bars"]] if found is not None else [], phrase_bars=about["bars"],
+        phrases=phrases, phrase_bars=bars, phrase_source=origin,
         phrase_big=about["big"], phrase_big_on=about["big_on"])
     return steady
 

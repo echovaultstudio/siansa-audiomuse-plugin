@@ -55,3 +55,24 @@ def unpack(packed):
     codes = array.array("B", zlib.decompress(base64.b64decode(packed["data"])))
     levels = [c / 2.0 + FLOOR_DB for c in codes]
     return packed["hop"], [levels[i:i + width] for i in range(0, len(levels) - width + 1, width)]
+
+
+FULL_VOLUME_DB = 6.0  # an end within this of the song's usual loudness hasn't faded
+END_WINDOW = 0.5  # seconds at each end
+
+
+def full_volume_ends(hop, frames):
+    """True when the song is at full volume in its first and last half second (no fade in or out, no silence):
+    a track cut from a mixed CD, where each starts and ends in the middle of the DJ's mix. Every other song in the
+    owner's library fades in or out somewhere."""
+    import math
+    import statistics
+
+    if not hop or len(frames) < 10:
+        return False
+    total = [10.0 * math.log10(sum(10.0 ** (v / 10.0) for v in f)) for f in frames]
+    usual = statistics.median(total)
+    edge = max(1, int(END_WINDOW / hop))
+    start = sum(total[:edge]) / edge
+    end = sum(total[-edge:]) / edge
+    return start > usual - FULL_VOLUME_DB and end > usual - FULL_VOLUME_DB
