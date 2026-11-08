@@ -407,7 +407,7 @@ class ServiceTest(Base):
         self.assertAlmostEqual(g["intro_bpm"], 140.0, delta=0.1)
         self.assertLess(g["intro_beat_ms"], g["outro_beat_ms"])
         self.assertEqual(g["intro_phrase_bars"], 8)
-        self.assertGreater(g["beats_until_ms"], g["outro_bar_ms"] - 1)
+        self.assertIsNone(g["beats_until_ms"])  # it beats to its end: no beatless outro
         self.assertNotIn("ends", self.call("/api/songs")[0]["result"])
         with self.assertRaises(urllib.error.HTTPError) as caught:
             self.call("/api/grids?ids=" + ",".join(str(n) for n in range(2001)))

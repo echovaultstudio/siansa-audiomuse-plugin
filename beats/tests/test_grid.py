@@ -228,6 +228,17 @@ class SteadyGridTest(unittest.TestCase):
         self.assertAlmostEqual(result["grid_bpm"], 140.0, delta=0.05)
 
 
+class BeatlessOutroTest(unittest.TestCase):
+    def test_the_beat_stopping_is_sent_only_before_a_beatless_outro(self):
+        beats = beats_at(128, 200)
+        steady = grid.steady_grid(beats, beats[::4], 128.0)
+        # The beat to the end, but for the last few seconds of a fade-out: not a beatless outro.
+        self.assertIsNone(grid.app_ends(steady, beats, beats[-1] + 8.0)["beats_until_ms"])
+        # 30 seconds of pads after the last beat: one.
+        ends = grid.app_ends(steady, beats, beats[-1] + 30.0)
+        self.assertAlmostEqual(ends["beats_until_ms"], beats[-1] * 1000, delta=1)
+
+
 class GenreFitTest(unittest.TestCase):
     def test_half_and_double_are_the_same_beat(self):
         self.assertIsNone(grid.genre_fit(174, 160, 180))
