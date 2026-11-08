@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Siansa Beats</title>
+<style>
+:root {
+  --page: #000000; --raised: #0B0F13; --raised-2: #121820; --text: #EEF2F5; --muted: #AFC2D3; --faint: #7F93A4;
+  --line: rgba(175, 194, 211, 0.16); --line-strong: rgba(175, 194, 211, 0.32);
+  --amber: #FFB547; --on-amber: #1A1200; --amber-text: #FFC56E; --frost: #9DB4C8;
+  --ok: #7FD1A0; --warn: #FFB547; --bad: #FF8A80; --band: rgba(127, 209, 160, 0.10);
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --page: #F3F6F8; --raised: #FFFFFF; --raised-2: #EDF1F4; --text: #0C1216; --muted: #46576A; --faint: #5C6E80;
+    --line: rgba(12, 18, 22, 0.10); --line-strong: rgba(12, 18, 22, 0.22); --amber-text: #8F5200; --frost: #4E6B85;
+    --ok: #1F7A45; --warn: #8F5200; --bad: #B3261E; --band: rgba(31, 122, 69, 0.10); color-scheme: light;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--text); font: 15px/1.45 var(--sans); }
+header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--page) 88%, transparent);
+  backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 0 16px; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; min-height: 58px; }
+h1 { font-size: 1.15rem; margin: 0; letter-spacing: -0.01em; }
+h1 b { color: var(--amber); }
+h2 { font-size: 1rem; margin: 0 0 10px; }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.pill { border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 10px; font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
+.pill.ok::before, .pill.bad::before, .pill.wait::before { content: "●"; margin-right: 6px; }
+.pill.ok::before { color: var(--ok); } .pill.bad::before { color: var(--bad); } .pill.wait::before { color: var(--warn); }
+main { padding: 16px 0 48px; display: grid; gap: 16px; }
+.card { background: var(--raised); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.now { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 24px; align-items: center; }
+.now .what { font-size: 1.05rem; font-weight: 600; }
+@media (max-width: 700px) { .now { grid-template-columns: minmax(0, 1fr); } .controls input { flex: 1 1 160px; } }
+.now .step { color: var(--muted); font-size: 0.9rem; }
+.progress { grid-column: 1 / -1; height: 8px; border-radius: 99px; background: var(--raised-2); overflow: hidden; display: flex; }
+.progress span { display: block; height: 100%; }
+.progress .done { background: var(--amber); } .progress .failed { background: var(--bad); } .progress .busy { background: var(--frost); }
+.counts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 0.88rem; }
+.counts b { color: var(--text); font-variant-numeric: tabular-nums; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, .btn { font: inherit; font-size: 0.9rem; border-radius: 999px; padding: 7px 14px; border: 1px solid var(--line-strong);
+  background: transparent; color: var(--text); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+button:hover, .btn:hover { border-color: var(--amber); }
+button.primary { background: var(--amber); color: var(--on-amber); border-color: var(--amber); font-weight: 600; }
+button:disabled { opacity: 0.5; cursor: default; }
+input[type=text], input[type=search], select { font: inherit; font-size: 0.9rem; border-radius: 999px; padding: 7px 12px;
+  border: 1px solid var(--line-strong); background: var(--raised-2); color: var(--text); min-width: 0; }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+.split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 980px) { .split { grid-template-columns: minmax(0, 1fr); } }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.tools .grow { flex: 1 1 180px; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 999px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 6px 12px; }
+.seg button[aria-pressed=true] { background: var(--amber); color: var(--on-amber); }
+.table { overflow-x: auto; }
+table { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 0.88rem; }
+#detail { scroll-margin-top: 76px; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--faint); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--raised-2); }
+tbody tr[aria-selected=true] { background: color-mix(in srgb, var(--amber) 12%, transparent); }
+.sub { color: var(--faint); font-size: 0.8rem; }
+.big { font-weight: 700; font-size: 0.98rem; }
+.chip { display: inline-block; border-radius: 999px; padding: 1px 8px; margin: 0 4px 4px 0; font-size: 0.76rem; border: 1px solid var(--line-strong); color: var(--muted); }
+.note { display: block; font-size: 0.8rem; margin-bottom: 2px; }
+.note.ok { color: var(--ok); } .note.warn { color: var(--warn); } .note.info { color: var(--faint); }
+.note.ok::before { content: "✓ "; } .note.warn::before { content: "! "; } .note.info::before { content: "· "; }
+.state { font-size: 0.8rem; white-space: nowrap; }
+.state.failed { color: var(--bad); } .state.done { color: var(--ok); } .state.busy { color: var(--amber-text); }
+.events { list-style: none; margin: 0; padding: 0; max-height: 520px; overflow-y: auto; font-size: 0.84rem; }
+.events li { padding: 6px 0; border-bottom: 1px solid var(--line); color: var(--muted); }
+.events time { color: var(--faint); font-family: var(--mono); font-size: 0.76rem; margin-right: 6px; }
+.events .error { color: var(--bad); } .events .warn { color: var(--warn); }
+.empty { color: var(--faint); padding: 24px 8px; text-align: center; }
+#detail[hidden] { display: none; }
+.detail-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; margin-bottom: 12px; }
+.detail-head .title { font-size: 1.15rem; font-weight: 700; }
+audio { width: 100%; margin: 6px 0 10px; }
+canvas { width: 100%; display: block; border-radius: 10px; background: var(--raised-2); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.78rem; color: var(--faint); margin: 6px 0 14px; }
+.legend i { display: inline-block; width: 12px; height: 3px; vertical-align: middle; margin-right: 5px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
+.fact { background: var(--raised-2); border-radius: 10px; padding: 10px; }
+.fact .k { font-size: 0.74rem; color: var(--faint); text-transform: uppercase; letter-spacing: 0.04em; }
+.fact .v { font-size: 1.05rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0.9rem; color: var(--muted); }
+.banner { border: 1px solid var(--bad); color: var(--bad); border-radius: 12px; padding: 10px 14px; }
+.banner[hidden] { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap bar">
+    <h1><b>Siansa</b> Beats</h1>
+    <div class="pills" id="pills" aria-live="polite"></div>
+  </div>
+</header>
+<main class="wrap">
+  <div class="banner" id="banner" role="alert" hidden></div>
+
+  <section class="card now" aria-label="What's happening">
+    <div>
+      <div class="what" id="now-what">Starting…</div>
+      <div class="step" id="now-step"></div>
+    </div>
+    <div class="controls">
+      <input type="text" id="playlist" list="playlists" aria-label="Playlist" placeholder="Playlist">
+      <datalist id="playlists"></datalist>
+      <button class="primary" id="scan">Analyse playlist</button>
+      <button id="pause">Pause</button>
+    </div>
+    <div class="progress" id="progress" aria-hidden="true"></div>
+    <div class="counts" id="counts"></div>
+  </section>
+
+  <section class="card" id="detail" hidden aria-label="Song">
+    <div class="detail-head">
+      <span class="title" id="d-title"></span><span class="sub" id="d-sub"></span>
+      <span style="margin-left:auto" class="controls">
+        <button id="d-again">Analyse again</button>
+        <button id="d-remove">Remove</button>
+        <button id="d-close" aria-label="Close">✕</button>
+      </span>
+    </div>
+    <audio id="player" controls preload="none" crossorigin="anonymous"></audio>
+    <div class="controls" style="margin-bottom:10px">
+      <label class="toggle"><input type="checkbox" id="clicks" checked> Clicks on the beats</label>
+      <label class="toggle">Click volume <input type="range" id="click-volume" min="0" max="1" step="0.05" value="0.5"></label>
+    </div>
+    <canvas id="beatview" height="120" aria-label="Beats around the playhead"></canvas>
+    <div class="legend"><span><i style="background:var(--frost)"></i>beat</span><span><i style="background:var(--amber)"></i>downbeat (bar number)</span><span><i style="background:var(--text)"></i>now</span><span>8 seconds around what's playing; tap to jump</span></div>
+    <canvas id="curve" height="170" aria-label="Tempo along the song"></canvas>
+    <div class="legend"><span><i style="background:var(--amber)"></i>Beat This! tempo</span><span><i style="background:var(--ok)"></i>BPM tag</span><span><i style="background:var(--bad)"></i>plugin's intro / outro</span><span><i style="background:var(--line-strong)"></i>the ends the plugin measures</span><span><i style="background:var(--band);height:10px"></i>genre's usual range</span></div>
+    <div id="d-notes"></div>
+    <div class="facts" id="d-facts"></div>
+  </section>
+
+  <div class="split">
+    <section class="card" aria-label="Songs">
+      <div class="tools">
+        <input type="search" class="grow" id="search" placeholder="Find a song, artist or genre" aria-label="Find">
+        <div class="seg" role="group" aria-label="Show">
+          <button data-filter="all" aria-pressed="true">All</button>
+          <button data-filter="differ" aria-pressed="false">Disagreements</button>
+          <button data-filter="failed" aria-pressed="false">Failed</button>
+        </div>
+      </div>
+      <div class="table">
+        <table>
+          <thead><tr>
+            <th>Song</th><th>Genre</th><th title="The file's BPM tag">Tag</th><th title="The Siansa plugin today: intro / outro">Plugin</th>
+            <th title="Beat This!: whole song (intro / outro)">Beat This!</th><th title="Beats a bar, and the share of bars that agree">Bar</th>
+            <th title="Share of beats within 4 % of the usual gap">Steady</th><th>Notes</th><th>State</th>
+          </tr></thead>
+          <tbody id="rows"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="tools" style="margin-top:12px">
+        <button id="all-again">Analyse every song again</button>
+        <button id="plugin-refresh">Read the plugin's values again</button>
+        <a class="btn" href="api/export.csv" download>Export CSV</a>
+      </div>
+    </section>
+    <section class="card" aria-label="Activity">
+      <h2>Activity</h2>
+      <ul class="events" id="events"></ul>
+    </section>
+  </div>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v)) ? "–" : Number(v).toFixed(d);
+const pct = (v) => (v === null || v === undefined) ? "–" : Math.round(v * 100) + "%";
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const BUSY = ["downloading", "decoding", "analysing"];
+let songs = [], filter = "all", selected = null, detail = null, lastCounts = "", status = null;
+
+async function api(path, options = {}) {
+  const r = await fetch(path, {headers: {"Content-Type": "application/json"}, ...options});
+  const body = r.headers.get("Content-Type")?.includes("json") ? await r.json() : await r.text();
+  if (!r.ok) throw new Error(body?.error || r.statusText);
+  return body;
+}
+function banner(text) { $("banner").hidden = !text; $("banner").textContent = text || ""; }
+
+// ---- status ----
+async function refreshStatus() {
+  try {
+    status = await api("api/status");
+    banner(null);
+  } catch (e) { banner("The service doesn't answer: " + e.message); return; }
+  const s = status, c = s.counts, total = c.songs || 0;
+  const done = c.done || 0, failed = c.failed || 0, queued = c.queued || 0;
+  const busy = BUSY.reduce((n, k) => n + (c[k] || 0), 0);
+  $("pills").innerHTML = [
+    `<span class="pill ${s.model_loaded ? (s.device_note ? "wait" : "ok") : "wait"}" title="${esc(s.device_note || "")}">Model ${esc(s.model)} · ${s.model_loaded ? esc(s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") + (s.float16 && s.device !== "cpu" ? " (half precision)" : "") + (s.model_load_seconds ? ` · loaded in ${fmt(s.model_load_seconds)}s` : "") : (s.device === "cpu" ? "CPU" : "GPU if there is one") + " · loads with the first song"}</span>`,
+    `<span class="pill ${s.navidrome ? "ok" : "bad"}">Navidrome</span>`,
+    `<span class="pill ${s.audiomuse ? "ok" : "wait"}">${s.audiomuse ? "AudioMuse-AI" : "No AudioMuse-AI (plugin column empty)"}</span>`,
+    `<span class="pill">v${esc(s.version)}</span>`,
+  ].join("");
+  if (!$("playlist").value) $("playlist").value = s.playlist;
+  if (s.current) {
+    $("now-what").textContent = `${s.current.artist} – ${s.current.title}`;
+    $("now-step").textContent = `${s.current.step} for ${fmt(s.current.for_seconds)} s`;
+  } else if (s.paused) {
+    $("now-what").textContent = "Paused"; $("now-step").textContent = `${queued} waiting`;
+  } else {
+    $("now-what").textContent = total ? (queued ? "Starting the next song…" : "All done") : "No songs yet";
+    $("now-step").textContent = total ? "" : `Make a playlist called "${s.playlist}" in Navidrome, then Analyse playlist.`;
+  }
+  $("pause").textContent = s.paused ? "Carry on" : "Pause";
+  if (s.device_note) banner(s.device_note);
+  const w = (n) => total ? (100 * n / total) + "%" : "0";
+  $("progress").innerHTML = `<span class="done" style="width:${w(done)}"></span><span class="failed" style="width:${w(failed)}"></span><span class="busy" style="width:${w(busy)}"></span>`;
+  const times = songs.filter((x) => x.result).map((x) => x.result.model_seconds).filter((x) => x);
+  const avg = times.length ? times.reduce((a, b) => a + b, 0) / times.length : null;
+  $("counts").innerHTML = `<span><b>${total}</b> songs</span><span><b>${done}</b> done</span><span><b>${queued + busy}</b> to go</span><span><b>${failed}</b> failed</span>` +
+    (avg ? `<span>about <b>${fmt(avg)}</b> s a song in the model</span>` : "") +
+    (s.last_error ? `<span>last error: ${esc(s.last_error)}</span>` : "");
+  $("events").innerHTML = s.events.map((e) => `<li class="${esc(e.level)}"><time>${new Date(e.at * 1000).toLocaleTimeString()}</time>${esc(e.message)}</li>`).join("") || `<li>Nothing yet.</li>`;
+  const key = JSON.stringify(c) + (s.current ? s.current.id + s.current.step : "");
+  if (key !== lastCounts) { lastCounts = key; refreshSongs(); }
+}
+
+// ---- the table ----
+async function refreshSongs() {
+  try { songs = await api("api/songs"); } catch (e) { return; }
+  drawRows();
+  if (selected && detail && detail.state !== songs.find((s) => s.id === selected)?.state) openSong(selected, false);
+}
+function differs(s) { return (s.verdict || []).some(([level]) => level === "warn"); }
+function drawRows() {
+  const q = $("search").value.trim().toLowerCase();
+  const shown = songs.filter((s) => filter === "all" || (filter === "differ" ? differs(s) : s.state === "failed"))
+    .filter((s) => !q || [s.title, s.artist, s.album, ...s.genres.map((g) => g.label)].join(" ").toLowerCase().includes(q));
+  if (!shown.length) {
+    $("rows").innerHTML = `<tr><td colspan="9" class="empty">${songs.length ? "Nothing matches." : "No songs yet."}</td></tr>`;
+    return;
+  }
+  $("rows").innerHTML = shown.map((s) => {
+    const r = s.result || {}, p = s.plugin || {};
+    const state = BUSY.includes(s.state) ? "busy" : s.state;
+    return `<tr data-id="${esc(s.id)}" aria-selected="${s.id === selected}">
+      <td><div class="big">${esc(s.title)}</div><div class="sub">${esc(s.artist)}</div></td>
+      <td>${s.genres.map((g) => `<span class="chip" title="from ${esc(g.source)}">${esc(g.label)}</span>`).join("") || '<span class="sub">–</span>'}</td>
+      <td class="num">${s.tag_bpm ? fmt(s.tag_bpm, 0) : "–"}</td>
+      <td class="num">${fmt(p.intro_bpm)}<div class="sub">${fmt(p.outro_bpm)}</div></td>
+      <td class="num"><span class="big">${fmt(r.bpm, 2)}</span><div class="sub">${fmt(r.intro_bpm)} / ${fmt(r.outro_bpm)}</div></td>
+      <td class="num">${r.beats_per_bar ? r.beats_per_bar + " beats" : "–"}<div class="sub">${r.beats_per_bar ? pct(r.bar_share) : ""}</div></td>
+      <td class="num">${pct(r.steady)}<div class="sub">grid ${pct(r.grid_share)}</div></td>
+      <td>${(s.verdict || []).map(([level, text]) => `<span class="note ${level}">${esc(text)}</span>`).join("") || (s.error ? `<span class="note warn">${esc(s.error)}</span>` : "")}</td>
+      <td><span class="state ${esc(state)}">${esc(s.state || "–")}</span>${r.model_seconds ? `<div class="sub">${fmt(r.model_seconds)} s</div>` : ""}</td>
+    </tr>`;
+  }).join("");
+}
+$("rows").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-id]"); if (tr) openSong(tr.dataset.id, true); });
+$("search").addEventListener("input", drawRows);
+document.querySelectorAll("[data-filter]").forEach((b) => b.addEventListener("click", () => {
+  filter = b.dataset.filter;
+  document.querySelectorAll("[data-filter]").forEach((x) => x.setAttribute("aria-pressed", x === b));
+  drawRows();
+}));
+
+// ---- one song ----
+async function openSong(id, newSong) {
+  selected = id;
+  drawRows();
+  try { detail = await api("api/songs/" + encodeURIComponent(id)); } catch (e) { banner(e.message); return; }
+  $("detail").hidden = false;
+  $("d-title").textContent = detail.title;
+  $("d-sub").textContent = `${detail.artist} · ${detail.album} · ${fmt(detail.duration / 60)} min${detail.suffix ? " · " + detail.suffix : ""}`;
+  if (newSong) {
+    const player = $("player");
+    player.src = "api/audio/" + encodeURIComponent(id);
+    resetClicks();
+    $("detail").scrollIntoView({behavior: "smooth", block: "start"});
+  }
+  const r = detail.result || {}, p = detail.plugin || {};
+  $("d-notes").innerHTML = (detail.verdict || []).map(([level, text]) => `<span class="note ${level}">${esc(text)}</span>`).join("")
+    + (detail.error ? `<span class="note warn">${esc(detail.error)}</span>` : "");
+  const facts = [
+    ["Beat This! tempo", r.bpm ? fmt(r.bpm, 2) + " BPM" : "–"],
+    ["Intro (first 30 s)", fmt(r.intro_bpm, 2)], ["Outro (last 30 s)", fmt(r.outro_bpm, 2)],
+    ["Plugin intro / outro", `${fmt(p.intro_bpm, 2)} / ${fmt(p.outro_bpm, 2)}`], ["BPM tag", detail.tag_bpm ? fmt(detail.tag_bpm, 0) : "–"],
+    ["Beats a bar", r.beats_per_bar ? `${r.beats_per_bar} (${pct(r.bar_share)} of bars)` : "–"], ["First downbeat", r.first_downbeat_ms != null ? fmt(r.first_downbeat_ms / 1000, 2) + " s" : "–"],
+    ["Steady", pct(r.steady)], ["On a straight grid", `${pct(r.grid_share)} (worst ${fmt(r.grid_ms, 0)} ms)`],
+    ["Beats / downbeats", r.beat_count != null ? `${r.beat_count} / ${r.downbeat_count}` : "–"],
+    ["Time", r.model_seconds ? `model ${fmt(r.model_seconds)} s · decode ${fmt(r.decode_seconds)} s · download ${fmt(r.download_seconds)} s` : "–"],
+    ["Genre", detail.genres.map((g) => `${g.label} (${g.source})`).join(", ") || "–"],
+    ["Genre's usual range", detail.genre_range ? `${detail.genre_range[0]}–${detail.genre_range[1]} BPM` : "–"],
+  ];
+  $("d-facts").innerHTML = facts.map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
+  drawCurve();
+}
+$("d-close").addEventListener("click", () => { $("detail").hidden = true; selected = null; detail = null; $("player").pause(); drawRows(); });
+$("d-again").addEventListener("click", async () => { if (detail) { await api(`api/songs/${encodeURIComponent(detail.id)}/analyse`, {method: "POST"}); refreshStatus(); } });
+$("d-remove").addEventListener("click", async () => {
+  if (!detail) return;
+  await api("api/songs/" + encodeURIComponent(detail.id), {method: "DELETE"});
+  $("d-close").click(); refreshStatus();
+});
+
+// ---- drawing ----
+function sizeCanvas(canvas) {
+  const ratio = window.devicePixelRatio || 1, w = canvas.clientWidth, h = Number(canvas.getAttribute("height"));
+  canvas.width = w * ratio; canvas.height = h * ratio; canvas.style.height = h + "px";
+  const g = canvas.getContext("2d"); g.setTransform(ratio, 0, 0, ratio, 0, 0);
+  return [g, w, h];
+}
+function drawBeatView() {
+  const canvas = $("beatview"); if ($("detail").hidden) return;
+  const [g, w, h] = sizeCanvas(canvas), now = $("player").currentTime || 0, span = 8;
+  const t0 = now - span / 2, x = (t) => (t - t0) / span * w;
+  g.clearRect(0, 0, w, h);
+  if (!detail) return;
+  const downs = detail.downbeats || [];
+  g.font = "11px " + css("--mono");
+  for (const b of detail.beats || []) {
+    if (b < t0 || b > t0 + span) continue;
+    const isDown = downs.some((d) => Math.abs(d - b) < 0.03);
+    g.fillStyle = isDown ? css("--amber") : css("--frost");
+    const bh = isDown ? h - 28 : (h - 28) * 0.55;
+    g.fillRect(x(b) - 1.5, h - 10 - bh, 3, bh);
+    if (isDown) { g.fillText(String(downs.findIndex((d) => Math.abs(d - b) < 0.03) + 1), x(b) + 4, 14); }
+  }
+  g.fillStyle = css("--text"); g.fillRect(w / 2 - 1, 0, 2, h);
+  g.fillStyle = css("--faint"); g.fillText(fmt(now, 2) + " s", w / 2 + 6, h - 2);
+}
+function drawCurve() {
+  const canvas = $("curve"); if (!detail) return;
+  const [g, w, h] = sizeCanvas(canvas), r = detail.result || {}, p = detail.plugin || {};
+  const dur = detail.duration || (detail.beats || []).slice(-1)[0] || 1, pts = detail.tempo_curve || [];
+  g.clearRect(0, 0, w, h);
+  const values = pts.map((q) => q[1]).concat([detail.tag_bpm, p.intro_bpm, p.outro_bpm, r.bpm].filter((v) => v));
+  if (!values.length) { g.fillStyle = css("--faint"); g.fillText("Not analysed yet", 12, 20); return; }
+  let lo = Math.min(...values), hi = Math.max(...values);
+  if (detail.genre_range) { lo = Math.min(lo, detail.genre_range[0]); hi = Math.max(hi, detail.genre_range[1]); }
+  lo = Math.floor((lo - 5) / 10) * 10; hi = Math.ceil((hi + 5) / 10) * 10;
+  const x = (t) => 40 + (t / dur) * (w - 50), y = (v) => 10 + (1 - (v - lo) / (hi - lo)) * (h - 30);
+  if (detail.genre_range) { g.fillStyle = css("--band"); g.fillRect(40, y(detail.genre_range[1]), w - 50, y(detail.genre_range[0]) - y(detail.genre_range[1])); }
+  g.fillStyle = css("--line"); const end = detail.end_seconds || 30;
+  g.fillRect(x(0), 10, x(end) - x(0), h - 30); g.fillRect(x(Math.max(0, dur - end)), 10, x(dur) - x(Math.max(0, dur - end)), h - 30);
+  g.strokeStyle = css("--line"); g.fillStyle = css("--faint"); g.font = "11px " + css("--mono"); g.lineWidth = 1;
+  for (let v = lo; v <= hi; v += (hi - lo > 80 ? 20 : 10)) { g.beginPath(); g.moveTo(40, y(v)); g.lineTo(w - 10, y(v)); g.stroke(); g.fillText(String(v), 6, y(v) + 4); }
+  const line = (v, color, from = 0, to = dur, dash = []) => { if (!v) return; g.strokeStyle = color; g.setLineDash(dash); g.lineWidth = 2; g.beginPath(); g.moveTo(x(from), y(v)); g.lineTo(x(to), y(v)); g.stroke(); g.setLineDash([]); };
+  line(detail.tag_bpm, css("--ok"), 0, dur, [6, 4]);
+  line(p.intro_bpm, css("--bad"), 0, Math.min(end, dur)); line(p.outro_bpm, css("--bad"), Math.max(0, dur - end), dur);
+  if (pts.length) { g.strokeStyle = css("--amber"); g.lineWidth = 2; g.beginPath(); pts.forEach(([t, v], i) => i ? g.lineTo(x(t), y(v)) : g.moveTo(x(t), y(v))); g.stroke(); }
+  const now = $("player").currentTime || 0; g.fillStyle = css("--text"); g.fillRect(x(now) - 1, 10, 2, h - 30);
+  g.fillStyle = css("--faint"); g.fillText("0", 40, h - 4); g.fillText(fmt(dur / 60) + " min", w - 60, h - 4);
+}
+$("beatview").addEventListener("click", (e) => {
+  const rect = e.target.getBoundingClientRect(), player = $("player");
+  player.currentTime = Math.max(0, (player.currentTime || 0) + ((e.clientX - rect.left) / rect.width - 0.5) * 8);
+});
+$("curve").addEventListener("click", (e) => {
+  if (!detail) return; const rect = e.target.getBoundingClientRect(), dur = detail.duration || 1;
+  $("player").currentTime = Math.max(0, ((e.clientX - rect.left - 40) / (rect.width - 50)) * dur);
+});
+window.addEventListener("resize", () => { drawBeatView(); drawCurve(); });
+
+// ---- clicks on the beats, timed by the audio clock ----
+let audioCtx = null, clickGain = null, scheduled = new Set(), lastPos = 0;
+function ensureAudio() {
+  if (audioCtx) return;
+  audioCtx = new AudioContext();
+  const source = audioCtx.createMediaElementSource($("player"));
+  source.connect(audioCtx.destination);
+  clickGain = audioCtx.createGain(); clickGain.gain.value = Number($("click-volume").value); clickGain.connect(audioCtx.destination);
+}
+function resetClicks() { scheduled = new Set(); }
+function click(at, down) {
+  const osc = audioCtx.createOscillator(), env = audioCtx.createGain();
+  osc.frequency.value = down ? 1760 : 1100;
+  env.gain.setValueAtTime(0.0001, at); env.gain.exponentialRampToValueAtTime(1, at + 0.002); env.gain.exponentialRampToValueAtTime(0.0001, at + 0.05);
+  osc.connect(env); env.connect(clickGain); osc.start(at); osc.stop(at + 0.06);
+}
+function scheduleClicks() {
+  const player = $("player");
+  if (!audioCtx || !detail || player.paused || !$("clicks").checked) return;
+  const pos = player.currentTime;
+  if (Math.abs(pos - lastPos) > 0.5) resetClicks();
+  lastPos = pos;
+  const offset = audioCtx.currentTime - pos, downs = detail.downbeats || [];
+  (detail.beats || []).forEach((b, i) => {
+    if (b >= pos + 0.02 && b < pos + 0.35 && !scheduled.has(i)) {
+      scheduled.add(i);
+      click(b + offset, downs.some((d) => Math.abs(d - b) < 0.03));
+    }
+  });
+}
+$("player").addEventListener("play", () => { ensureAudio(); audioCtx.resume(); resetClicks(); });
+$("player").addEventListener("seeked", resetClicks);
+$("click-volume").addEventListener("input", (e) => { if (clickGain) clickGain.gain.value = Number(e.target.value); });
+setInterval(scheduleClicks, 60);
+(function frame() { drawBeatView(); if (detail && !$("player").paused) drawCurve(); requestAnimationFrame(frame); })();
+
+// ---- controls ----
+$("scan").addEventListener("click", async () => {
+  $("scan").disabled = true;
+  try { const r = await api("api/scan", {method: "POST", body: JSON.stringify({playlist: $("playlist").value})}); banner(null); }
+  catch (e) { banner(e.message); }
+  finally { $("scan").disabled = false; refreshStatus(); }
+});
+$("pause").addEventListener("click", async () => { await api(status?.paused ? "api/resume" : "api/pause", {method: "POST"}); refreshStatus(); });
+$("all-again").addEventListener("click", async () => { if (confirm("Analyse every song again?")) { await api("api/analyse-all", {method: "POST"}); refreshStatus(); } });
+$("plugin-refresh").addEventListener("click", async () => { try { await api("api/plugin/refresh", {method: "POST"}); } catch (e) { banner(e.message); } lastCounts = ""; refreshStatus(); });
+api("api/playlists").then((lists) => { $("playlists").innerHTML = lists.map((p) => `<option value="${esc(p.name)}">${p.songs} songs</option>`).join(""); }).catch(() => {});
+refreshStatus();
+setInterval(refreshStatus, 2000);
+</script>
+</body>
+</html>

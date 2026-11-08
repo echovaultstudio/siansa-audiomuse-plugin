@@ -1,0 +1,27 @@
+# Siansa Beats: copy this and the .env next to it on the Docker server, then `docker compose up -d`.
+# The page is then at http://<that server>:8090. See README.md.
+services:
+  beats:
+    image: ghcr.io/echovaultstudio/siansa-beats:latest
+    container_name: siansa-beats
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      NAVIDROME_URL: ${NAVIDROME_URL}
+      NAVIDROME_USER: ${NAVIDROME_USER}
+      NAVIDROME_PASSWORD: ${NAVIDROME_PASSWORD}
+      PLAYLIST: ${PLAYLIST:-Beat test}
+      AUDIOMUSE_URL: ${AUDIOMUSE_URL:-}
+      AUDIOMUSE_TOKEN: ${AUDIOMUSE_TOKEN:-}
+      BEATS_MODEL: ${BEATS_MODEL:-final0}
+      BEATS_THREADS: ${BEATS_THREADS:-0}
+      BEATS_PASSWORD: ${BEATS_PASSWORD:-}
+    volumes:
+      - beats-data:/data
+    # A song at a time; the model uses the CPU's cores while it reads one. Lower to keep the server responsive.
+    cpus: ${BEATS_CPUS:-4}
+    mem_limit: 3g
+
+volumes:
+  beats-data:

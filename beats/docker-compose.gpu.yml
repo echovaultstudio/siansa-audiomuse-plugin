@@ -1,0 +1,16 @@
+# On a Docker server with an NVIDIA GPU (and NVIDIA's container toolkit): the cuda image, given the GPU.
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# On TrueNAS, use truenas.yml instead (see README.md).
+services:
+  beats:
+    image: ghcr.io/echovaultstudio/siansa-beats:cuda
+    environment:
+      BEATS_DEVICE: ${BEATS_DEVICE:-auto}
+      BEATS_FLOAT16: ${BEATS_FLOAT16:-0}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

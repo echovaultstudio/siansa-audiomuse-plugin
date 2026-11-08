@@ -1,0 +1,112 @@
+# Siansa Beats (beats): its tests, then the Docker image with Beat This! checked against songs of known tempo
+# and bars, then (on main) published to ghcr.io/echovaultstudio/siansa-beats for the Docker server to pull.
+name: Siansa Beats
+
+on:
+  push:
+    paths:
+      - "beats/**"
+      - ".github/workflows/beats.yml"
+  pull_request:
+    paths:
+      - "beats/**"
+      - ".github/workflows/beats.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beats-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (no model)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tempo, bars and the comparison
+        run: cd beats && python3 -I tests/test_grid.py
+      - name: CPU or GPU
+        run: cd beats && python3 -I tests/test_analyser.py
+      - name: The service against a fake Navidrome and AudioMuse-AI
+        run: cd beats && python3 -I tests/test_service.py
+
+  image:
+    # Two images: the CPU one (latest) and the cuda one for an NVIDIA GPU (cuda). GitHub's runners have no GPU, so the
+    # cuda image is checked running on the CPU, as it does when the container isn't given a GPU.
+    name: Image with Beat This! (${{ matrix.variant }})
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cpu
+            index: https://download.pytorch.org/whl/cpu
+            suffix: ""
+          - variant: cuda
+            index: https://download.pytorch.org/whl/cu121
+            suffix: "-cuda"
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/echovaultstudio/siansa-beats
+    steps:
+      - uses: actions/checkout@v7
+
+      # CUDA's libraries are several GB: room for them.
+      - name: Free disk space
+        if: matrix.variant == 'cuda'
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
+          df -h / | tail -1
+
+      - name: Build
+        run: |
+          docker build --progress=plain --build-arg TORCH_INDEX=${{ matrix.index }} -t siansa-beats:test beats \
+            2>&1 | tail -40
+
+      - name: Songs of known tempo and bars
+        run: |
+          mkdir -p songs && chmod 777 songs
+          docker run --rm -v "$PWD/beats/tests:/tests:ro" -v "$PWD/songs:/songs" --user 1000 \
+            siansa-beats:test python /tests/make_test_songs.py /songs
+
+      - name: Start a fake Navidrome and AudioMuse-AI with them
+        run: |
+          python3 -I beats/tests/fakes.py songs 4533 > fake.log 2>&1 &
+          sleep 2 && cat fake.log
+
+      - name: Start the service
+        run: |
+          docker run -d --name beats --network host \
+            -e NAVIDROME_URL=http://127.0.0.1:4533 -e NAVIDROME_USER=test -e NAVIDROME_PASSWORD=test \
+            -e AUDIOMUSE_URL=http://127.0.0.1:4533 -e AUDIOMUSE_TOKEN=token -e PORT=8090 \
+            siansa-beats:test
+
+      - name: Beat This! on every song, and every part of the page
+        run: python3 -I beats/tests/e2e.py http://127.0.0.1:8090 songs/catalog.json
+
+      - name: The service's log
+        if: always()
+        run: |
+          docker logs beats 2>&1 | tail -80 || true
+          docker inspect --format '{{.State.Health.Status}}' beats || true
+          docker image ls siansa-beats:test --format 'Image size: {{.Size}}'
+
+      - name: Publish
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          version=$(python3 -c "import re;print(re.search(r'__version__ = \"(.+)\"', open('beats/beats/__init__.py').read())[1])")
+          suffix="${{ matrix.suffix }}"
+          first=$([ -z "$suffix" ] && echo latest || echo cuda)
+          for tag in "$first" "$version$suffix" "sha-${GITHUB_SHA::7}$suffix"; do
+            docker tag siansa-beats:test "$IMAGE:$tag" && docker push -q "$IMAGE:$tag"
+          done
+          echo "::notice::Published $IMAGE:$first ($version$suffix)"
