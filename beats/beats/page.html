@@ -29,6 +29,7 @@ header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, va
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; min-height: 58px; }
 h1 { font-size: 1.15rem; margin: 0; letter-spacing: -0.01em; }
 h1 b { color: var(--amber); }
+h1 a { color: inherit; text-decoration: none; } h1 a:hover b { text-decoration: underline; }
 h2 { font-size: 1rem; margin: 0 0 10px; }
 .pills { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
 .pill { border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 10px; font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
@@ -106,7 +107,7 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
 <body>
 <header>
   <div class="wrap bar">
-    <h1><b>Siansa</b> Beats</h1>
+    <h1><a href="./" id="home" title="Back to all songs"><b>Siansa</b> Beats</a></h1>
     <div class="pills" id="pills" aria-live="polite"></div>
   </div>
 </header>
@@ -143,10 +144,11 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
     <audio id="player" controls preload="none" crossorigin="anonymous"></audio>
     <div class="controls" style="margin-bottom:10px">
       <label class="toggle"><input type="checkbox" id="clicks" checked> Clicks on the beats</label>
+      <label class="toggle">from <select id="click-source"><option value="grid">the steady grid</option><option value="model">the model's beats</option></select></label>
       <label class="toggle">Click volume <input type="range" id="click-volume" min="0" max="1" step="0.05" value="0.5"></label>
     </div>
     <canvas id="beatview" height="120" aria-label="Beats around the playhead"></canvas>
-    <div class="legend"><span><i style="background:var(--frost)"></i>beat</span><span><i style="background:var(--amber)"></i>downbeat (bar number)</span><span><i style="background:var(--text)"></i>now</span><span>8 seconds around what's playing; tap to jump</span></div>
+    <div class="legend"><span><i style="background:var(--frost)"></i>beat</span><span><i style="background:var(--amber)"></i>downbeat (bar number)</span><span><i style="background:var(--ok)"></i>phrase start (every 8 or 16 bars)</span><span id="other-legend"><i style="background:var(--faint);height:6px"></i>the model's beats</span><span><i style="background:var(--text)"></i>now</span><span>8 seconds around what's playing; tap to jump</span></div>
     <canvas id="curve" height="170" aria-label="Tempo along the song"></canvas>
     <div class="legend"><span><i style="background:var(--amber)"></i>Beat This! tempo</span><span><i style="background:var(--ok)"></i>BPM tag</span><span><i style="background:var(--bad)"></i>plugin's intro / outro</span><span><i style="background:var(--line-strong)"></i>the ends the plugin measures</span><span><i style="background:var(--band);height:10px"></i>genre's usual range</span></div>
     <div id="d-notes"></div>
@@ -279,7 +281,7 @@ function drawRows() {
       <td class="num">${s.tag_bpm ? fmt(s.tag_bpm, 0) : "–"}</td>
       <td class="num">${fmt(p.intro_bpm)}<div class="sub">${fmt(p.outro_bpm)}</div></td>
       <td class="num"><span class="big">${fmt(r.bpm, 2)}</span><div class="sub">${fmt(r.intro_bpm)} / ${fmt(r.outro_bpm)}</div></td>
-      <td class="num">${r.beats_per_bar ? r.beats_per_bar + " beats" : "–"}<div class="sub">${r.beats_per_bar ? pct(r.bar_share) : ""}</div></td>
+      <td class="num">${r.beats_per_bar ? r.beats_per_bar + " beats" : "–"}<div class="sub">${r.phrase_first_ms != null ? "phrases ✓" : r.phrase_count === 0 ? "no phrases" : r.beats_per_bar ? pct(r.bar_share) : ""}</div></td>
       <td class="num">${pct(r.steady)}<div class="sub">grid ${pct(r.grid_share)}</div></td>
       <td>${(s.verdict || []).map(([level, text]) => `<span class="note ${level}">${esc(text)}</span>`).join("") || (s.error ? `<span class="note warn">${esc(s.error)}</span>` : "")}</td>
       <td><span class="state ${esc(state)}">${esc(s.state || "–")}</span>${r.model_seconds ? `<div class="sub">${fmt(r.model_seconds)} s</div>` : ""}</td>
@@ -295,13 +297,16 @@ document.querySelectorAll("[data-filter]").forEach((b) => b.addEventListener("cl
 }));
 
 // ---- one song ----
-async function openSong(id, newSong) {
+async function openSong(id, newSong, fromHistory) {
+  if (newSong && !fromHistory) history.pushState({song: id}, "", "#song=" + encodeURIComponent(id));
   selected = id;
   drawRows();
   try { detail = await api("api/songs/" + encodeURIComponent(id)); } catch (e) { banner(e.message); return; }
   $("detail").hidden = false;
   $("d-title").textContent = detail.title;
   $("d-sub").textContent = `${detail.artist} · ${detail.album} · ${fmt(detail.duration / 60)} min${detail.suffix ? " · " + detail.suffix : ""}`;
+  $("click-source").disabled = !detail.grid;
+  if (!detail.grid) $("click-source").value = "model"; else if (newSong) $("click-source").value = "grid";
   if (newSong) {
     const player = $("player");
     player.src = "api/audio/" + encodeURIComponent(id);
@@ -316,6 +321,9 @@ async function openSong(id, newSong) {
     ["One line through every beat", r.bpm_fit ? fmt(r.bpm_fit, 2) + " BPM" : "–"],
     ["Intro (first 30 s)", fmt(r.intro_bpm, 2)], ["Outro (last 30 s)", fmt(r.outro_bpm, 2)],
     ["Plugin intro / outro", `${fmt(p.intro_bpm, 2)} / ${fmt(p.outro_bpm, 2)}`], ["BPM tag", detail.tag_bpm ? fmt(detail.tag_bpm, 0) : "–"],
+    ["Steady grid", detail.grid ? `${fmt(detail.grid.bpm, 2)} BPM · ${pct(detail.grid.on_grid)} of the model's beats on it · bars from ${pct(detail.grid.bar_share)} of its downbeats` : "None: the song isn't at one tempo, so the clicks follow the model's beats"],
+    ["Bars", !detail.grid ? "–" : {both: "The model's downbeats and the music's changes agree", model: "From the model's downbeats (no clear changes to check them by)", changes: "Moved to where the music changes: the model's downbeats were off"}[detail.grid.downbeat_source] || "From the model's downbeats"],
+    ["Phrases", !detail.grid ? "–" : detail.grid.phrases && detail.grid.phrases.length ? `Every ${detail.grid.phrase_bars} bars from ${fmt(detail.grid.phrases[0], 2)} s · ${detail.grid.phrase_big_on} of ${detail.grid.phrase_big} big changes on them` : detail.grid.phrase_big == null ? "Not measured yet: the song is analysed again for its sound" : `No clear phrases (${detail.grid.phrase_big_on || 0} of ${detail.grid.phrase_big} big changes on one bar of 8)`],
     ["Beats a bar", r.beats_per_bar ? `${r.beats_per_bar} (${pct(r.bar_share)} of bars)` : "–"], ["First downbeat", r.first_downbeat_ms != null ? fmt(r.first_downbeat_ms / 1000, 2) + " s" : "–"],
     ["Steady", pct(r.steady)], ["On a straight grid", `${pct(r.grid_share)} (worst ${fmt(r.grid_ms, 0)} ms)`],
     ["Beats / downbeats", r.beat_count != null ? `${r.beat_count} / ${r.downbeat_count}` : "–"],
@@ -326,12 +334,23 @@ async function openSong(id, newSong) {
   $("d-facts").innerHTML = facts.map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
   drawCurve();
 }
-$("d-close").addEventListener("click", () => { $("detail").hidden = true; selected = null; detail = null; $("player").pause(); drawRows(); });
+function closeSong() { $("detail").hidden = true; selected = null; detail = null; $("player").pause(); drawRows(); }
+// Back (the browser's, a phone's or the ✕) closes the song; the logo goes back to all the songs.
+$("d-close").addEventListener("click", () => { if (history.state && history.state.song) history.back(); else closeSong(); });
+window.addEventListener("popstate", (e) => {
+  const id = e.state && e.state.song;
+  if (id) openSong(id, true, true); else closeSong();
+});
+$("home").addEventListener("click", (e) => {
+  e.preventDefault();
+  if (history.state && history.state.song) history.pushState(null, "", "./");
+  closeSong(); window.scrollTo({top: 0, behavior: "smooth"});
+});
 $("d-again").addEventListener("click", async () => { if (detail) { await api(`api/songs/${encodeURIComponent(detail.id)}/analyse`, {method: "POST"}); refreshStatus(); } });
 $("d-remove").addEventListener("click", async () => {
   if (!detail) return;
   await api("api/songs/" + encodeURIComponent(detail.id), {method: "DELETE"});
-  $("d-close").click(); refreshStatus();
+  closeSong(); if (history.state && history.state.song) history.replaceState(null, "", "./"); refreshStatus();
 });
 
 // ---- drawing ----
@@ -347,15 +366,20 @@ function drawBeatView() {
   const t0 = now - span / 2, x = (t) => (t - t0) / span * w;
   g.clearRect(0, 0, w, h);
   if (!detail) return;
-  const downs = detail.downbeats || [];
+  const [beats, downs, other, phrases] = shownBeats();
   g.font = "11px " + css("--mono");
-  for (const b of detail.beats || []) {
+  g.fillStyle = css("--faint");  // the other set, small along the bottom, to see where they part
+  for (const b of other) if (b >= t0 && b <= t0 + span) g.fillRect(x(b) - 1, h - 8, 2, 6);
+  for (const b of beats) {
     if (b < t0 || b > t0 + span) continue;
-    const isDown = downs.some((d) => Math.abs(d - b) < 0.03);
-    g.fillStyle = isDown ? css("--amber") : css("--frost");
+    const isDown = near(downs, b), isPhrase = isDown && near(phrases, b);
+    g.fillStyle = isPhrase ? css("--ok") : isDown ? css("--amber") : css("--frost");
     const bh = isDown ? h - 28 : (h - 28) * 0.55;
-    g.fillRect(x(b) - 1.5, h - 10 - bh, 3, bh);
-    if (isDown) { g.fillText(String(downs.findIndex((d) => Math.abs(d - b) < 0.03) + 1), x(b) + 4, 14); }
+    g.fillRect(x(b) - (isPhrase ? 2.5 : 1.5), h - 10 - bh, isPhrase ? 5 : 3, bh);
+    if (isDown) {
+      const barNo = downs.findIndex((d) => Math.abs(d - b) < 0.03) + 1;
+      g.fillText(isPhrase ? `${barNo} · phrase ${phrases.findIndex((d) => Math.abs(d - b) < 0.03) + 1}` : String(barNo), x(b) + 4, 14);
+    }
   }
   g.fillStyle = css("--text"); g.fillRect(w / 2 - 1, 0, 2, h);
   g.fillStyle = css("--faint"); g.fillText(fmt(now, 2) + " s", w / 2 + 6, h - 2);
@@ -379,6 +403,8 @@ function drawCurve() {
   const line = (v, color, from = 0, to = dur, dash = []) => { if (!v) return; g.strokeStyle = color; g.setLineDash(dash); g.lineWidth = 2; g.beginPath(); g.moveTo(x(from), y(v)); g.lineTo(x(to), y(v)); g.stroke(); g.setLineDash([]); };
   line(detail.tag_bpm, css("--ok"), 0, dur, [6, 4]);
   line(p.intro_bpm, css("--bad"), 0, Math.min(end, dur)); line(p.outro_bpm, css("--bad"), Math.max(0, dur - end), dur);
+  g.fillStyle = css("--ok");  // the phrase starts, as ticks along the top
+  for (const t of (detail.grid && detail.grid.phrases) || []) g.fillRect(x(t) - 1, 10, 2, 8);
   if (pts.length) { g.strokeStyle = css("--amber"); g.lineWidth = 2; g.beginPath(); pts.forEach(([t, v], i) => i ? g.lineTo(x(t), y(v)) : g.moveTo(x(t), y(v))); g.stroke(); }
   const now = $("player").currentTime || 0; g.fillStyle = css("--text"); g.fillRect(x(now) - 1, 10, 2, h - 30);
   g.fillStyle = css("--faint"); g.fillText("0", 40, h - 4); g.fillText(fmt(dur / 60) + " min", w - 60, h - 4);
@@ -393,6 +419,15 @@ $("curve").addEventListener("click", (e) => {
 });
 window.addEventListener("resize", () => { drawBeatView(); drawCurve(); });
 
+// The beats shown and clicked: the steady grid when the song has one and it's picked, else the model's own.
+function shownBeats() {
+  const grid = detail && detail.grid, model = [detail?.beats || [], detail?.downbeats || []];
+  if (grid && $("click-source").value === "grid") return [grid.beats, grid.downbeats, model[0], grid.phrases || []];
+  return [...model, grid ? grid.beats : [], []];
+}
+const near = (list, t) => list.some((d) => Math.abs(d - t) < 0.03);
+$("click-source").addEventListener("change", () => { resetClicks(); drawBeatView(); });
+
 // ---- clicks on the beats, timed by the audio clock ----
 let audioCtx = null, clickGain = null, scheduled = new Set(), lastPos = 0;
 function ensureAudio() {
@@ -403,9 +438,9 @@ function ensureAudio() {
   clickGain = audioCtx.createGain(); clickGain.gain.value = Number($("click-volume").value); clickGain.connect(audioCtx.destination);
 }
 function resetClicks() { scheduled = new Set(); }
-function click(at, down) {
+function click(at, down, phrase) {
   const osc = audioCtx.createOscillator(), env = audioCtx.createGain();
-  osc.frequency.value = down ? 1760 : 1100;
+  osc.frequency.value = phrase ? 2640 : down ? 1760 : 1100;
   env.gain.setValueAtTime(0.0001, at); env.gain.exponentialRampToValueAtTime(1, at + 0.002); env.gain.exponentialRampToValueAtTime(0.0001, at + 0.05);
   osc.connect(env); env.connect(clickGain); osc.start(at); osc.stop(at + 0.06);
 }
@@ -415,11 +450,11 @@ function scheduleClicks() {
   const pos = player.currentTime;
   if (Math.abs(pos - lastPos) > 0.5) resetClicks();
   lastPos = pos;
-  const offset = audioCtx.currentTime - pos, downs = detail.downbeats || [];
-  (detail.beats || []).forEach((b, i) => {
+  const offset = audioCtx.currentTime - pos, [beats, downs, , phrases] = shownBeats();
+  beats.forEach((b, i) => {
     if (b >= pos + 0.02 && b < pos + 0.35 && !scheduled.has(i)) {
       scheduled.add(i);
-      click(b + offset, downs.some((d) => Math.abs(d - b) < 0.03));
+      click(b + offset, near(downs, b), near(phrases, b));
     }
   });
 }
@@ -442,6 +477,7 @@ $("plugin-refresh").addEventListener("click", async () => { try { await api("api
 api("api/playlists").then((lists) => { $("playlists").innerHTML = lists.map((p) => `<option value="${esc(p.name)}">${p.songs} songs</option>`).join(""); }).catch(() => {});
 refreshStatus();
 setInterval(refreshStatus, 2000);
+{ const m = location.hash.match(/^#song=(.+)$/); if (m) { history.replaceState({song: decodeURIComponent(m[1])}, "", location.hash); openSong(decodeURIComponent(m[1]), true, true); } }
 </script>
 </body>
 </html>

@@ -19,7 +19,7 @@ import sqlite3
 import threading
 import time
 
-SCHEMA_VERSION = 2  # 2: results have bpm_fit and main_share (0.3.0)
+SCHEMA_VERSION = 4  # 2: bpm_fit, main_share (0.3.0); 3: the steady grid (0.4.0); 4: levels, phrases (0.5.0)
 EVENTS_KEPT = 500
 
 SCHEMA = """
@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS plugin (
 CREATE TABLE IF NOT EXISTS events (at REAL, level TEXT, message TEXT);
 """
 
-RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "bpm_median", "steady", "grid_ms", "grid_share", "intro_bpm", "intro_steady", "outro_bpm",
+RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "grid_bpm", "on_grid", "analysis_version", "downbeat_source", "grid_counted",
+                 "changes_share", "phrase_first_ms", "phrase_count", "phrase_bars", "phrase_big", "phrase_big_on", "bpm_median", "steady", "grid_ms", "grid_share", "intro_bpm", "intro_steady", "outro_bpm",
                  "outro_steady", "beats_per_bar", "bar_share", "first_downbeat_ms", "beat_count", "downbeat_count",
                  "download_seconds", "decode_seconds", "model_seconds")
 PLUGIN_FIELDS = ("intro_bpm", "outro_bpm", "intro_steady", "outro_steady", "intro_bar_ms", "outro_bar_ms")
@@ -63,9 +64,12 @@ class Store:
             self.db.execute("PRAGMA journal_mode=WAL")
             self.db.executescript(SCHEMA)
             columns = {r[1] for r in self.db.execute("PRAGMA table_info(results)")}
-            for column in ("bpm_fit", "main_share"):
+            for column, kind in (("bpm_fit", "REAL"), ("main_share", "REAL"), ("grid_bpm", "REAL"), ("on_grid", "REAL"),
+                                 ("analysis_version", "REAL"), ("downbeat_source", "TEXT"), ("grid_counted", "TEXT"), ("changes_share", "REAL"),
+                                 ("phrase_first_ms", "REAL"), ("phrase_count", "INTEGER"), ("phrase_bars", "INTEGER"), ("phrase_big", "INTEGER"),
+                                 ("phrase_big_on", "INTEGER"), ("levels", "TEXT")):
                 if column not in columns:
-                    self.db.execute(f"ALTER TABLE results ADD COLUMN {column} REAL")
+                    self.db.execute(f"ALTER TABLE results ADD COLUMN {column} {kind}")
             if self.db.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
                 self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             # Songs that were being worked on when the service stopped go back in the queue.
@@ -153,29 +157,38 @@ class Store:
 
     # ---- results ----
 
-    def save_result(self, song_id, model, values, beats, downbeats):
+    def save_result(self, song_id, model, values, beats, downbeats, levels=None):
+        """``levels``: the sound's levels (:func:`beats.features.measure`); ``None`` saves an empty ``""``, so a
+        song whose sound couldn't be measured isn't asked for again."""
         with self.lock, self.db:
             self.db.execute(
-                f"INSERT OR REPLACE INTO results (song_id, model, {', '.join(RESULT_FIELDS)}, analysed_at, beats, downbeats)"
-                f" VALUES (?, ?, {', '.join('?' for _ in RESULT_FIELDS)}, ?, ?, ?)",
+                f"INSERT OR REPLACE INTO results (song_id, model, {', '.join(RESULT_FIELDS)}, analysed_at, beats, downbeats,"
+                f" levels) VALUES (?, ?, {', '.join('?' for _ in RESULT_FIELDS)}, ?, ?, ?, ?)",
                 (song_id, model, *[values.get(f) for f in RESULT_FIELDS], time.time(),
-                 json.dumps([round(b, 3) for b in beats]), json.dumps([round(b, 3) for b in downbeats])))
+                 json.dumps([round(b, 3) for b in beats]), json.dumps([round(b, 3) for b in downbeats]),
+                 json.dumps(levels) if levels else ""))
 
     def result(self, song_id, model, with_beats=False):
         rows = self._rows("SELECT * FROM results WHERE song_id=? AND model=?", (song_id, model))
         if not rows:
             return None
         row = rows[0]
-        beats, downbeats = row.pop("beats"), row.pop("downbeats")
+        beats, downbeats, levels = row.pop("beats"), row.pop("downbeats"), row.pop("levels", None)
         if with_beats:
             row["beats"], row["downbeats"] = json.loads(beats or "[]"), json.loads(downbeats or "[]")
+            row["levels"] = json.loads(levels) if levels else None
         return row
 
-    def stale_results(self):
-        """``(song_id, model)`` of results worked out before the main tempo (0.3.0), to be worked out again from
-        their beats."""
-        return [(r["song_id"], r["model"]) for r in
-                self._rows("SELECT song_id, model FROM results WHERE bpm_fit IS NULL AND beats IS NOT NULL")]
+    def stale_results(self, version):
+        """``(song_id, model)`` of results worked out by an older Siansa Beats (``analysis_version`` below
+        ``version``), to be worked out again from their beats."""
+        return [(r["song_id"], r["model"]) for r in self._rows(
+            "SELECT song_id, model FROM results WHERE (analysis_version IS NULL OR analysis_version < ?) "
+            "AND beats IS NOT NULL", (version,))]
+
+    def without_levels(self):
+        """Songs analysed before their sound was measured (0.5.0), to be analysed again for their phrases."""
+        return [r["song_id"] for r in self._rows("SELECT song_id FROM results WHERE levels IS NULL")]
 
     def update_result(self, song_id, model, values):
         """Rewrites the readings worked out from the beats, keeping the beats and the times."""

@@ -64,7 +64,7 @@ class BarsTest(unittest.TestCase):
         beats = beats_at(140, 60, start=1.0)
         result = grid.analyse(beats, beats[1::4], 60.0)
         self.assertEqual(result["beats_per_bar"], 4)
-        self.assertAlmostEqual(result["first_downbeat_ms"], beats[1] * 1000, delta=1)
+        self.assertAlmostEqual(result["first_downbeat_ms"], beats[1] * 1000, delta=12)  # the even grid, not the 20 ms one
         self.assertEqual(result["beat_count"], len(beats))
 
 
@@ -127,7 +127,7 @@ class VerdictTest(unittest.TestCase):
         self.assertEqual(grid.verdict(result, genres=["Drum And Bass"]), [("info", "Starts at half time (87.0)")])
 
     def test_an_end_at_another_tempo_is_noted(self):
-        result = {"bpm": 174.0, "intro_bpm": 140.0, "intro_steady": 0.95, "outro_bpm": 120.0, "outro_steady": 0.3,
+        result = {"bpm": 174.0, "intro_bpm": 140.0, "intro_steady": 0.95, "outro_bpm": None, "outro_steady": 0.3,
                   "steady": 0.9}
         notes = grid.verdict(result)
         self.assertIn(("info", "Starts at 140.0, not the song's 174.0"), notes)
@@ -163,6 +163,51 @@ class MainTempoTest(unittest.TestCase):
 
     def test_too_few_beats(self):
         self.assertEqual(grid.main_tempo([0.5, 1.0, 1.5]), (None, 0.0))
+
+
+class SteadyGridTest(unittest.TestCase):
+    def test_extra_beats_in_a_breakdown_dont_move_the_grid(self):
+        # As Control at 57 s: the model hears beats between the beats in a breakdown.
+        beats = beats_at(140, 200)
+        noisy = beats + [b + 0.21 for b in beats if 60 < b < 75]
+        steady = grid.steady_grid(noisy, beats[::4], 140.0)
+        self.assertAlmostEqual(steady["bpm"], 140.0, delta=0.05)
+        self.assertGreater(steady["on_grid"], 0.8)
+        on = [b for b in steady["beats"] if 60 < b < 75]
+        self.assertTrue(all(abs(b - min(beats, key=lambda x: abs(x - b))) < 0.015 for b in on))
+
+    def test_bars_follow_the_vote_not_the_wandering_downbeats(self):
+        # As 1111: most downbeats on beat 1 of 4, but some on beat 3 and some on any beat in a breakdown.
+        beats = beats_at(174, 240)
+        downs = beats[::4]
+        wandering = downs[:20] + beats[82:140:2] + downs[35:]
+        steady = grid.steady_grid(beats, wandering, 174.0)
+        gaps = {round((b - a) * 174 / 60) for a, b in zip(steady["downbeats"], steady["downbeats"][1:])}
+        self.assertEqual(gaps, {4})
+        self.assertAlmostEqual(steady["downbeats"][0], downs[0], delta=0.015)
+        self.assertLess(steady["bar_share"], 1.0)
+
+    def test_the_grid_carries_on_through_a_beatless_intro(self):
+        beats = [12.0 + b for b in beats_at(128, 180, start=0.0)]
+        steady = grid.steady_grid(beats, beats[::4], 128.0)
+        self.assertAlmostEqual(steady["beats"][0], beats[0], delta=0.015)
+
+    def test_no_grid_for_a_song_that_changes_tempo(self):
+        beats = beats_at(120, 100) + [100 + b for b in beats_at(150, 120, start=0.0)]
+        self.assertIsNone(grid.steady_grid(beats, beats[::4], 120.0))
+
+    def test_an_end_without_a_steady_beat_has_no_tempo(self):
+        rng = random.Random(3)
+        scattered = sorted(rng.uniform(0, 30) for _ in range(60))  # as 1111's outro, read at 365
+        self.assertIsNone(grid.end_tempo(scattered, 0, 30)[0])
+        self.assertAlmostEqual(grid.end_tempo(beats_at(174, 30), 0, 30)[0], 174.0, delta=0.5)
+
+    def test_analyse_gives_the_grids_bars(self):
+        beats = beats_at(140, 200)
+        result = grid.analyse(beats + [b + 0.21 for b in beats if 60 < b < 75], beats[2::4], 200.0)
+        self.assertEqual(result["beats_per_bar"], 4)
+        self.assertAlmostEqual(result["first_downbeat_ms"], beats[2] * 1000, delta=15)
+        self.assertAlmostEqual(result["grid_bpm"], 140.0, delta=0.05)
 
 
 class GenreFitTest(unittest.TestCase):

@@ -5,8 +5,9 @@ model's readings, the comparison with the plugin and the BPM tag, the song's pag
 
     python3 tests/e2e.py http://127.0.0.1:8090 <songs folder>/catalog.json
 
-Songs marked strict must read within 1.5 % of their tempo with the right bar; the others are reported (a
-model may count drum & bass at half time, which a DJ would too). Prints a table either way; exits 1 on a failure.
+Songs marked strict must read within 1.5 % of their tempo with the right bar, their bars starting on beat 1 and
+their phrases where their sections do (within 60 ms); the others are reported (a model may count drum & bass at
+half time, which a DJ would too). Prints a table either way; exits 1 on a failure.
 """
 
 import json
@@ -59,7 +60,8 @@ def main(base, catalog_path):
         problems.append("the status doesn't say where the model runs")
 
     songs = {s["id"]: s for s in call(base, "/api/songs")}
-    print(f"\n{'song':<14}{'expect':>8}{'read':>9}{'intro':>8}{'outro':>8}{'bar':>5}{'steady':>8}{'model s':>9}  notes")
+    print(f"\n{'song':<14}{'expect':>8}{'read':>9}{'intro':>8}{'outro':>8}{'bar':>5}{'steady':>8}{'1 at':>7}"
+          f"{'phrase':>8}{'model s':>9}  notes")
     for sid, want in catalog.items():
         s = songs.get(sid)
         if not s or s["state"] != "done":
@@ -68,6 +70,7 @@ def main(base, catalog_path):
         r = s["result"]
         line = (f"{sid:<14}{want['expect_bpm']:>8.1f}{(r['bpm'] or 0):>9.2f}{(r['intro_bpm'] or 0):>8.1f}"
                 f"{(r['outro_bpm'] or 0):>8.1f}{str(r['beats_per_bar']):>5}{(r['steady'] or 0):>8.2f}"
+                f"{str(r['first_downbeat_ms']):>7}{str(r['phrase_first_ms']):>8}"
                 f"{r['model_seconds']:>9.1f}  " + "; ".join(t for _, t in s["verdict"]))
         print(line)
         off = abs((r["bpm"] or 0) / want["expect_bpm"] - 1)
@@ -77,6 +80,16 @@ def main(base, catalog_path):
             target.append(f"{sid}: read {r['bpm']} BPM, expected {want['expect_bpm']}")
         if not bar_ok:
             target.append(f"{sid}: {r['beats_per_bar']} beats a bar, expected {want['expect_bar']}")
+        # Each song's first kick, on beat 1, is at 0 s; its phrases start after its lead-in.
+        bar_ms = want["expect_bar"] * 60_000.0 / want["expect_bpm"]
+        first = r.get("first_downbeat_ms")
+        if first is None or min(first % bar_ms, bar_ms - first % bar_ms) > 60:
+            target.append(f"{sid}: the bars start at {first} ms, not on beat 1 (every {bar_ms:.0f} ms from 0)")
+        phrase = r.get("phrase_first_ms")
+        expected = want.get("expect_phrase_bar", 0) * bar_ms
+        if phrase is None or abs(phrase - expected) > 60:
+            target.append(f"{sid}: the phrases start at {phrase} ms, expected {expected:.0f} "
+                          f"({r.get('phrase_big_on')} of {r.get('phrase_big')} big changes on them)")
 
     # The comparison: t140 carries the plugin's 4/3 misreading, t122 a BPM tag at half its tempo.
     texts = {sid: [t for _, t in s["verdict"]] for sid, s in songs.items()}

@@ -11,15 +11,17 @@ import time
 import traceback
 
 from . import grid
+from . import features
 from .audiomuse import AudioMuseError
 from .subsonic import SubsonicError
 
 
 class Worker:
-    def __init__(self, store, navidrome, audiomuse, tracker, decode, data_dir, model_name):
+    def __init__(self, store, navidrome, audiomuse, tracker, decode, data_dir, model_name, measure=None):
         self.store = store
         self.navidrome = navidrome
         self.audiomuse = audiomuse
+        self.measure = measure or features.measure
         self.plugin_state = {"state": "waiting", "text": "Not asked yet"}
         self.tracker = tracker  # (samples) -> (beats, downbeats)
         self.decode = decode  # (path) -> samples
@@ -78,15 +80,23 @@ class Worker:
 
     def regrid(self):
         """Works out again, from their saved beats, the results of an older Siansa Beats (no model needed)."""
-        stale = self.store.stale_results()
+        stale = self.store.stale_results(grid.ANALYSIS_VERSION)
         for song_id, model in stale:
             row = self.store.result(song_id, model, with_beats=True)
             song = self.store.song(song_id) or {}
             if row and row.get("beats"):
                 self.store.update_result(song_id, model, grid.analyse(row["beats"], row["downbeats"],
-                                                                      song.get("duration") or row["beats"][-1]))
+                                                                      song.get("duration") or row["beats"][-1],
+                                                                      row.get("levels"),
+                                                                      [g["label"] for g in self.store.genres(song_id)]))
         if stale:
             self.store.event(f"Worked out the tempo again for {len(stale)} songs from their saved beats")
+        unheard = self.store.without_levels()
+        for song_id in unheard:
+            self.store.queue(song_id, force=True)
+        if unheard:
+            self.store.event(f"Analysing {len(unheard)} songs again to measure their sound, for their phrases")
+            self.wake()
         return len(stale)
 
     def check_plugin(self):
@@ -188,9 +198,15 @@ class Worker:
                 if note:
                     self.store.event(note, "warn")
 
-            values = grid.analyse(beats, downbeats, duration or song["duration"])
+            try:
+                levels = self.measure(samples)
+            except Exception as e:  # the phrases need it, the beats don't: carry on without
+                levels = None
+                self.store.event(f"{song['artist']} – {song['title']}: couldn't measure the sound for phrases: {e}", "warn")
+            genres = [g["label"] for g in self.store.genres(song_id)]
+            values = grid.analyse(beats, downbeats, duration or song["duration"], levels, genres)
             values.update(download_seconds=download_seconds, decode_seconds=decode_seconds, model_seconds=model_seconds)
-            self.store.save_result(song_id, self.model_name, values, beats, downbeats)
+            self.store.save_result(song_id, self.model_name, values, beats, downbeats, levels)
             self.store.set_state(song_id, "done")
             bpm = f"{values['bpm']:.2f} BPM" if values.get("bpm") else "no steady beat"
             self.store.event(f"{song['artist']} – {song['title']}: {bpm}, {len(beats)} beats, "

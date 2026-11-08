@@ -313,6 +313,10 @@ class ServiceTest(Base):
         self.assertEqual(detail["end_seconds"], grid.END_SECONDS)
         beats = self.call("/api/beats/t140")
         self.assertEqual((beats["beats_per_bar"], beats["track_id"]), (4, "t140"))
+        self.assertTrue(beats["steady"])
+        self.assertGreater(beats["on_grid"], 0.9)
+        self.assertAlmostEqual(len(beats["downbeats"]), len(beats["beats"]) / 4, delta=1)
+        self.assertTrue(detail["grid"]["beats"])
 
         # Scanning again queues nothing new; Analyse again does.
         self.assertEqual(self.call("/api/scan", "POST", {})["queued"], 0)
@@ -346,7 +350,7 @@ class ServiceTest(Base):
         self.wait_done()
         db = self.app.store
         with db.lock, db.db:  # as 0.2: no main tempo yet, and the whole-song line as the tempo
-            db.db.execute("UPDATE results SET bpm=149.1, bpm_fit=NULL, main_share=NULL")
+            db.db.execute("UPDATE results SET bpm=149.1, bpm_fit=NULL, main_share=NULL, analysis_version=NULL")
         self.assertEqual(self.app.worker.regrid(), 3)
         control = {s["id"]: s for s in self.call("/api/songs")}["t140"]["result"]
         self.assertAlmostEqual(control["bpm"], 140.0, delta=0.1)
