@@ -14,7 +14,7 @@ import statistics
 
 from . import features, phrase
 
-ANALYSIS_VERSION = 5  # what's worked out from the beats: older results are worked out again from their saved beats
+ANALYSIS_VERSION = 7  # what's worked out from the beats: older results are worked out again from their saved beats
 END_SECONDS = 30.0  # each end, as the plugin's beats.SECONDS
 MIN_BEATS = 8  # fewer, and there's no tempo worth reporting
 GRID_MS = 30.0  # a beat this close to the straight grid sits on it
@@ -229,27 +229,49 @@ def steady_grid(beats, downbeats, bpm, per_bar=4):
     }
 
 
+PHRASE_SHIFTS = (0, 4)  # where the sound may put a normal track's phrases: from bar 1, or a 4-bar intro later
+
+
 def with_sound(steady, levels):
     """``steady`` (a :func:`steady_grid`) with its bars checked against where the music changes, and its phrases,
     from the song's ``levels`` (:func:`beats.features.measure`). Without levels it's returned as it is, with
-    ``downbeat_source`` ``"model"`` and no phrases."""
+    ``downbeat_source`` ``"model"`` and phrases every 8 bars from bar 1.
+
+    The phrases (``phrase_source``): a dance track is made in 8-bar blocks from its first bar, so they're every 8
+    bars from bar 1 (``"bar 1"``), unless the sound says clearly that they start 4 bars later or run 16 bars
+    (``"sound"``): the owner's marks (21 of 22 on bar 1 + 8k where the bars were clear) and the songs where the
+    sound was sure (61 of 78 on bar 1, 9 more 4 bars later) both say so. A track from a mixed CD (``from_mix``:
+    full volume at both ends, cut wherever the DJ put the track marker) has no bar 1 to count from: its phrases
+    come from the sound or there are none (``"mix: sound"``, ``"mix: none"``)."""
     if not steady:
         return steady
-    steady = dict(steady, downbeat_source="model", phrases=[], phrase_bars=phrase.PHRASE_BARS, phrase_big=None,
+    steady = dict(steady, downbeat_source="model", phrases=steady["downbeats"][::phrase.PHRASE_BARS],
+                  phrase_bars=phrase.PHRASE_BARS, phrase_source="bar 1", from_mix=None, phrase_big=None,
                   phrase_big_on=None, changes_share=None)
     hop, frames = features.unpack(levels)
+    if frames:
+        steady["from_mix"] = features.full_volume_ends(hop, frames)
     beat_levels = phrase.per_beat(hop, frames, steady["beats"])
     per_bar = steady["per_bar"]
     if len(beat_levels) < 8 * per_bar:
+        if steady["from_mix"]:
+            steady.update(phrases=[], phrase_source="mix: none")
         return steady
     vote = steady["beats"].index(steady["downbeats"][0]) % per_bar if steady["downbeats"] else 0
     start, source, details = phrase.downbeats(beat_levels, per_bar, vote, steady["bar_share"])
     downs = steady["beats"][start::per_bar]
     found, about = phrase.phrases(phrase.bars_of(beat_levels, start, per_bar))
+    if steady["from_mix"]:
+        phrases = downs[found::about["bars"]] if found is not None else []
+        bars, origin = about["bars"], "mix: sound" if found is not None else "mix: none"
+    elif found is not None and found % 8 in PHRASE_SHIFTS:
+        phrases, bars, origin = downs[found::about["bars"]], about["bars"], "sound"
+    else:
+        phrases, bars, origin = downs[::phrase.PHRASE_BARS], phrase.PHRASE_BARS, "bar 1"
     steady.update(
         downbeats=downs, downbeat_source=source, changes_share=details["changes_share"],
         first_downbeat_ms=round(downs[0] * 1000.0) if downs else None,
-        phrases=downs[found::about["bars"]] if found is not None else [], phrase_bars=about["bars"],
+        phrases=phrases, phrase_bars=bars, phrase_source=origin,
         phrase_big=about["big"], phrase_big_on=about["big_on"])
     return steady
 
@@ -402,6 +424,45 @@ def doubled(beats, period):
     return out + beats[-1:]
 
 
+def app_ends(steady, model_beats, duration, end_seconds=END_SECONDS):
+    """The beat grid at each end of the song, in the shape the Siansa app reads from the Siansa plugin (its
+    ``BeatEnd``): ``intro_bpm``, ``intro_beat_ms`` (the first beat), ``intro_bar_ms`` (the first downbeat),
+    ``intro_phrase_ms`` and ``intro_phrase_bars`` (the first phrase start, when there are phrases), ``intro_rhythm``
+    (the share of the grid's beats in the first :data:`END_SECONDS` the model heard: low for a beatless intro) and
+    ``intro_steady`` (the share on the grid); the same for ``outro_`` (the last beat, downbeat and phrase start, from
+    the last :data:`END_SECONDS`); and ``beats_until_ms``, the model's last beat. From the steady grid, so the
+    tempo is the song's, to a hundredth of a BPM."""
+    grid_beats, downs, phrases = steady["beats"], steady["downbeats"], steady.get("phrases") or []
+    if not grid_beats:
+        return None
+    model_beats = sorted(model_beats)
+
+    def heard(lo, hi):
+        inside = [b for b in grid_beats if lo <= b <= hi]
+        return (_heard(inside, model_beats) / len(inside)) if inside else 0.0
+
+    def ms(t):
+        return round(t * 1000.0, 1) if t is not None else None
+
+    last_beat = max((b for b in grid_beats if b <= duration), default=grid_beats[-1])
+    out = {"beats_until_ms": ms(model_beats[-1]) if model_beats else None}
+    for end, beat, bar, phrase_start, lo, hi in (
+            ("intro", grid_beats[0], downs[0] if downs else None, phrases[0] if phrases else None,
+             0.0, end_seconds),
+            ("outro", last_beat, max((d for d in downs if d <= last_beat), default=None),
+             max((p for p in phrases if p <= last_beat), default=None), max(0.0, duration - end_seconds), duration)):
+        out.update({
+            f"{end}_bpm": round(steady["bpm"], 3),
+            f"{end}_beat_ms": ms(beat),
+            f"{end}_bar_ms": ms(bar),
+            f"{end}_phrase_ms": ms(phrase_start),
+            f"{end}_phrase_bars": steady.get("phrase_bars") if phrase_start is not None else None,
+            f"{end}_rhythm": round(heard(lo, hi), 3),
+            f"{end}_steady": round(steady["on_grid"], 3),
+        })
+    return out
+
+
 def analyse(beats, downbeats, duration, levels=None, genres=()):
     """Everything Siansa's comparison shows for one song, from Beat This!'s beats and downbeats (seconds), the
     song's length (seconds), its sound's ``levels`` (:func:`beats.features.measure`, for bars and phrases) and its
@@ -446,6 +507,9 @@ def analyse(beats, downbeats, duration, levels=None, genres=()):
         "on_grid": steady.get("on_grid"),
         "downbeat_source": steady.get("downbeat_source"),
         "grid_counted": counted if steady else None,
+        "phrase_source": steady.get("phrase_source"),
+        "from_mix": steady.get("from_mix"),
+        "ends": app_ends(steady, beats, duration) if steady else None,
         "changes_share": steady.get("changes_share"),
         "phrase_first_ms": round(steady["phrases"][0] * 1000.0) if steady.get("phrases") else None,
         "phrase_count": len(steady["phrases"]) if steady.get("phrases") is not None and levels else None,

@@ -392,6 +392,27 @@ class ServiceTest(Base):
             self.call("/api/songs/nope/marks", "POST", {"seconds": 1})
         self.assertEqual(caught.exception.code, 404)
 
+    def test_grids_for_the_app(self):
+        self.start()
+        self.call("/api/scan", "POST", {})
+        self.wait_done()
+        answer = self.call("/api/grids?ids=t140,nope,t122,t140")
+        self.assertEqual(answer["missing"], ["nope"])
+        grids = {g["track_id"]: g for g in answer["grids"]}
+        self.assertEqual(set(grids), {"t140", "t122"})
+        g = grids["t140"]
+        for end in ("intro", "outro"):
+            for field in ("bpm", "beat_ms", "bar_ms", "rhythm", "steady"):
+                self.assertIsNotNone(g[f"{end}_{field}"], f"{end}_{field}")
+        self.assertAlmostEqual(g["intro_bpm"], 140.0, delta=0.1)
+        self.assertLess(g["intro_beat_ms"], g["outro_beat_ms"])
+        self.assertEqual(g["intro_phrase_bars"], 8)
+        self.assertGreater(g["beats_until_ms"], g["outro_bar_ms"] - 1)
+        self.assertNotIn("ends", self.call("/api/songs")[0]["result"])
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.call("/api/grids?ids=" + ",".join(str(n) for n in range(2001)))
+        self.assertEqual(caught.exception.code, 400)
+
     def test_the_plugin_line_says_what_went_wrong(self):
         self.start()
         self.app.audiomuse.token = "wrong"

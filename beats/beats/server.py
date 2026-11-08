@@ -19,6 +19,7 @@ API (JSON):
     GET  /api/beats/<id>              just the beat grid (the shape the plugin will read later)
     GET  /api/audio/<id>              the song for the page's player (Navidrome's MP3, passed through)
     GET  /api/export.csv              the table as CSV
+    GET  /api/grids?ids=a,b           each song's beat grid at both ends, as the Siansa app reads the plugin's
     GET  /api/export.json             every song's beats and sound levels, to tune the grid and phrases on
     POST /api/songs/<id>/marks        {"seconds": 67.4}: the owner heard a section start there
     DELETE /api/songs/<id>/marks/<n>  takes a mark away
@@ -290,6 +291,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guard():
             return
         path = self.path.split("?", 1)[0]
+        query = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
         app = self.app
         try:
             if path in ("/", "/index.html"):
@@ -301,6 +303,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(app.navidrome.playlists())
             if path == "/api/songs":
                 return self._json(app.songs())
+            if path == "/api/grids":
+                ids = [i for i in dict.fromkeys(p.strip() for p in (query.get("ids") or [""])[0].split(",")) if i]
+                if len(ids) > 2000:
+                    return self._error(HTTPStatus.BAD_REQUEST, "at most 2000 ids at a time")
+                found = app.store.ends(ids, app.config.model)
+                return self._json({"version": __version__, "grids": [{"track_id": i, **found[i]} for i in ids if i in found],
+                                   "missing": [i for i in ids if i not in found]})
             if path == "/api/export.json":
                 body = json.dumps(app.export()).encode()
                 return self._send(HTTPStatus.OK, body, "application/json",
