@@ -192,6 +192,24 @@ class SteadyGridTest(unittest.TestCase):
         steady = grid.steady_grid(beats, beats[::4], 128.0)
         self.assertAlmostEqual(steady["beats"][0], beats[0], delta=0.015)
 
+    def test_a_tempo_reading_a_fraction_off_still_gets_the_grid(self):
+        # As Quema Quema (174.44) and Control (140.35): the song's tempo reading a little off its real one, which
+        # left a 5-minute song without a grid in 0.5.0.
+        rng = random.Random(4)
+        for true, reading in ((174.0, 174.44), (140.0, 140.35), (175.0, 175.6)):
+            period = 60.0 / true
+            beats = sorted(round((i * period + rng.uniform(-0.01, 0.01)) / 0.02) * 0.02
+                           for i in range(int(300 / period)) if rng.random() > 0.03)
+            beats = sorted(beats + [b + period / 2 for b in beats if 40 < b < 60])  # a breakdown's extra beats
+            steady = grid.steady_grid(beats, beats[::4], reading)
+            self.assertIsNotNone(steady, reading)
+            self.assertAlmostEqual(steady["bpm"], true, delta=0.02)
+            self.assertGreater(steady["on_grid"], 0.9)
+
+    def test_no_grid_for_a_song_that_changes_tempo_halfway(self):
+        beats = beats_at(120, 150) + [150 + b for b in beats_at(150, 150, start=0.0)]
+        self.assertIsNone(grid.steady_grid(beats, beats[::4], 120.0))
+
     def test_no_grid_for_a_song_that_changes_tempo(self):
         beats = beats_at(120, 100) + [100 + b for b in beats_at(150, 120, start=0.0)]
         self.assertIsNone(grid.steady_grid(beats, beats[::4], 120.0))

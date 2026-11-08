@@ -130,6 +130,9 @@ installed, a name the container can't look up…). **Read the plugin's values ag
 **Back** (the browser's or the phone's) closes a song, and the **Siansa Beats** logo goes back to all the songs.
 A song's address (`#song=…`) opens it straight away.
 
+**Download data** gives every song's beats and sound levels as one file (a few MB; song names and genres, no
+addresses or passwords): what the grid and phrases are worked out from, to tune them on real music.
+
 To add songs, add them to the playlist and press **Analyse playlist** again: only the new ones are read.
 
 ## Test it
