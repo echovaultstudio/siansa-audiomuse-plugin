@@ -1,7 +1,8 @@
 """Stand-ins for Navidrome and the Siansa plugin on AudioMuse-AI, for the tests and the end-to-end check.
 
 ``FakeServer(folder)`` serves the songs listed in ``folder/catalog.json`` (made by make_test_songs.py) as a Navidrome
-with one playlist, "Beat test", and the plugin's profiles from each song's ``plugin`` entry. It checks the login
+with two libraries, "Music" (every song, unless a song's ``library`` says "2") and "Compilations", and the plugin's
+profiles from each song's ``plugin`` entry. It checks the login
 (user ``test``, password ``test``; AudioMuse-AI token ``token``) the way the real ones do.
 
 Run on its own for the end-to-end check or to try the page: ``python3 tests/fakes.py <folder> [port]``.
@@ -16,7 +17,6 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 USER, PASSWORD, TOKEN = "test", "test", "token"
-PLAYLIST = "Beat test"
 
 
 def entry(song):
@@ -36,7 +36,6 @@ class FakeServer:
         with open(os.path.join(folder, "catalog.json")) as f:
             self.songs = json.load(f)
         self.requests = []
-        self.in_playlist = None  # the ids in the playlist ("Beat test"), or None for every song
         self.search_all = True  # whether search3 finds every song for an empty query (else: album by album)
         fake = self
 
@@ -64,7 +63,7 @@ class FakeServer:
 
             def do_GET(self):
                 url = urllib.parse.urlparse(self.path)
-                q = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
+                q = {k: v[0] for k, v in urllib.parse.parse_qs(url.query, keep_blank_values=True).items()}
                 fake.requests.append((url.path, q))
                 if url.path.startswith("/plugins/siansa_analysis/"):
                     if len(self.requestline) > 4094:  # as AudioMuse-AI's web server (gunicorn's limit_request_line)
@@ -79,28 +78,26 @@ class FakeServer:
                 by_id = {s["id"]: s for s in fake.songs}
                 if method == "ping":
                     return self.subsonic()
-                if method == "getPlaylists":
-                    return self.subsonic({"playlists": {"playlist": [
-                        {"id": "pl-1", "name": PLAYLIST, "songCount": len(fake.songs)},
-                        {"id": "pl-2", "name": "Something else", "songCount": 0}]}})
-                if method == "getPlaylist":
-                    if q.get("id") != "pl-1":
-                        return self.subsonic({"playlist": {"id": q.get("id"), "entry": []}})
-                    return self.subsonic({"playlist": {"id": "pl-1", "name": PLAYLIST, "entry": [
-                        entry(s) for s in fake.songs if fake.in_playlist is None or s["id"] in fake.in_playlist]}})
+                if method == "getMusicFolders":
+                    return self.subsonic({"musicFolders": {"musicFolder": [{"id": 1, "name": "Music"},
+                                                                           {"id": 2, "name": "Compilations"}]}})
+                songs = [s for s in fake.songs if "musicFolderId" not in q
+                         or str(s.get("library", "1")) == q["musicFolderId"]]
                 if method == "search3":
-                    found = fake.songs if q.get("query") == "" and fake.search_all else []
+                    found = songs if q.get("query") == "" and fake.search_all else []
                     start, count = int(q.get("songOffset", 0)), int(q.get("songCount", 20))
                     return self.subsonic({"searchResult3": {"song": [entry(s) for s in found[start:start + count]]}})
-                albums = sorted({s.get("album", "Test") for s in fake.songs})
+                # An album is in one library, as on Navidrome: its id says which.
+                albums = sorted({(str(s.get("library", "1")), s.get("album", "Test")) for s in songs})
                 if method == "getAlbumList2":
                     start, size = int(q.get("offset", 0)), int(q.get("size", 10))
-                    return self.subsonic({"albumList2": {"album": [{"id": "al-" + a, "name": a}
-                                                                   for a in albums[start:start + size]]}})
+                    return self.subsonic({"albumList2": {"album": [{"id": f"al-{lib}-{a}", "name": a}
+                                                                   for lib, a in albums[start:start + size]]}})
                 if method == "getAlbum":
-                    name = q.get("id", "").removeprefix("al-")
+                    lib, _, name = q.get("id", "").removeprefix("al-").partition("-")
                     return self.subsonic({"album": {"id": q.get("id"), "song": [
-                        entry(s) for s in fake.songs if s.get("album", "Test") == name]}})
+                        entry(s) for s in fake.songs
+                        if s.get("album", "Test") == name and str(s.get("library", "1")) == lib]}})
                 if method == "getSong":
                     if q.get("id") not in by_id:
                         return self.subsonic(error="Song not found")

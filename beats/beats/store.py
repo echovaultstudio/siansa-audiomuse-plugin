@@ -2,7 +2,7 @@
 
 Tables:
 
-- ``songs``: each song in the test library (from Navidrome), with its BPM tag;
+- ``songs``: each song from the chosen Navidrome libraries, with its BPM tag and its library (``folder``);
 - ``genres``: a song's genres, each with where it came from (``source``: ``tag`` for now). Room for better genres
   later: another source (a genre model, AudioMuse-AI's labels…) adds its own rows, and the page and the checks use
   every source;
@@ -10,7 +10,7 @@ Tables:
 - ``results``: Beat This!'s readings, one row per song and model, with every beat and downbeat;
 - ``plugin``: the Siansa plugin's current readings, for comparison;
 - ``events``: what the service did, for the page's activity list;
-- ``settings``: what the page turned on (the whole library), kept across restarts.
+- ``settings``: what the page chose (the libraries to analyse), kept across restarts.
 
 Nothing here is written back to Navidrome, AudioMuse-AI or the music files.
 """
@@ -26,7 +26,7 @@ EVENTS_KEPT = 500
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS songs (
     id TEXT PRIMARY KEY, title TEXT, artist TEXT, album TEXT, duration REAL, suffix TEXT, tag_bpm REAL,
-    playlist TEXT, added_at REAL
+    playlist TEXT, added_at REAL  -- playlist: before 0.10.0, which reads libraries instead (the folder column)
 );
 CREATE TABLE IF NOT EXISTS genres (
     song_id TEXT, source TEXT, label TEXT, weight REAL DEFAULT 1.0, PRIMARY KEY (song_id, source, label)
@@ -58,7 +58,6 @@ RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "grid_bpm", "on_grid", "analysi
                  "download_seconds", "decode_seconds", "model_seconds")
 PLUGIN_FIELDS = ("intro_bpm", "outro_bpm", "intro_steady", "outro_steady", "intro_bar_ms", "outro_bar_ms")
 BUSY = ("downloading", "decoding", "ready", "analysing")  # ready: downloaded and decoded, waiting for the model
-SCOPES = ("playlist", "library")  # the test playlist's songs (what the table shows first), or every song
 
 
 def _column(name, value):
@@ -77,6 +76,8 @@ class Store:
         with self.lock, self.db:
             self.db.execute("PRAGMA journal_mode=WAL")
             self.db.executescript(SCHEMA)
+            if "folder" not in {r[1] for r in self.db.execute("PRAGMA table_info(songs)")}:
+                self.db.execute("ALTER TABLE songs ADD COLUMN folder TEXT")
             columns = {r[1] for r in self.db.execute("PRAGMA table_info(results)")}
             for column, kind in (("bpm_fit", "REAL"), ("main_share", "REAL"), ("grid_bpm", "REAL"), ("on_grid", "REAL"),
                                  ("analysis_version", "REAL"), ("downbeat_source", "TEXT"), ("grid_counted", "TEXT"), ("changes_share", "REAL"),
@@ -100,31 +101,32 @@ class Store:
 
     # ---- songs and genres ----
 
-    def add_song(self, song, playlist=None, source="tag"):
-        """Adds or updates ``song`` (from :func:`subsonic.song_from`); its genres replace that source's."""
+    def add_song(self, song, folder=None, source="tag"):
+        """Adds or updates ``song`` (from :func:`subsonic.song_from`) of library ``folder``; its genres replace that
+        source's."""
         with self.lock, self.db:
-            self._add_song(song, playlist, source)
+            self._add_song(song, folder, source)
 
-    def add_songs(self, songs, playlist=None, source="tag"):
-        """Adds or updates many songs at once (the whole library) and queues the ones never analysed: the number
-        queued. A song already in the playlist stays in it."""
-        queued = 0
+    def add_songs(self, songs, folder=None, source="tag"):
+        """Adds or updates many songs at once (a whole library) and queues the ones never analysed: their ids."""
+        queued = []
         now = time.time()
         with self.lock, self.db:
             for song in songs:
-                self._add_song(song, playlist, source)
-                queued += self.db.execute("INSERT OR IGNORE INTO jobs (song_id, state, queued_at) VALUES (?, 'queued', ?)",
-                                          (song["id"], now)).rowcount
+                self._add_song(song, folder, source)
+                if self.db.execute("INSERT OR IGNORE INTO jobs (song_id, state, queued_at) VALUES (?, 'queued', ?)",
+                                   (song["id"], now)).rowcount:
+                    queued.append(song["id"])
         return queued
 
-    def _add_song(self, song, playlist, source):
+    def _add_song(self, song, folder, source):
         self.db.execute(
-            "INSERT INTO songs (id, title, artist, album, duration, suffix, tag_bpm, playlist, added_at) "
+            "INSERT INTO songs (id, title, artist, album, duration, suffix, tag_bpm, folder, added_at) "
             "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, artist=excluded.artist, "
             "album=excluded.album, duration=excluded.duration, suffix=excluded.suffix, tag_bpm=excluded.tag_bpm, "
-            "playlist=COALESCE(excluded.playlist, songs.playlist)",
+            "folder=COALESCE(excluded.folder, songs.folder)",
             (song["id"], song["title"], song["artist"], song["album"], song["duration"], song["suffix"],
-             song["tag_bpm"], playlist, time.time()))
+             song["tag_bpm"], folder, time.time()))
         self.db.execute("DELETE FROM genres WHERE song_id=? AND source=?", (song["id"], source))
         for label in song.get("genres") or []:
             self.db.execute("INSERT OR REPLACE INTO genres VALUES (?,?,?,?)", (song["id"], source, label, 1.0))
@@ -167,8 +169,7 @@ class Store:
                             " VALUES (?, 'queued', NULL, ?, NULL, NULL, NULL)", (song_id, time.time()))
             return True
 
-    NEXT = ("SELECT j.song_id FROM jobs j LEFT JOIN songs s ON s.id=j.song_id WHERE j.state='queued' "
-            "ORDER BY s.playlist IS NULL, j.queued_at, j.song_id LIMIT 1")  # the playlist's songs first
+    NEXT = "SELECT song_id FROM jobs WHERE state='queued' ORDER BY queued_at, song_id LIMIT 1"
 
     def next_queued(self):
         rows = self._rows(self.NEXT)
@@ -184,11 +185,20 @@ class Store:
                             (time.time(), row["song_id"]))
             return row["song_id"]
 
-    def unqueue_library(self):
-        """Takes the songs that are only in the library (not the playlist) out of the queue: the number taken."""
+    def unqueue_except(self, folders):
+        """Takes the songs of every library but ``folders`` out of the queue (those done stay): the number taken."""
+        folders = list(folders)
         with self.lock, self.db:
-            return self.db.execute("DELETE FROM jobs WHERE state='queued' AND song_id IN "
-                                   "(SELECT id FROM songs WHERE playlist IS NULL)").rowcount
+            return self.db.execute(
+                "DELETE FROM jobs WHERE state='queued' AND song_id IN (SELECT id FROM songs WHERE folder IS NOT NULL"
+                + (f" AND folder NOT IN ({', '.join('?' for _ in folders)})" if folders else "") + ")",
+                folders).rowcount
+
+    def folder_counts(self):
+        """``{folder: {"songs", "done"}}``: each library's songs here, and how many are analysed."""
+        rows = self._rows("SELECT s.folder, COUNT(*) AS songs, SUM(j.state='done') AS done FROM songs s "
+                          "LEFT JOIN jobs j ON j.song_id=s.id GROUP BY s.folder")
+        return {r["folder"]: {"songs": r["songs"], "done": r["done"] or 0} for r in rows if r["folder"] is not None}
 
     # ---- settings ----
 
@@ -214,7 +224,6 @@ class Store:
         rows = self._rows("SELECT state, COUNT(*) AS n FROM jobs GROUP BY state")
         counts = {r["state"]: r["n"] for r in rows}
         counts["songs"] = self._rows("SELECT COUNT(*) AS n FROM songs")[0]["n"]
-        counts["playlist"] = self._rows("SELECT COUNT(*) AS n FROM songs WHERE playlist IS NOT NULL")[0]["n"]
         return counts
 
     # ---- results ----
@@ -281,13 +290,10 @@ class Store:
         rows = self._rows("SELECT * FROM plugin WHERE song_id=?", (song_id,))
         return rows[0] if rows else None
 
-    def overview(self, model, scope="library", find=None, failed=False, limit=None, song_id=None):
-        """The songs with their job, result (no beats) and plugin readings, for the table: every song
-        (``scope`` "library") or the playlist's, those whose name, artist, album or genre has ``find`` in it, only
-        the failed ones, at most ``limit`` of them, or just ``song_id``."""
+    def overview(self, model, find=None, failed=False, limit=None, song_id=None):
+        """The songs with their job, result (no beats) and plugin readings, for the table: those whose name, artist,
+        album or genre has ``find`` in it, only the failed ones, at most ``limit`` of them, or just ``song_id``."""
         where, args = [], [model]
-        if scope == "playlist":
-            where.append("s.playlist IS NOT NULL")
         if song_id is not None:
             where.append("s.id=?")
             args.append(song_id)

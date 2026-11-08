@@ -42,7 +42,7 @@ def main(base, catalog_path):
             time.sleep(1)
     print(f"Service up: model {health['model']}, loaded {health['model_loaded']}")
 
-    print("Scan:", call(base, "/api/scan", "POST", {"playlist": "Beat test"}))
+    print("Libraries:", call(base, "/api/libraries", "POST", {"ids": ["1"]}))
     started, end = time.time(), time.time() + 900
     while True:
         status = call(base, "/api/status")

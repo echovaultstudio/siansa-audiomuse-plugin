@@ -92,12 +92,11 @@ class Base(unittest.TestCase):
 
 
 class SubsonicTest(Base):
-    def test_reads_playlists_songs_and_files_with_a_token_login(self):
+    def test_reads_libraries_songs_and_files_with_a_token_login(self):
         nd = Subsonic(self.fake.url, USER, PASSWORD)
         self.assertEqual(nd.ping()["type"], "navidrome")
-        self.assertEqual(nd.playlist_named("BEAT TEST")["id"], "pl-1")
-        self.assertIsNone(nd.playlist_named("nope"))
-        songs = nd.playlist_songs("pl-1")
+        self.assertEqual(nd.libraries(), [{"id": "1", "name": "Music"}, {"id": "2", "name": "Compilations"}])
+        songs = nd.all_songs("1")
         self.assertEqual([s["id"] for s in songs], ["t140", "t122", "t96w", "bad"])
         self.assertEqual(songs[0]["tag_bpm"], 140.0)
         self.assertEqual(songs[0]["genres"], ["Trance"])
@@ -192,7 +191,7 @@ class StoreTest(unittest.TestCase):
 
     def test_the_queue_and_its_states(self):
         db = self.store()
-        db.add_song(self.song(), playlist="Beat test")
+        db.add_song(self.song(), folder="1")
         self.assertTrue(db.queue("a"))
         self.assertFalse(db.queue("a"))  # already queued
         self.assertEqual(db.next_queued(), "a")
@@ -202,29 +201,29 @@ class StoreTest(unittest.TestCase):
         db.set_state("a", "done")
         self.assertFalse(db.queue("a"))  # done stays done…
         self.assertTrue(db.queue("a", force=True))  # …unless asked again
-        self.assertEqual(db.counts(), {"queued": 1, "songs": 1, "playlist": 1})
+        self.assertEqual(db.counts(), {"queued": 1, "songs": 1})
 
-    def test_the_library_queues_after_the_playlist_and_one_worker_claims_each_song(self):
+    def test_libraries_queue_in_turn_and_one_worker_claims_each_song(self):
         db = self.store()
-        self.assertEqual(db.add_songs([self.song("lib1"), self.song("lib2")]), 2)
-        db.add_song(self.song("pl"), playlist="Beat test")
-        db.queue("pl")
-        self.assertEqual(db.add_songs([self.song("lib1"), self.song("pl")]), 0)  # nothing new
-        self.assertEqual(db.song("pl")["playlist"], "Beat test")  # the library doesn't take it out of the playlist
-        self.assertEqual(db.claim_next(), "pl")  # the playlist's songs first
-        self.assertEqual(db.claim_next(), "lib1")
-        self.assertEqual(db.counts()["downloading"], 2)
-        self.assertEqual(db.unqueue_library(), 1)  # lib2; lib1 is being worked on and stays
+        self.assertEqual(db.add_songs([self.song("m1"), self.song("m2")], "1"), ["m1", "m2"])
+        self.assertEqual(db.add_songs([self.song("c1")], "2"), ["c1"])
+        db.add_song(self.song("old"))  # from the playlist of 0.9.0: no library yet
+        self.assertEqual(db.add_songs([self.song("m1")], "1"), [])  # nothing new
+        self.assertEqual(db.claim_next(), "m1")
+        self.assertEqual(db.counts()["downloading"], 1)
+        self.assertEqual(db.unqueue_except(["1"]), 1)  # c1; m1 is being worked on, m2 is in library 1
+        self.assertEqual(db.claim_next(), "m2")
         self.assertIsNone(db.claim_next())
-        self.assertEqual(db.counts()["playlist"], 1)
+        db.set_state("m1", "done")
+        self.assertEqual(db.folder_counts(), {"1": {"songs": 2, "done": 1}, "2": {"songs": 1, "done": 0}})
+        db.add_song(self.song("old"), folder="2")  # found in a library later
+        self.assertEqual(db.song("old")["folder"], "2")
 
     def test_the_table_finds_and_limits(self):
         db = self.store()
         db.add_songs([dict(self.song("a"), title="Stars Align"), dict(self.song("b"), genres=["Drum & Bass"]),
-                      dict(self.song("c"), title="100%_sure")])
-        db.add_song(self.song("d"), playlist="Beat test")
+                      dict(self.song("c"), title="100%_sure"), self.song("d")], "1")
         ids = lambda **k: [r["id"] for r in db.overview("final0", **k)]  # noqa: E731
-        self.assertEqual(ids(scope="playlist"), ["d"])
         self.assertEqual(sorted(ids()), ["a", "b", "c", "d"])
         self.assertEqual(ids(find="stars ALIGN"), ["a"])
         self.assertEqual(ids(find="drum"), ["b"])  # genres too
@@ -325,9 +324,9 @@ class ServiceTest(Base):
             time.sleep(0.1)
         self.fail(f"not done: {self.call('/api/status')}")
 
-    def test_a_playlist_analysed_and_compared(self):
+    def test_a_library_analysed_and_compared(self):
         self.start()
-        self.assertEqual(self.call("/api/scan", "POST", {"playlist": "beat TEST"}), {"songs": 4, "queued": 4})
+        self.assertEqual(self.call("/api/libraries", "POST", {"ids": ["1"]}), {"songs": 4, "queued": 4})
         counts = self.wait_done()
         self.assertEqual((counts["done"], counts["failed"]), (3, 1))
         songs = {s["id"]: s for s in self.call("/api/songs")}
@@ -358,8 +357,8 @@ class ServiceTest(Base):
         self.assertAlmostEqual(len(beats["downbeats"]), len(beats["beats"]) / 4, delta=1)
         self.assertTrue(detail["grid"]["beats"])
 
-        # Scanning again queues nothing new; Analyse again does.
-        self.assertEqual(self.call("/api/scan", "POST", {})["queued"], 0)
+        # Reading the library again queues nothing new; Analyse again does.
+        self.assertEqual(self.call("/api/libraries/read", "POST")["queued"], 0)
         self.assertEqual(self.call("/api/songs/t140/analyse", "POST"), {"queued": True})
         self.wait_done()
         self.assertEqual(self.tracker.calls, 4)
@@ -369,7 +368,7 @@ class ServiceTest(Base):
         status = self.call("/api/status")
         self.assertEqual(status["plugin"]["state"], "ok")
         self.assertEqual((status["plugin"]["found"], status["plugin"]["asked"]), (1, 4))
-        self.assertTrue(any("Playlist \"Beat test\": 4 songs, 4 new" in e["message"] for e in status["events"]))
+        self.assertTrue(any("Library Music: 4 songs, 4 new" in e["message"] for e in status["events"]))
         self.assertTrue(any("Broken failed" in e["message"] for e in status["events"]))
         self.assertTrue(status["model_loaded"])
 
@@ -386,7 +385,7 @@ class ServiceTest(Base):
 
     def test_results_of_an_older_version_are_worked_out_again_from_their_beats(self):
         self.start()
-        self.call("/api/scan", "POST", {})
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
         db = self.app.store
         with db.lock, db.db:  # as 0.2: no main tempo yet, and the whole-song line as the tempo
@@ -400,7 +399,7 @@ class ServiceTest(Base):
 
     def test_the_data_comes_out_for_tuning(self):
         self.start()
-        self.call("/api/scan", "POST", {})
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
         data = self.call("/api/export.json")
         self.assertEqual(len(data["songs"]), 3)
@@ -411,7 +410,7 @@ class ServiceTest(Base):
 
     def test_section_marks_are_kept_shown_and_exported(self):
         self.start()
-        self.call("/api/scan", "POST", {})
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
         added = self.call("/api/songs/t140/marks", "POST", {"seconds": 67.4})
         self.call("/api/songs/t140/marks", "POST", {"seconds": 12.25})
@@ -434,7 +433,7 @@ class ServiceTest(Base):
 
     def test_grids_for_the_app(self):
         self.start()
-        self.call("/api/scan", "POST", {})
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
         answer = self.call("/api/grids?ids=t140,nope,t122,t140")
         self.assertEqual(answer["missing"], ["nope"])
@@ -465,7 +464,7 @@ class ServiceTest(Base):
 
     def test_the_audio_is_passed_through_with_seeking(self):
         self.start()
-        self.call("/api/scan", "POST", {})
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
         r, data = self.call("/api/audio/t122", raw=True)
         self.assertEqual((r.status, data), (200, b"t122"))
         r, data = self.call("/api/audio/t122", headers={"Range": "bytes=2-"}, raw=True)
@@ -476,21 +475,21 @@ class ServiceTest(Base):
             self.call("/api/audio/unknown")
         self.assertEqual(e.exception.code, 404)
 
-    def test_an_unknown_playlist_lists_the_ones_there_are(self):
+    def test_an_unknown_library_lists_the_ones_there_are(self):
         self.start()
         with self.assertRaises(urllib.error.HTTPError) as e:
-            self.call("/api/scan", "POST", {"playlist": "Nope"})
-        self.assertEqual(e.exception.code, 502)
-        self.assertIn("Beat test, Something else", json.loads(e.exception.read())["error"])
-        # …and it stays in Activity, where it can be read at leisure.
-        self.assertTrue(any(ev["level"] == "error" and 'No playlist called "Nope"' in ev["message"]
-                            for ev in self.call("/api/status")["events"]))
-        self.assertEqual([p["name"] for p in self.call("/api/playlists")], ["Beat test", "Something else"])
+            self.call("/api/libraries", "POST", {"ids": ["9"]})
+        self.assertEqual(e.exception.code, 400)
+        self.assertIn("1 Music, 2 Compilations", json.loads(e.exception.read())["error"])
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/libraries", "POST", {})
+        self.assertEqual(e.exception.code, 400)
+        self.assertEqual(self.call("/api/status")["counts"]["songs"], 0)
 
     def test_pause_and_carry_on(self):
         self.start()
         self.assertEqual(self.call("/api/pause", "POST"), {"paused": True})
-        self.call("/api/scan", "POST", {})
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
         time.sleep(0.5)
         self.assertEqual(self.tracker.calls, 0)
         self.assertEqual(self.call("/api/resume", "POST"), {"paused": False})
@@ -511,54 +510,68 @@ class ServiceTest(Base):
         _, page = self.call("/", raw=True)
         self.assertIn(b"<title>Siansa Beats</title>", page)
 
-    def test_the_whole_library(self):
-        self.fake.in_playlist = {"t140"}
+    def test_chosen_libraries(self):
+        for song in self.fake.songs:
+            song["library"] = "2" if song["id"] == "t96w" else "1"  # the waltz is on a compilation
         self.start()
-        self.assertEqual(self.call("/api/scan", "POST", {}), {"songs": 1, "queued": 1})
-        self.assertFalse(self.call("/api/status")["library"]["on"])
-        self.assertEqual(self.call("/api/library", "POST", {"on": True}), {"songs": 4, "queued": 3})
+        self.assertEqual([(l["name"], l["on"]) for l in self.call("/api/libraries")],
+                         [("Music", False), ("Compilations", False)])
+        self.assertEqual(self.call("/api/libraries", "POST", {"ids": ["1"]}), {"songs": 3, "queued": 3})
         counts = self.wait_done()
-        self.assertEqual((counts["songs"], counts["playlist"], counts["done"]), (4, 1, 3))
+        self.assertEqual((counts["songs"], counts["done"], counts["failed"]), (3, 2, 1))
+        self.assertNotIn("t96w", [s["id"] for s in self.call("/api/songs")])
         status = self.call("/api/status")
-        self.assertTrue(status["library"]["on"])
-        self.assertIsNotNone(status["library"]["read_at"])
-        self.assertEqual([s["id"] for s in self.call("/api/songs")], ["t140"])  # the playlist by default
-        self.assertEqual(len(self.call("/api/songs?scope=library")), 4)
-        self.assertEqual([s["id"] for s in self.call("/api/songs?scope=library&find=waltz")], ["t96w"])
-        self.assertEqual([s["id"] for s in self.call("/api/songs?scope=library&show=failed")], ["bad"])
-        self.assertEqual(len(self.call("/api/songs?scope=library&limit=2")), 2)
-        self.assertEqual(len(self.call("/api/export.json")["songs"]), 1)
-        self.assertEqual(len(self.call("/api/export.json?scope=library")["songs"]), 3)
-        _, csv_body = self.call("/api/export.csv?scope=library", raw=True)
-        self.assertEqual(len(csv_body.decode().strip().splitlines()), 5)
-        self.assertEqual(self.call("/api/grids?ids=t122")["grids"][0]["track_id"], "t122")  # the app finds them all
-        self.assertEqual(self.call("/api/library/read", "POST"), {"songs": 4, "queued": 0})
-        self.assertEqual(self.call("/api/analyse-all", "POST", {"scope": "playlist"}), {"queued": 1})
+        self.assertEqual(status["libraries"]["chosen"], ["1"])
+        self.assertIsNotNone(status["libraries"]["read_at"])
+        libraries = {l["name"]: l for l in self.call("/api/libraries")}
+        self.assertEqual((libraries["Music"]["on"], libraries["Music"]["songs"], libraries["Music"]["done"]), (True, 3, 2))
+        self.assertFalse(libraries["Compilations"]["on"])
+
+        self.assertEqual(self.call("/api/libraries", "POST", {"ids": ["1", "2"]}), {"songs": 4, "queued": 1})
         self.wait_done()
-        self.assertEqual(self.call("/api/library", "POST", {"on": False})["queued"], 0)
-        self.assertFalse(self.call("/api/status")["library"]["on"])
+        self.assertEqual([s["id"] for s in self.call("/api/songs?find=waltz")], ["t96w"])
+        self.assertEqual([s["id"] for s in self.call("/api/songs?show=failed")], ["bad"])
+        self.assertEqual(len(self.call("/api/songs?limit=2")), 2)
+        self.assertEqual(len(self.call("/api/songs")), 4)
+        self.assertEqual(len(self.call("/api/export.json")["songs"]), 3)
+        self.assertEqual([s["id"] for s in self.call("/api/export.json?find=waltz")["songs"]], ["t96w"])
+        _, csv_body = self.call("/api/export.csv?find=waltz", raw=True)
+        self.assertEqual(len(csv_body.decode().strip().splitlines()), 2)
+        self.assertEqual(self.call("/api/grids?ids=t122")["grids"][0]["track_id"], "t122")  # the app finds them all
+        self.assertEqual(self.call("/api/libraries/read", "POST"), {"songs": 4, "queued": 0})
+
+    def test_the_libraries_of_0_9_0s_whole_library(self):
+        self.start()
+        self.app.store.set_setting("library", True)
+        self.assertEqual(self.app.worker.chosen(), ["1", "2"])
+        self.assertEqual(self.call("/api/status")["libraries"]["chosen"], ["1", "2"])
 
     def test_the_library_album_by_album_when_search_finds_nothing(self):
         self.fake.search_all = False
         nd = Subsonic(self.fake.url, USER, PASSWORD)
         self.assertEqual(sorted(s["id"] for s in nd.all_songs()), ["bad", "t122", "t140", "t96w"])
+        self.fake.songs[0]["library"] = "2"
+        self.assertEqual([s["id"] for s in nd.all_songs("2")], ["t140"])
         self.fake.search_all = True
         self.assertEqual(len(nd.all_songs(page=3)), 4)  # paged
+        self.assertEqual(len(nd.all_songs("1", page=2)), 3)
 
-    def test_turning_the_library_off_empties_its_queue(self):
-        self.fake.in_playlist = {"t140"}
+    def test_leaving_a_library_out_empties_its_queue(self):
+        for song in self.fake.songs:
+            song["library"] = "2" if song["id"] in ("t96w", "t122") else "1"
         self.start()
         self.call("/api/pause", "POST")
-        self.call("/api/scan", "POST", {})
-        self.call("/api/library", "POST", {"on": True})
+        self.call("/api/libraries", "POST", {"ids": ["1", "2"]})
         self.assertEqual(self.call("/api/status")["counts"]["queued"], 4)
-        self.assertEqual(self.call("/api/library", "POST", {"on": False}), {"songs": None, "queued": -3})
-        self.assertEqual(self.call("/api/status")["counts"]["queued"], 1)
+        self.assertEqual(self.call("/api/libraries", "POST", {"ids": ["1"]}), {"songs": 2, "queued": 0})
+        self.assertEqual(self.call("/api/status")["counts"]["queued"], 2)
+        self.assertEqual(self.call("/api/libraries", "POST", {"ids": []}), {"songs": 0, "queued": 0})
+        self.assertEqual(self.call("/api/status")["counts"].get("queued", 0), 0)
 
     def test_the_next_song_is_downloaded_while_the_model_works(self):
         self.start()
         self.tracker.delay = 0.4
-        self.call("/api/scan", "POST", {})
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
         end, seen = time.time() + 10, False
         while time.time() < end and not seen:
             status = self.call("/api/status")
