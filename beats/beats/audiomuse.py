@@ -5,6 +5,7 @@ token (AUDIOMUSE_TOKEN) when it has a login; nothing is changed there.
 """
 
 import json
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -47,21 +48,61 @@ class AudioMuse:
         return bool(self.url)
 
     def _get(self, path):
-        request = urllib.request.Request(self.url + path)
+        """The JSON answer at ``path``, or an :class:`AudioMuseError` that says what to check."""
+        parts = urllib.parse.urlsplit(self.url)
+        host = parts.hostname or self.url
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise AudioMuseError("AUDIOMUSE_URL needs to start with http:// or https://, like http://192.168.1.10:8000")
+        here = " (inside the container that's the container itself: use the server's address)" \
+            if host in ("localhost", "127.0.0.1", "::1") else ""
+        request = urllib.request.Request(self.url + path, headers={"Accept": "application/json"})
         if self.token:
             request.add_header("Authorization", f"Bearer {self.token}")
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return json.load(response)
+                body = response.read()
+                final = response.geturl()
         except urllib.error.HTTPError as e:
-            hint = " (check AUDIOMUSE_TOKEN)" if e.code in (401, 403) else ""
             try:
                 said = json.load(e).get("error") or ""
             except Exception:
                 said = ""
-            raise AudioMuseError(f"HTTP {e.code}{hint}" + (f": {said}" if said else "")) from None
-        except (urllib.error.URLError, OSError, ValueError) as e:
-            raise AudioMuseError(str(getattr(e, "reason", e))) from None
+            if e.code in (401, 403):
+                hint = ("AudioMuse-AI asks for a login: set AUDIOMUSE_TOKEN to an API token from AudioMuse-AI"
+                        if not self.token else "AudioMuse-AI doesn't take this AUDIOMUSE_TOKEN: make a new API token")
+            elif e.code == 404:
+                hint = ("No Siansa plugin there: check AUDIOMUSE_URL is AudioMuse-AI's own address (no /plugins/… at "
+                        "the end) and that the plugin is installed and turned on")
+            elif e.code == 400 and "too large" in said.lower():
+                hint = "AudioMuse-AI turned the request away as too long"
+            elif e.code >= 500:
+                hint = "AudioMuse-AI had an error: its log says more"
+            else:
+                hint = "AudioMuse-AI turned the request away"
+            raise AudioMuseError(f"HTTP {e.code}: {hint}" + (f" ({said})" if said else "")) from None
+        except urllib.error.URLError as e:
+            reason = e.reason
+            if isinstance(reason, ConnectionRefusedError):
+                raise AudioMuseError(f"Nothing answers at {host}:{parts.port or ''}: check the port, and that "
+                                     f"AudioMuse-AI is running{here}") from None
+            if isinstance(reason, socket.gaierror):
+                raise AudioMuseError(f"The name {host} isn't known inside the container: use the server's IP "
+                                     "address instead") from None
+            if isinstance(reason, (socket.timeout, TimeoutError)):
+                raise AudioMuseError(f"No answer from {host} within {self.timeout:.0f} s: check the address, and "
+                                     "that nothing blocks the port") from None
+            raise AudioMuseError(f"Couldn't reach {host}: {reason}{here}") from None
+        except (socket.timeout, TimeoutError):
+            raise AudioMuseError(f"No answer from {host} within {self.timeout:.0f} s") from None
+        except OSError as e:
+            raise AudioMuseError(f"Couldn't reach {host}: {e}{here}") from None
+        try:
+            return json.loads(body)
+        except ValueError:
+            login = "login" in final.lower() or b"<form" in body[:20000].lower()
+            raise AudioMuseError("AudioMuse-AI answered with its login page: set AUDIOMUSE_TOKEN to an API token "
+                                 "from AudioMuse-AI" if login else
+                                 "The answer isn't the plugin's: check AUDIOMUSE_URL is AudioMuse-AI's address") from None
 
     def health(self):
         return self._get("/plugins/siansa_analysis/api/health")

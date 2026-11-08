@@ -114,6 +114,7 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
   <div class="banner" id="offline" role="alert" hidden></div>
   <div class="banner" id="banner" role="alert" hidden><span id="banner-text"></span><button id="banner-close" aria-label="Close">✕</button></div>
   <div class="banner warn" id="device-note" role="status" hidden></div>
+  <div class="banner warn" id="plugin-note" role="status" hidden></div>
 
   <section class="card now" aria-label="What's happening">
     <div>
@@ -158,7 +159,7 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
         <input type="search" class="grow" id="search" placeholder="Find a song, artist or genre" aria-label="Find">
         <div class="seg" role="group" aria-label="Show">
           <button data-filter="all" aria-pressed="true">All</button>
-          <button data-filter="differ" aria-pressed="false">Disagreements</button>
+          <button data-filter="differ" aria-pressed="false" title="Songs where a reading really disagrees: half and double speed count as the same beat">Worth a listen</button>
           <button data-filter="failed" aria-pressed="false">Failed</button>
         </div>
       </div>
@@ -206,6 +207,14 @@ $("banner-close").addEventListener("click", () => banner(null));
 function offline(text) { $("offline").hidden = !text; $("offline").textContent = text || ""; }
 
 // ---- status ----
+const PLUGIN_PILL = {ok: "ok", error: "bad", warn: "wait", waiting: "wait", off: ""};
+function pluginPill(s) {
+  const p = s.plugin || {};
+  if (p.state === "off") return "No plugin to compare with";
+  if (p.state === "error") return "Plugin can't be reached";
+  if (p.asked) return `Plugin: ${p.found} of ${p.asked}`;
+  return p.state === "ok" ? "Plugin answers" : "Plugin: checking…";
+}
 async function refreshStatus() {
   try {
     status = await api("api/status");
@@ -217,7 +226,7 @@ async function refreshStatus() {
   $("pills").innerHTML = [
     `<span class="pill ${s.model_loaded ? (s.device_note ? "wait" : "ok") : "wait"}" title="${esc(s.device_note || "")}">Model ${esc(s.model)} · ${s.model_loaded ? esc(s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") + (s.float16 && s.device !== "cpu" ? " (half precision)" : "") + (s.model_load_seconds ? ` · loaded in ${fmt(s.model_load_seconds)}s` : "") : (s.device === "cpu" ? "CPU" : "GPU if there is one") + " · loads with the first song"}</span>`,
     `<span class="pill ${s.navidrome ? "ok" : "bad"}">Navidrome</span>`,
-    `<span class="pill ${s.audiomuse ? "ok" : "wait"}">${s.audiomuse ? "AudioMuse-AI" : "No AudioMuse-AI (plugin column empty)"}</span>`,
+    `<span class="pill ${PLUGIN_PILL[(s.plugin || {}).state] || "wait"}" title="${esc((s.plugin || {}).text || "")}">${pluginPill(s)}</span>`,
     `<span class="pill">v${esc(s.version)}</span>`,
   ].join("");
   if (!$("playlist").value) $("playlist").value = s.playlist;
@@ -232,6 +241,8 @@ async function refreshStatus() {
   }
   $("pause").textContent = s.paused ? "Carry on" : "Pause";
   $("device-note").hidden = !s.device_note; $("device-note").textContent = s.device_note || "";
+  const pluginTrouble = s.plugin && ["error", "warn"].includes(s.plugin.state) ? s.plugin.text : "";
+  $("plugin-note").hidden = !pluginTrouble; $("plugin-note").textContent = pluginTrouble;
   const w = (n) => total ? (100 * n / total) + "%" : "0";
   $("progress").innerHTML = `<span class="done" style="width:${w(done)}"></span><span class="failed" style="width:${w(failed)}"></span><span class="busy" style="width:${w(busy)}"></span>`;
   const times = songs.filter((x) => x.result).map((x) => x.result.model_seconds).filter((x) => x);
@@ -301,7 +312,8 @@ async function openSong(id, newSong) {
   $("d-notes").innerHTML = (detail.verdict || []).map(([level, text]) => `<span class="note ${level}">${esc(text)}</span>`).join("")
     + (detail.error ? `<span class="note warn">${esc(detail.error)}</span>` : "");
   const facts = [
-    ["Beat This! tempo", r.bpm ? fmt(r.bpm, 2) + " BPM" : "–"],
+    ["Beat This! tempo", r.bpm ? fmt(r.bpm, 2) + " BPM" + (r.main_share != null ? ` (${pct(r.main_share)} of the song)` : "") : "–"],
+    ["One line through every beat", r.bpm_fit ? fmt(r.bpm_fit, 2) + " BPM" : "–"],
     ["Intro (first 30 s)", fmt(r.intro_bpm, 2)], ["Outro (last 30 s)", fmt(r.outro_bpm, 2)],
     ["Plugin intro / outro", `${fmt(p.intro_bpm, 2)} / ${fmt(p.outro_bpm, 2)}`], ["BPM tag", detail.tag_bpm ? fmt(detail.tag_bpm, 0) : "–"],
     ["Beats a bar", r.beats_per_bar ? `${r.beats_per_bar} (${pct(r.bar_share)} of bars)` : "–"], ["First downbeat", r.first_downbeat_ms != null ? fmt(r.first_downbeat_ms / 1000, 2) + " s" : "–"],

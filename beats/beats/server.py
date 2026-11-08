@@ -34,6 +34,7 @@ import io
 import json
 import os
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -142,6 +143,7 @@ class App:
             "playlist": self.config.playlist,
             "navidrome": self.config.navidrome_url or None,
             "audiomuse": self.config.audiomuse_url or None,
+            "plugin": worker.plugin_state,
             "uptime_seconds": round(time.time() - self.started),
             "events": self.store.events(),
         }
@@ -152,6 +154,7 @@ class App:
     def csv(self):
         out = io.StringIO()
         columns = ["artist", "title", "album", "genres", "tag_bpm", "plugin_intro_bpm", "plugin_outro_bpm", "bpm",
+                   "main_share", "bpm_fit",
                    "intro_bpm", "outro_bpm", "steady", "grid_share", "beats_per_bar", "bar_share", "first_downbeat_ms",
                    "model_seconds", "state", "notes"]
         w = csv.writer(out)
@@ -160,6 +163,7 @@ class App:
             r, p = row["result"] or {}, row["plugin"] or {}
             w.writerow([row["artist"], row["title"], row["album"], " / ".join(g["label"] for g in row["genres"]),
                         row["tag_bpm"], p.get("intro_bpm"), p.get("outro_bpm"), _round(r.get("bpm")),
+                        _round(r.get("main_share"), 3), _round(r.get("bpm_fit")),
                         _round(r.get("intro_bpm")), _round(r.get("outro_bpm")), _round(r.get("steady"), 3),
                         _round(r.get("grid_share"), 3), r.get("beats_per_bar"), _round(r.get("bar_share"), 3),
                         r.get("first_downbeat_ms"), _round(r.get("model_seconds"), 1), row["state"],
@@ -371,12 +375,13 @@ def main():
             app.store.event(f"Navidrome answers ({info.get('type') or 'server'} {info.get('version') or ''})".strip())
         except SubsonicError as e:
             app.store.event(f"Navidrome doesn't answer: {e}", "error")
-    if app.audiomuse.configured:
-        try:
-            health = app.audiomuse.health()
-            app.store.event(f"Siansa plugin {health.get('plugin_version', '?')} answers on AudioMuse-AI")
-        except AudioMuseError as e:
-            app.store.event(f"The Siansa plugin on AudioMuse-AI doesn't answer: {e}", "warn")
+    app.worker.regrid()
+
+    def plugin():  # in the background: a slow AudioMuse-AI doesn't hold up the page
+        if app.worker.check_plugin()["state"] == "ok" and app.store.song_ids():
+            app.worker.refresh_plugin(app.store.song_ids())
+
+    threading.Thread(target=plugin, name="plugin", daemon=True).start()
     server = make_server(app)
     print(f"Siansa Beats {__version__} on port {config.port}", flush=True)
     try:
