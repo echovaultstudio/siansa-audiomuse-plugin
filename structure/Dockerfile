@@ -3,15 +3,13 @@
 # source, Demucs) are fussy, and if they misbehave Beat This! carries on.
 #
 #   docker build -t siansa-structure structure                                   # CPU
-#   docker build -t siansa-structure:cuda --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu121 \
-#     --build-arg NATTEN_BUILD=torch230cu121 structure                            # NVIDIA GPU
+#   docker build -t siansa-structure:cuda --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu121 structure
 FROM python:3.10-slim-bookworm
 LABEL org.opencontainers.image.source="https://github.com/echovaultstudio/siansa-audiomuse-plugin" \
       org.opencontainers.image.description="Siansa Structure: All-In-One's sections of a song, for Siansa Beats" \
       org.opencontainers.image.licenses="MIT"
 
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
-ARG NATTEN_BUILD=torch230cpu
 # madmom from GitHub (the release on PyPI doesn't build on today's numpy), pinned.
 ARG MADMOM_COMMIT=27f032e8947204902c675e5e341a3faf5dc86dae
 
@@ -28,7 +26,10 @@ RUN pip install --upgrade pip==24.2
 RUN printf 'torch==2.3.1\ntorchaudio==2.3.1\nnumpy==1.26.4\n' > /constraints.txt
 RUN pip install --index-url "$TORCH_INDEX" torch==2.3.1 torchaudio==2.3.1 \
  && pip install -c /constraints.txt numpy==1.26.4 cython==3.0.11 scipy==1.13.1 mido==1.3.2
-RUN pip install -c /constraints.txt "natten==0.17.1+${NATTEN_BUILD}" -f https://shi-labs.com/natten/wheels/
+# NATTEN's four functions All-In-One uses, in plain PyTorch (natten_torch): NATTEN's own wheels are on a site whose
+# certificate has expired, and building it needs CUDA's compilers. CI checks ours against NATTEN built from source.
+COPY natten_torch /tmp/natten_torch
+RUN pip install -c /constraints.txt /tmp/natten_torch && rm -rf /tmp/natten_torch
 RUN pip install -c /constraints.txt --no-build-isolation "git+https://github.com/CPJKU/madmom@${MADMOM_COMMIT}"
 RUN pip install -c /constraints.txt demucs==4.0.1 soundfile==0.12.1 librosa==0.10.2.post1 matplotlib==3.9.2 \
       huggingface-hub==0.25.2 hydra-core==1.3.2 omegaconf==2.3.0 tqdm \

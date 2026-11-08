@@ -21,6 +21,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  natten:
+    name: Our NATTEN functions against NATTEN's own
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - name: torch, and NATTEN built from source (CPU)
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch==2.3.1
+          pip install numpy==1.26.4 cmake ninja
+          NATTEN_N_WORKERS=4 pip install --no-build-isolation -v natten==0.17.1 2>&1 | tail -20
+      - name: The same answers
+        run: python structure/check_natten.py structure/natten_torch/natten/functional.py
+
   image:
     name: Image with All-In-One (${{ matrix.variant }})
     runs-on: ubuntu-latest
@@ -31,11 +48,9 @@ jobs:
         include:
           - variant: cpu
             index: https://download.pytorch.org/whl/cpu
-            natten: torch230cpu
             suffix: ""
           - variant: cuda
             index: https://download.pytorch.org/whl/cu121
-            natten: torch230cu121
             suffix: "-cuda"
     permissions:
       contents: read
@@ -54,7 +69,7 @@ jobs:
         run: |
           set -o pipefail
           docker build --progress=plain --build-arg TORCH_INDEX=${{ matrix.index }} \
-            --build-arg NATTEN_BUILD=${{ matrix.natten }} -t siansa-structure:test structure 2>&1 | tail -60
+            -t siansa-structure:test structure 2>&1 | tail -60
           docker image ls siansa-structure:test --format 'Image size: {{.Size}}'
 
       - name: Songs with known sections
