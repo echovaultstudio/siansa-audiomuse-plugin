@@ -80,8 +80,8 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
 
 ## Use it
 
-1. Tick the **libraries to analyse**. It reads their songs from Navidrome and works through them a song at a time;
-   the top shows the song
+1. Tick the **libraries to analyse** and press **Start analysis**. It reads their songs from Navidrome and works
+   through them a song at a time; the top shows the song
    and the step (downloading, decoding, loading the model, analysing), and **Activity** what's been done, with the
    time each step took. The first song takes longer while the model loads.
 2. **The table**, a row a song:
@@ -97,7 +97,7 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
      range (trance 125–150, drum & bass 160–180…, with 3 % to spare). Half or double the genre's tempo is the
      same beat counted another way (a drum & bass song read at 87 is 174), so it's noted, not flagged; so is an
      intro or outro at another tempo than the rest of the song.
-   - **Worth a listen** shows only the songs where readings really disagree (a warning).
+   - **Worth a listen** shows only the songs where readings really disagree (a warning). **Done** shows the songs analysed, **Failed** those that failed.
 3. **Tap a song** to open it:
    - play it: **Clicks on the beats** ticks on every beat, higher on each downbeat. If the clicks sit on the kick
      drum, the beats are right; if they drift or fall between, they're not;
@@ -142,8 +142,9 @@ addresses or passwords): what the grid and phrases are worked out from, to tune 
 `:dev-cuda` (GPU): put that tag in the YAML instead of `latest` / `cuda` and restart. It keeps the same data; going
 back to `:cuda` keeps it too.
 
-**Libraries.** Each ticked library shows how many of its songs are done. Untick one to leave it out: its songs not
-yet analysed leave the queue, the ones done stay. The choice is kept across restarts, and the ticked libraries are
+**Libraries.** Each ticked library shows how many of its songs are done. Ticks take effect with **Start analysis**.
+Untick one and start to leave it out: its songs not yet analysed leave the queue, the ones done stay, and **Remove
+them** next to it forgets them (their beats and marks; nothing changes on Navidrome). The choice is kept across restarts, and the ticked libraries are
 read again every 6 hours for new songs (**Look for new songs** does it now). The next song is downloaded and decoded
 while the model works on this one, so the model rarely waits for the network; the top says how long each song takes,
 to judge how long a library will. The table shows the first 200 songs, the search finding the rest, and **Export
@@ -177,7 +178,7 @@ On the server, after setting it up:
 
 1. `docker compose ps` says **healthy**, and http://\<server\>:8090/api/health answers `"status": "ok"`.
 2. The page's pills are green for Navidrome (and AudioMuse-AI if you set it).
-3. **Tick a library**: the songs appear, the first one loads the model (the pill then says how long it took),
+3. **Tick a library** and **Start analysis**: the songs appear, the first one loads the model (the pill then says how long it took),
    and the rest follow. A song that fails says why in its row and in Activity, and the queue goes on.
 4. Open Control (or another song you know): play it with clicks on, and check the clicks sit on the beat.
 

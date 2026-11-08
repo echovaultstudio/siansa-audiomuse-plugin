@@ -15,7 +15,7 @@ API (JSON):
     GET  /api/status                  the queue, what's being done, setup and recent activity
     GET  /api/libraries               Navidrome's libraries, each with "on" (analysed) and its songs here and done
     GET  /api/songs                   the songs with their readings and what they say together, with ?find=,
-                                      ?show=differ|failed and ?limit= (200 when not given, at most 1000)
+                                      ?show=differ|done|failed and ?limit= (200 when not given, at most 1000)
     GET  /api/songs/<id>              one song, with every beat and downbeat and its tempo along the song
     GET  /api/beats/<id>              just the beat grid (the shape the plugin will read later)
     GET  /api/audio/<id>              the song for the page's player (Navidrome's MP3, passed through)
@@ -28,6 +28,7 @@ API (JSON):
     POST /api/songs/<id>/analyse      analyse it again
     POST /api/libraries {"ids"}       analyse these libraries (and no others); read them now, and every 6 hours
     POST /api/libraries/read          read the chosen libraries now, for new songs
+    DELETE /api/libraries/<id>/songs  forget the songs of a library that's left out, with what was found in them
     POST /api/analyse-all             analyse every song again
     POST /api/plugin/refresh          read the plugin's readings again
     POST /api/pause, /api/resume
@@ -109,7 +110,8 @@ class App:
         """The table's songs: those ``find`` finds, of those to ``show`` (all, "differ" or "failed"), at most
         ``limit`` (``0``: every one, for the exports)."""
         limit = None if limit == 0 else min(int(limit or self.SONGS_SHOWN), self.SONGS_MOST)
-        rows = self.store.overview(self.config.model, find, show == "failed", None if show == "differ" else limit)
+        rows = self.store.overview(self.config.model, find, show if show in ("done", "failed") else None,
+                                   None if show == "differ" else limit)
         rows = [self.song_row(r) for r in rows]
         if show == "differ":
             rows = [r for r in rows if any(level == "warn" for level, _ in r["verdict"])]
@@ -410,6 +412,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guard():
             return
         path = self.path.split("?", 1)[0]
+        m = re.fullmatch(r"/api/libraries/([^/]+)/songs", path)
+        if m:
+            try:
+                return self._json({"removed": self.app.worker.remove_library(_id(m[1]))})
+            except ValueError as e:
+                return self._error(HTTPStatus.CONFLICT, str(e))
+            except SubsonicError as e:
+                return self._error(HTTPStatus.BAD_GATEWAY, str(e))
         m = re.fullmatch(r"/api/songs/([^/]+)/marks/(\d+)", path)
         if m:
             removed = self.app.store.remove_mark(_id(m[1]), int(m[2]))

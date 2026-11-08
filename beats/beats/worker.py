@@ -97,6 +97,17 @@ class Worker:
         self.store.event(f"Libraries to analyse: {names}" + (f" ({taken} songs of the others left the queue)" if taken else ""))
         return self.read_libraries() if ids else {"songs": 0, "queued": 0}
 
+    def remove_library(self, folder):
+        """Forgets the songs of a library that's left out (its results too): the number removed."""
+        folder = str(folder)
+        if folder in self.chosen():
+            raise ValueError("That library is being analysed: leave it out (and start the analysis) first")
+        names = {f["id"]: f["name"] for f in self.navidrome.libraries()}
+        removed = self.store.remove_folder(folder)
+        self.store.event(f"Removed the {removed} songs of the library {names.get(folder, folder)} (and what was found "
+                         "in them)")
+        return removed
+
     def read_libraries(self):
         """Reads every song of the chosen libraries from Navidrome, adds them and queues the new ones. Returns
         ``{"songs", "queued"}``."""
