@@ -14,7 +14,7 @@ import statistics
 
 from . import features, phrase
 
-ANALYSIS_VERSION = 8  # what's worked out from the beats: older results are worked out again from their saved beats
+ANALYSIS_VERSION = 9  # what's worked out from the beats: older results are worked out again from their saved beats
 END_SECONDS = 30.0  # each end, as the plugin's beats.SECONDS
 MIN_BEATS = 8  # fewer, and there's no tempo worth reporting
 GRID_MS = 30.0  # a beat this close to the straight grid sits on it
@@ -32,23 +32,6 @@ RELATIONS = (
     ("2/3", 2.0 / 3.0),
 )
 RELATION_TOLERANCE = 0.03  # 3 %: two readings of one song rarely differ by more when they agree
-
-# The tempos each style is usually made at, for telling which of two related readings is likely right. Keys are
-# matched as words in a genre (lower case); the first that matches wins, so the more specific come first. Room for
-# better genres later: anything that adds a genre (genres table, any source) gets checked against this.
-GENRE_RANGES = (
-    ("drum and bass", 160, 180), ("drum & bass", 160, 180), ("dnb", 160, 180), ("jungle", 155, 180),
-    ("dubstep", 135, 150), ("trap", 130, 170),
-    ("psytrance", 135, 150), ("hardstyle", 145, 160), ("hardcore", 160, 200), ("gabber", 160, 200),
-    ("trance", 125, 150), ("techno", 120, 150), ("house", 115, 132), ("garage", 125, 140),
-    ("eurodance", 120, 145), ("hi-nrg", 120, 140), ("disco", 105, 135), ("electro", 110, 135),
-    ("downtempo", 70, 115), ("trip hop", 70, 110), ("chillout", 70, 120), ("ambient", 50, 120),
-    ("hip hop", 70, 105), ("hip-hop", 70, 105), ("rap", 70, 110), ("r&b", 60, 110),
-    ("reggaeton", 85, 105), ("reggae", 60, 100), ("dancehall", 85, 110),
-    ("metal", 80, 200), ("punk", 140, 200), ("rock", 70, 180), ("pop", 70, 140),
-    ("jazz", 50, 250), ("classical", 30, 200), ("soundtrack", 30, 200),
-)
-
 
 def _fit(xs, ys):
     """Least squares line ``ys = a + b * xs``: (a, b, rms of what's left)."""
@@ -383,50 +366,6 @@ def relation(a, b, tolerance=RELATION_TOLERANCE):
     return name if abs(ratio / value - 1.0) <= tolerance else "different"
 
 
-GENRE_SLACK = 0.03  # the ranges are rough: 3 % either side still fits (Trance at 152, drum and bass at 182)
-
-
-def genre_range(genres):
-    """``(low, high, genre)``: the usual tempos of the first of ``genres`` (labels) that :data:`GENRE_RANGES`
-    knows, or ``None``."""
-    for label in genres or ():
-        text = " " + " ".join(label.lower().replace("/", " ").replace(",", " ").replace("_", " ").split()) + " "
-        for key, low, high in GENRE_RANGES:
-            if f" {key} " in text:
-                return low, high, label
-    return None
-
-
-def genre_fit(bpm, low, high):
-    """How ``bpm`` fits a genre's usual ``low``–``high``: ``None`` inside it, ``"half"`` when it's half a tempo
-    inside it (the beat counted at half speed, as a half-time intro), ``"double"`` the other way round, else
-    ``"outside"``. Half and double are the same beat, so they aren't a disagreement."""
-    if not bpm:
-        return None
-    low, high = low * (1 - GENRE_SLACK), high * (1 + GENRE_SLACK)
-    if low <= bpm <= high:
-        return None
-    if low <= bpm * 2 <= high:
-        return "half"
-    if low <= bpm / 2 <= high:
-        return "double"
-    return "outside"
-
-
-def doubled(beats, period):
-    """``beats`` with a beat put between each two a ``period`` apart: a song read at half speed, counted as a
-    DJ counts it."""
-    out = []
-    for a, b in zip(beats, beats[1:]):
-        out.append(a)
-        if abs((b - a) / period - 1.0) < 0.25:
-            out.append((a + b) / 2.0)
-    return out + beats[-1:]
-
-
-BEATLESS_OUTRO_SECONDS = 16.0  # this long without a beat at the end is a beatless outro, as the plugin reads it
-
-
 def app_ends(steady, model_beats, duration, end_seconds=END_SECONDS):
     """The beat grid at each end of the song, in the shape the Siansa app reads from the Siansa plugin (its
     ``BeatEnd``): ``intro_bpm``, ``intro_beat_ms`` (the first beat), ``intro_bar_ms`` (the first downbeat),
@@ -471,10 +410,16 @@ def app_ends(steady, model_beats, duration, end_seconds=END_SECONDS):
     return out
 
 
-def analyse(beats, downbeats, duration, levels=None, genres=()):
+BEATLESS_OUTRO_SECONDS = 16.0  # this long without a beat at the end is a beatless outro, as the plugin reads it
+
+
+def analyse(beats, downbeats, duration, levels=None):
     """Everything Siansa's comparison shows for one song, from Beat This!'s beats and downbeats (seconds), the
-    song's length (seconds), its sound's ``levels`` (:func:`beats.features.measure`, for bars and phrases) and its
-    ``genres`` (a song read at half its genre's speed gets its grid at the genre's: 87 is 174 for drum & bass)."""
+    song's length (seconds) and its sound's ``levels`` (:func:`beats.features.measure`, for bars and phrases).
+
+    The grid is the tempo the model heard: genre tags never change it (they're partly guessed). A song heard at 87
+    stays at 87; the app counts half and double as the same tempo, and doubles anything under 100
+    itself, so it blends into 174 drum and bass as it would by ear."""
     whole = tempo(beats) or {}
     main, main_share = main_tempo(beats)
     fit = whole.get("bpm")
@@ -486,13 +431,7 @@ def analyse(beats, downbeats, duration, levels=None, genres=()):
     intro_bpm, intro_share, _ = end_tempo(beats, 0.0, intro_end)
     outro_bpm, outro_share, _ = end_tempo(beats, outro_start, duration + 1.0)
     per_bar, bar_share = bars(beats, downbeats)
-    counted = "same"
-    found = genre_range(genres)
-    if bpm and found and genre_fit(bpm, found[0], found[1]) == "half":
-        counted = "double"
-        steady = with_sound(steady_grid(doubled(beats, 60.0 / bpm), downbeats, bpm * 2, 4), levels) or {}
-    else:
-        steady = with_sound(steady_grid(beats, downbeats, bpm, per_bar or 4), levels) or {}
+    steady = with_sound(steady_grid(beats, downbeats, bpm, per_bar or 4), levels) or {}
     if steady:  # the even grid's bars, not the model's downbeats, which wander in breakdowns
         per_bar = steady["per_bar"]
     return {
@@ -514,7 +453,7 @@ def analyse(beats, downbeats, duration, levels=None, genres=()):
         "grid_bpm": steady.get("bpm"),
         "on_grid": steady.get("on_grid"),
         "downbeat_source": steady.get("downbeat_source"),
-        "grid_counted": counted if steady else None,
+        "grid_counted": "same" if steady else None,
         "phrase_source": steady.get("phrase_source"),
         "from_mix": steady.get("from_mix"),
         "ends": app_ends(steady, beats, duration) if steady else None,
@@ -530,7 +469,7 @@ def analyse(beats, downbeats, duration, levels=None, genres=()):
     }
 
 
-def verdict(result, tag_bpm=None, plugin=None, genres=()):
+def verdict(result, tag_bpm=None, plugin=None):
     """What the readings say together, for the table: a list of ``(level, text)``, level ``"ok"``, ``"warn"`` or
     ``"info"``. ``result`` is :func:`analyse`'s, ``plugin`` the plugin's profile (``intro_bpm``, ``outro_bpm``)."""
     notes = []
@@ -555,16 +494,6 @@ def verdict(result, tag_bpm=None, plugin=None, genres=()):
             notes.append(("warn", f"Plugin's {end} {theirs:.1f} differs"))
         elif r:
             notes.append(("warn", f"Plugin's {end} {theirs:.1f} is {r} of this"))
-    found = genre_range(genres)
-    if found:
-        low, high, label = found
-        fits = genre_fit(bpm, low, high)
-        if fits == "half":
-            notes.append(("info", f"Counted at half speed: {bpm:.1f} is {bpm * 2:.1f} for {label}"))
-        elif fits == "double":
-            notes.append(("info", f"Counted at double speed: {bpm:.1f} is {bpm / 2:.1f} for {label}"))
-        elif fits == "outside":
-            notes.append(("warn", f"{bpm:.1f} is outside {label}'s usual {low}–{high}"))
     for end in ("intro", "outro"):
         theirs = result.get(f"{end}_bpm")
         r = relation(theirs, bpm)

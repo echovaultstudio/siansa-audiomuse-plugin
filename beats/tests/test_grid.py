@@ -85,46 +85,27 @@ class RelationTest(unittest.TestCase):
         self.assertIsNone(grid.relation(0, 120))
 
 
-class GenreTest(unittest.TestCase):
-    def test_genres_find_their_range(self):
-        self.assertEqual(grid.genre_range(["Trance"])[:2], (125, 150))
-        self.assertEqual(grid.genre_range(["Progressive Trance"])[:2], (125, 150))
-        self.assertEqual(grid.genre_range(["Drum & Bass"])[:2], (160, 180))
-        self.assertEqual(grid.genre_range(["Electronic/Deep House"])[:2], (115, 132))
-        self.assertEqual(grid.genre_range(["Hip-Hop"])[:2], (70, 105))
-        self.assertIsNone(grid.genre_range(["Spoken word"]))
-        self.assertIsNone(grid.genre_range([]))
-
-    def test_the_first_known_genre_wins(self):
-        self.assertEqual(grid.genre_range(["Spoken word", "Techno"])[2], "Techno")
-
-    def test_words_not_parts_of_words(self):
-        self.assertIsNone(grid.genre_range(["Trapeze"]))
-        self.assertIsNone(grid.genre_range(["Popcorn"]))
-
-
 class VerdictTest(unittest.TestCase):
     def test_control_shows_the_plugins_misreading(self):
         result = {"bpm": 140.2, "intro_bpm": 140.3, "outro_bpm": 140.1, "steady": 0.98}
-        notes = grid.verdict(result, tag_bpm=140, plugin={"intro_bpm": 187.1, "outro_bpm": 140.0}, genres=["Trance"])
+        notes = grid.verdict(result, tag_bpm=140, plugin={"intro_bpm": 187.1, "outro_bpm": 140.0})
         texts = [t for _, t in notes]
         self.assertIn("Matches the BPM tag", texts)
         self.assertIn("Plugin's intro 187.1 is 4/3 of this", texts)
         self.assertIn("Plugin's outro agrees", texts)
         self.assertFalse(any("outside" in t for t in texts))
 
-    def test_a_tag_at_half_and_a_tempo_outside_the_genre(self):
-        notes = dict((t, level) for level, t in grid.verdict({"bpm": 93.0, "steady": 0.99}, tag_bpm=186, genres=["Trance"]))
-        self.assertEqual(notes["BPM tag 186 is double of this"], "warn")
-        self.assertEqual(notes["93.0 is outside Trance's usual 125–150"], "warn")
+    def test_a_tag_at_double(self):
+        notes = dict((t, level) for level, t in grid.verdict({"bpm": 93.0, "steady": 0.99}, tag_bpm=186))
+        self.assertEqual(notes, {"BPM tag 186 is double of this": "warn"})
 
-    def test_half_speed_for_the_genre_isnt_a_disagreement(self):
-        notes = grid.verdict({"bpm": 87.0, "steady": 0.99}, genres=["Drum And Bass"])
-        self.assertEqual(notes, [("info", "Counted at half speed: 87.0 is 174.0 for Drum And Bass")])
+    def test_genres_dont_make_notes(self):
+        # Tags are partly guessed: a song at 87 is just 87, whatever its genre says.
+        self.assertEqual(grid.verdict({"bpm": 87.0, "steady": 0.99}), [])
 
     def test_a_half_time_intro_is_noted_not_flagged(self):
         result = {"bpm": 174.0, "intro_bpm": 87.0, "intro_steady": 0.95, "outro_bpm": 174.1, "steady": 0.9}
-        self.assertEqual(grid.verdict(result, genres=["Drum And Bass"]), [("info", "Starts at half time (87.0)")])
+        self.assertEqual(grid.verdict(result), [("info", "Starts at half time (87.0)")])
 
     def test_an_end_at_another_tempo_is_noted(self):
         result = {"bpm": 174.0, "intro_bpm": 140.0, "intro_steady": 0.95, "outro_bpm": None, "outro_steady": 0.3,
@@ -237,14 +218,6 @@ class BeatlessOutroTest(unittest.TestCase):
         # 30 seconds of pads after the last beat: one.
         ends = grid.app_ends(steady, beats, beats[-1] + 30.0)
         self.assertAlmostEqual(ends["beats_until_ms"], beats[-1] * 1000, delta=1)
-
-
-class GenreFitTest(unittest.TestCase):
-    def test_half_and_double_are_the_same_beat(self):
-        self.assertIsNone(grid.genre_fit(174, 160, 180))
-        self.assertEqual(grid.genre_fit(87, 160, 180), "half")
-        self.assertEqual(grid.genre_fit(280, 125, 150), "double")
-        self.assertEqual(grid.genre_fit(105, 160, 180), "outside")
 
 
 class CurveTest(unittest.TestCase):

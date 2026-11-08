@@ -4,8 +4,8 @@ Tables:
 
 - ``songs``: each song from the chosen Navidrome libraries, with its BPM tag and its library (``folder``);
 - ``genres``: a song's genres, each with where it came from (``source``: ``tag`` for now). Room for better genres
-  later: another source (a genre model, AudioMuse-AI's labels…) adds its own rows, and the page and the checks use
-  every source;
+  later: another source (a genre model, AudioMuse-AI's labels…) adds its own rows. They're only shown: no reading
+  uses them;
 - ``jobs``: each song's place in the queue and what's happening to it;
 - ``results``: Beat This!'s readings, one row per song and model, with every beat and downbeat;
 - ``plugin``: the Siansa plugin's current readings, for comparison;

@@ -180,15 +180,15 @@ class PhraseTest(unittest.TestCase):
         notes = grid.verdict(result)
         self.assertTrue(any("Bars moved" in t for _, t in notes), notes)  # the model voted for beat 2
 
-    def test_drum_and_bass_read_at_half_speed_is_counted_at_174(self):
-        half = grid_beats(87, 180)  # the model heard every other beat
-        result = grid.analyse(half, half[::2], 180.0, song_levels(174, 180, SECTIONS, lead_bars=4),
-                              genres=["Drum & Bass"])
-        bar = 4 * 60.0 / 174
-        self.assertEqual(result["grid_counted"], "double")
-        self.assertAlmostEqual(result["grid_bpm"], 174.0, delta=0.1)
+    def test_drum_and_bass_read_at_half_speed_stays_as_heard(self):
+        # The model heard every other beat, as it did on three drum and bass songs of the owner's: the grid stays at
+        # 87 (genre tags aren't used), and the app counts it at 174 itself.
+        half = grid_beats(87, 180)
+        result = grid.analyse(half, half[::4], 180.0, song_levels(174, 180, SECTIONS, lead_bars=4))
+        self.assertEqual(result["grid_counted"], "same")
+        self.assertAlmostEqual(result["grid_bpm"], 87.0, delta=0.1)
         self.assertEqual(result["beats_per_bar"], 4)
-        self.assertAlmostEqual(result["phrase_first_ms"], 4 * bar * 1000, delta=20)
+        self.assertAlmostEqual(result["ends"]["intro_bpm"], 87.0, delta=0.1)
 
     def test_no_clear_phrases_is_flagged(self):
         result = {"bpm": 128.0, "steady": 0.99, "on_grid": 0.98, "phrase_count": 0, "phrase_big": 6, "phrase_big_on": 2}
