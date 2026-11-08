@@ -130,8 +130,18 @@ installed, a name the container can't look up…). **Read the plugin's values ag
 **Back** (the browser's or the phone's) closes a song, and the **Siansa Beats** logo goes back to all the songs.
 A song's address (`#song=…`) opens it straight away.
 
+**Section marks.** While a song plays, tap **Section starts here** (or press **M**) on every drop, breakdown or big
+change you hear. Each mark shows the bar it's nearest the start of, and whether it falls on a phrase start; tap it to
+hear it again, ✕ to take it away. Marks are kept through analysing again, show as ◆ in the table, and go out with
+**Download data**: they're what the phrase rules are checked against. About 20 songs with their drops marked is
+enough.
+
 **Download data** gives every song's beats and sound levels as one file (a few MB; song names and genres, no
 addresses or passwords): what the grid and phrases are worked out from, to tune them on real music.
+
+**Trying the dev version.** New work goes to the `dev` branch first and is published as `:dev` (CPU) and
+`:dev-cuda` (GPU): put that tag in the YAML instead of `latest` / `cuda` and restart. It keeps the same data; going
+back to `:cuda` keeps it too.
 
 To add songs, add them to the playlist and press **Analyse playlist** again: only the new ones are read.
 

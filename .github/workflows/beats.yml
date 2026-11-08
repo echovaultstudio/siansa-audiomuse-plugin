@@ -1,5 +1,6 @@
 # Siansa Beats (beats): its tests, then the Docker image with Beat This! checked against songs of known tempo
-# and bars, then (on main) published to ghcr.io/echovaultstudio/siansa-beats for the Docker server to pull.
+# and bars, then published to ghcr.io/echovaultstudio/siansa-beats for the Docker server to pull: from main as
+# latest / cuda, from dev as dev / dev-cuda (to try before it reaches main).
 name: Siansa Beats
 
 on:
@@ -100,12 +101,18 @@ jobs:
           docker image ls siansa-beats:test --format 'Image size: {{.Size}}'
 
       - name: Publish
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.event_name != 'pull_request'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           version=$(python3 -c "import re;print(re.search(r'__version__ = \"(.+)\"', open('beats/beats/__init__.py').read())[1])")
           suffix="${{ matrix.suffix }}"
-          first=$([ -z "$suffix" ] && echo latest || echo cuda)
+          if [ "$GITHUB_REF" = refs/heads/dev ]; then
+            # dev / dev-cuda: the dev branch, never latest or cuda
+            first=$([ -z "$suffix" ] && echo dev || echo dev-cuda)
+            version="$version-dev"
+          else
+            first=$([ -z "$suffix" ] && echo latest || echo cuda)
+          fi
           for tag in "$first" "$version$suffix" "sha-${GITHUB_SHA::7}$suffix"; do
             docker tag siansa-beats:test "$IMAGE:$tag" && docker push -q "$IMAGE:$tag"
           done

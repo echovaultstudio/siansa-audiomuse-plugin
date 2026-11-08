@@ -9,7 +9,7 @@
   --page: #000000; --raised: #0B0F13; --raised-2: #121820; --text: #EEF2F5; --muted: #AFC2D3; --faint: #7F93A4;
   --line: rgba(175, 194, 211, 0.16); --line-strong: rgba(175, 194, 211, 0.32);
   --amber: #FFB547; --on-amber: #1A1200; --amber-text: #FFC56E; --frost: #9DB4C8;
-  --ok: #7FD1A0; --warn: #FFB547; --bad: #FF8A80; --band: rgba(127, 209, 160, 0.10);
+  --ok: #7FD1A0; --warn: #FFB547; --bad: #FF8A80; --band: rgba(127, 209, 160, 0.10); --mark: #E879F9;
   --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
   color-scheme: dark;
@@ -18,7 +18,7 @@
   :root {
     --page: #F3F6F8; --raised: #FFFFFF; --raised-2: #EDF1F4; --text: #0C1216; --muted: #46576A; --faint: #5C6E80;
     --line: rgba(12, 18, 22, 0.10); --line-strong: rgba(12, 18, 22, 0.22); --amber-text: #8F5200; --frost: #4E6B85;
-    --ok: #1F7A45; --warn: #8F5200; --bad: #B3261E; --band: rgba(31, 122, 69, 0.10); color-scheme: light;
+    --ok: #1F7A45; --warn: #8F5200; --bad: #B3261E; --band: rgba(31, 122, 69, 0.10); --mark: #A21CAF; color-scheme: light;
   }
 }
 * { box-sizing: border-box; }
@@ -51,6 +51,11 @@ button, .btn { font: inherit; font-size: 0.9rem; border-radius: 999px; padding: 
   background: transparent; color: var(--text); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
 button:hover, .btn:hover { border-color: var(--amber); }
 button.primary { background: var(--amber); color: var(--on-amber); border-color: var(--amber); font-weight: 600; }
+button.mark { background: var(--mark); color: #1a0620; border-color: var(--mark); font-weight: 600; }
+.marks { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; align-items: center; }
+.marks .chip { display: inline-flex; gap: 6px; align-items: center; border-color: var(--mark); }
+.marks .chip button { border: 0; background: none; padding: 0 2px; color: inherit; cursor: pointer; }
+.marks .hint { color: var(--muted); font-size: 0.9em; }
 button:disabled { opacity: 0.5; cursor: default; }
 input[type=text], input[type=search], select { font: inherit; font-size: 0.9rem; border-radius: 999px; padding: 7px 12px;
   border: 1px solid var(--line-strong); background: var(--raised-2); color: var(--text); min-width: 0; }
@@ -143,12 +148,14 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
     </div>
     <audio id="player" controls preload="none" crossorigin="anonymous"></audio>
     <div class="controls" style="margin-bottom:10px">
+      <button class="mark" id="mark" title="Tap it (or press M) where a new section starts: a drop, a breakdown, the beat coming in">Section starts here</button>
       <label class="toggle"><input type="checkbox" id="clicks" checked> Clicks on the beats</label>
       <label class="toggle">from <select id="click-source"><option value="grid">the steady grid</option><option value="model">the model's beats</option></select></label>
       <label class="toggle">Click volume <input type="range" id="click-volume" min="0" max="1" step="0.05" value="0.5"></label>
     </div>
+    <div class="marks" id="d-marks" aria-live="polite"></div>
     <canvas id="beatview" height="120" aria-label="Beats around the playhead"></canvas>
-    <div class="legend"><span><i style="background:var(--frost)"></i>beat</span><span><i style="background:var(--amber)"></i>downbeat (bar number)</span><span><i style="background:var(--ok)"></i>phrase start (every 8 or 16 bars)</span><span id="other-legend"><i style="background:var(--faint);height:6px"></i>the model's beats</span><span><i style="background:var(--text)"></i>now</span><span>8 seconds around what's playing; tap to jump</span></div>
+    <div class="legend"><span><i style="background:var(--frost)"></i>beat</span><span><i style="background:var(--amber)"></i>downbeat (bar number)</span><span><i style="background:var(--ok)"></i>phrase start (every 8 or 16 bars)</span><span><i style="background:var(--mark)"></i>your section marks</span><span id="other-legend"><i style="background:var(--faint);height:6px"></i>the model's beats</span><span><i style="background:var(--text)"></i>now</span><span>8 seconds around what's playing; tap to jump</span></div>
     <canvas id="curve" height="170" aria-label="Tempo along the song"></canvas>
     <div class="legend"><span><i style="background:var(--amber)"></i>Beat This! tempo</span><span><i style="background:var(--ok)"></i>BPM tag</span><span><i style="background:var(--bad)"></i>plugin's intro / outro</span><span><i style="background:var(--line-strong)"></i>the ends the plugin measures</span><span><i style="background:var(--band);height:10px"></i>genre's usual range</span></div>
     <div id="d-notes"></div>
@@ -277,7 +284,7 @@ function drawRows() {
     const r = s.result || {}, p = s.plugin || {};
     const state = BUSY.includes(s.state) ? "busy" : s.state;
     return `<tr data-id="${esc(s.id)}" aria-selected="${s.id === selected}">
-      <td><div class="big">${esc(s.title)}</div><div class="sub">${esc(s.artist)}</div></td>
+      <td><div class="big">${esc(s.title)}${s.marks ? ` <span class="sub" style="color:var(--mark)" title="Your section marks">◆ ${s.marks}</span>` : ""}</div><div class="sub">${esc(s.artist)}</div></td>
       <td>${s.genres.map((g) => `<span class="chip" title="from ${esc(g.source)}">${esc(g.label)}</span>`).join("") || '<span class="sub">–</span>'}</td>
       <td class="num">${s.tag_bpm ? fmt(s.tag_bpm, 0) : "–"}</td>
       <td class="num">${fmt(p.intro_bpm)}<div class="sub">${fmt(p.outro_bpm)}</div></td>
@@ -333,7 +340,7 @@ async function openSong(id, newSong, fromHistory) {
     ["Genre's usual range", detail.genre_range ? `${detail.genre_range[0]}–${detail.genre_range[1]} BPM` : "–"],
   ];
   $("d-facts").innerHTML = facts.map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
-  drawCurve();
+  drawCurve(); drawMarks();
 }
 function closeSong() { $("detail").hidden = true; selected = null; detail = null; $("player").pause(); drawRows(); }
 // Back (the browser's, a phone's or the ✕) closes the song; the logo goes back to all the songs.
@@ -376,6 +383,8 @@ function drawBeatView() {
   g.clearRect(0, 0, w, h);
   if (!detail) return;
   const [beats, downs, other, phrases] = shownBeats();
+  g.fillStyle = css("--mark");  // the owner's marks, under the beats
+  for (const m of detail.marks || []) if (m.seconds >= t0 && m.seconds <= t0 + span) { g.fillRect(x(m.seconds) - 3, 0, 6, h); }
   g.font = "11px " + css("--mono");
   g.fillStyle = css("--faint");  // the other set, small along the bottom, to see where they part
   for (const b of other) if (b >= t0 && b <= t0 + span) g.fillRect(x(b) - 1, h - 8, 2, 6);
@@ -414,6 +423,8 @@ function drawCurve() {
   line(p.intro_bpm, css("--bad"), 0, Math.min(end, dur)); line(p.outro_bpm, css("--bad"), Math.max(0, dur - end), dur);
   g.fillStyle = css("--ok");  // the phrase starts, as ticks along the top
   for (const t of (detail.grid && detail.grid.phrases) || []) g.fillRect(x(t) - 1, 10, 2, 8);
+  g.fillStyle = css("--mark");  // the owner's marks, along the bottom
+  for (const m of detail.marks || []) g.fillRect(x(m.seconds) - 2, h - 28, 4, 10);
   if (pts.length) { g.strokeStyle = css("--amber"); g.lineWidth = 2; g.beginPath(); pts.forEach(([t, v], i) => i ? g.lineTo(x(t), y(v)) : g.moveTo(x(t), y(v))); g.stroke(); }
   const now = $("player").currentTime || 0; g.fillStyle = css("--text"); g.fillRect(x(now) - 1, 10, 2, h - 30);
   g.fillStyle = css("--faint"); g.fillText("0", 40, h - 4); g.fillText(fmt(dur / 60) + " min", w - 60, h - 4);
@@ -435,7 +446,50 @@ function shownBeats() {
   return [...model, grid ? grid.beats : [], []];
 }
 const near = (list, t) => list.some((d) => Math.abs(d - t) < 0.03);
-$("click-source").addEventListener("change", () => { resetClicks(); drawBeatView(); });
+$("click-source").addEventListener("change", () => { resetClicks(); drawBeatView(); drawMarks(); });
+
+// ---- section marks: where the owner hears a section start, to check the phrases against ----
+// Each mark is kept where it was tapped; it's shown at the bar it's nearest the start of (a tap comes a little late).
+function markBar(t) {
+  const [, downs, , phrases] = shownBeats();
+  if (!downs.length) return null;
+  let i = 0;
+  for (let k = 0; k < downs.length; k++) if (Math.abs(downs[k] - t) < Math.abs(downs[i] - t)) i = k;
+  const earlier = phrases.filter((p) => p <= downs[i] + 0.03);
+  const last = earlier.length ? downs.findIndex((d) => Math.abs(d - earlier[earlier.length - 1]) < 0.03) : -1;
+  return {bar: i + 1, phraseBar: last >= 0 ? i - last : null, hasPhrases: phrases.length > 0};
+}
+const clock = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
+function drawMarks() {
+  const list = (detail && detail.marks) || [];
+  $("d-marks").innerHTML = list.length ? list.map((m) => {
+    const at = markBar(m.seconds);
+    const where = !at ? "" : !at.hasPhrases ? ` · bar ${at.bar}` : at.phraseBar === 0 ? ` · bar ${at.bar} · on a phrase start ✓` :
+      ` · bar ${at.bar} · ${at.phraseBar === null ? "before the first phrase" : at.phraseBar + " bars after a phrase start"}`;
+    return `<span class="chip"><button data-jump="${m.seconds}" title="Play from just before it">${clock(m.seconds)}${where}</button>` +
+      `<button data-unmark="${m.id}" aria-label="Take this mark away">✕</button></span>`;
+  }).join("") : `<span class="hint">Tap <b>Section starts here</b> (or press M) on every drop, breakdown and big change you hear.</span>`;
+}
+async function addMark() {
+  if (!detail || !selected) return;
+  const at = Math.max(0, ($("player").currentTime || 0) - 0.15);  // a tap comes about 150 ms after the sound
+  try { detail.marks = (await api(`api/songs/${encodeURIComponent(selected)}/marks`, {method: "POST", body: JSON.stringify({seconds: at})})).marks; }
+  catch (e) { banner("Couldn't save the mark: " + e.message); return; }
+  drawMarks(); drawCurve(); drawBeatView();
+}
+$("mark").addEventListener("click", addMark);
+document.addEventListener("keydown", (e) => {
+  if ((e.key === "m" || e.key === "M") && !$("detail").hidden && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); addMark(); }
+});
+$("d-marks").addEventListener("click", async (e) => {
+  const jump = e.target.closest("[data-jump]"), unmark = e.target.closest("[data-unmark]");
+  if (jump) { const p = $("player"); p.currentTime = Math.max(0, Number(jump.dataset.jump) - 4); p.play(); }
+  if (unmark) {
+    try { detail.marks = (await api(`api/songs/${encodeURIComponent(selected)}/marks/${unmark.dataset.unmark}`, {method: "DELETE"})).marks; }
+    catch (err) { banner("Couldn't take the mark away: " + err.message); return; }
+    drawMarks(); drawCurve(); drawBeatView();
+  }
+});
 
 // ---- clicks on the beats, timed by the audio clock ----
 let audioCtx = null, clickGain = null, scheduled = new Set(), lastPos = 0;

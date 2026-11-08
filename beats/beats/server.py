@@ -20,6 +20,8 @@ API (JSON):
     GET  /api/audio/<id>              the song for the page's player (Navidrome's MP3, passed through)
     GET  /api/export.csv              the table as CSV
     GET  /api/export.json             every song's beats and sound levels, to tune the grid and phrases on
+    POST /api/songs/<id>/marks        {"seconds": 67.4}: the owner heard a section start there
+    DELETE /api/songs/<id>/marks/<n>  takes a mark away
     POST /api/scan {"playlist"}       read the playlist, queue its new songs
     POST /api/songs/<id>/analyse      analyse it again
     POST /api/analyse-all             analyse every song again
@@ -111,6 +113,7 @@ class App:
         row["tempo_curve"] = grid.tempo_curve(row["beats"])
         row["grid"] = self.steady_grid(full)
         row["end_seconds"] = grid.END_SECONDS
+        row["marks"] = self.store.marks(song_id)
         return row
 
     def steady_grid(self, full):
@@ -136,7 +139,8 @@ class App:
                         "genres": [g["label"] for g in self.store.genres(row["id"])],
                         "duration": row.get("duration"), "tag_bpm": row.get("tag_bpm"),
                         "result": {k: v for k, v in full.items() if k not in ("beats", "downbeats", "levels")},
-                        "beats": full["beats"], "downbeats": full["downbeats"], "levels": full.get("levels")})
+                        "beats": full["beats"], "downbeats": full["downbeats"], "levels": full.get("levels"),
+                        "marks": [m["seconds"] for m in self.store.marks(row["id"])]})
         return {"version": __version__, "model": self.config.model, "songs": out}
 
     def beats(self, song_id):
@@ -338,6 +342,18 @@ class Handler(BaseHTTPRequestHandler):
             if path in ("/api/pause", "/api/resume"):
                 app.worker.pause(path == "/api/pause")
                 return self._json({"paused": app.worker.paused})
+            m = re.fullmatch(r"/api/songs/([^/]+)/marks", path)
+            if m:
+                song_id = _id(m[1])
+                if not app.store.song(song_id):
+                    return self._error(HTTPStatus.NOT_FOUND, "no such song")
+                try:
+                    seconds = float(body.get("seconds"))
+                except (TypeError, ValueError):
+                    return self._error(HTTPStatus.BAD_REQUEST, "seconds needed")
+                if not 0 <= seconds < 24 * 3600:
+                    return self._error(HTTPStatus.BAD_REQUEST, "seconds out of range")
+                return self._json({"id": app.store.add_mark(song_id, seconds), "marks": app.store.marks(song_id)})
             m = re.fullmatch(r"/api/songs/([^/]+)/analyse", path)
             if m:
                 song_id = _id(m[1])
@@ -353,7 +369,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         if not self._guard():
             return
-        m = re.fullmatch(r"/api/songs/([^/]+)", self.path.split("?", 1)[0])
+        path = self.path.split("?", 1)[0]
+        m = re.fullmatch(r"/api/songs/([^/]+)/marks/(\d+)", path)
+        if m:
+            removed = self.app.store.remove_mark(_id(m[1]), int(m[2]))
+            return self._json({"removed": removed, "marks": self.app.store.marks(_id(m[1]))})
+        m = re.fullmatch(r"/api/songs/([^/]+)", path)
         if not m:
             return self._error(HTTPStatus.NOT_FOUND, "not found")
         self.app.store.remove(_id(m[1]))
