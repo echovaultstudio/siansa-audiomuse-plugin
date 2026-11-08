@@ -185,6 +185,7 @@ class App:
             "counts": counts,
             "current": current,
             "next": preparing,
+            "regridding": dict(worker.regridding) if worker.regridding else None,
             "libraries": {"chosen": self.store.setting("folders") or [], "read_at": self.store.setting("library_read_at")},
             "paused": worker.paused,
             "last_error": worker.last_error,
@@ -482,13 +483,12 @@ def main():
             app.store.event(f"Navidrome answers ({info.get('type') or 'server'} {info.get('version') or ''})".strip())
         except SubsonicError as e:
             app.store.event(f"Navidrome doesn't answer: {e}", "error")
-    app.worker.regrid()
-
-    def plugin():  # in the background: a slow AudioMuse-AI doesn't hold up the page
+    def background():  # after the page is up: a big library takes minutes, and a slow AudioMuse-AI can't hold it up
+        app.worker.regrid()
         if app.worker.check_plugin()["state"] == "ok" and app.store.song_ids():
             app.worker.refresh_plugin(app.store.song_ids())
 
-    threading.Thread(target=plugin, name="plugin", daemon=True).start()
+    threading.Thread(target=background, name="start", daemon=True).start()
     server = make_server(app)
     print(f"Siansa Beats {__version__} on port {config.port}", flush=True)
     try:

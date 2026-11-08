@@ -383,6 +383,13 @@ class ServiceTest(Base):
         # Temporary downloads are gone.
         self.assertEqual([f for f in os.listdir(self.app.config.data_dir) if f.startswith("song-")], [])
 
+    def test_status_shows_songs_being_worked_out_again(self):
+        self.start()
+        self.app.worker.regridding = {"done": 3, "total": 10}
+        self.assertEqual(self.call("/api/status")["regridding"], {"done": 3, "total": 10})
+        self.app.worker.regridding = None
+        self.assertIsNone(self.call("/api/status")["regridding"])
+
     def test_results_of_an_older_version_are_worked_out_again_from_their_beats(self):
         self.start()
         self.call("/api/libraries", "POST", {"ids": ["1"]})

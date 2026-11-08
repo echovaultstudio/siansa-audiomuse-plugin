@@ -37,6 +37,7 @@ class Worker:
         self.data_dir = data_dir
         self.model_name = model_name
         self.paused = False
+        self.regridding = None  # {"done", "total"} while older results are worked out again (after an update)
         self.current = None  # {"id", "title", "artist", "step", "since"}: in the model
         self.preparing = None  # the same, for the next song being downloaded and decoded
         self.last_error = None
@@ -153,15 +154,25 @@ class Worker:
     def regrid(self):
         """Works out again, from their saved beats, the results of an older Siansa Beats (no model needed)."""
         stale = self.store.stale_results(grid.ANALYSIS_VERSION)
-        for song_id, model in stale:
-            row = self.store.result(song_id, model, with_beats=True)
-            song = self.store.song(song_id) or {}
-            if row and row.get("beats"):
-                self.store.update_result(song_id, model, grid.analyse(row["beats"], row["downbeats"],
-                                                                      song.get("duration") or row["beats"][-1],
-                                                                      row.get("levels")))
         if stale:
-            self.store.event(f"Worked out the tempo again for {len(stale)} songs from their saved beats")
+            self.store.event(f"Working out {len(stale)} songs again from their saved beats (an update changed how)…")
+            self.regridding = {"done": 0, "total": len(stale)}
+        started = time.monotonic()
+        for song_id, model in stale:
+            try:
+                row = self.store.result(song_id, model, with_beats=True)
+                song = self.store.song(song_id) or {}
+                if row and row.get("beats"):
+                    self.store.update_result(song_id, model, grid.analyse(row["beats"], row["downbeats"],
+                                                                          song.get("duration") or row["beats"][-1],
+                                                                          row.get("levels")))
+            except Exception as e:  # one odd song never stops the rest
+                self.store.event(f"Couldn't work out {song_id} again: {e}", "warn")
+            self.regridding["done"] += 1
+        self.regridding = None
+        if stale:
+            self.store.event(f"Worked out {len(stale)} songs again from their saved beats in "
+                             f"{time.monotonic() - started:.0f}s")
         unheard = self.store.without_levels()
         for song_id in unheard:
             self.store.queue(song_id, force=True)
