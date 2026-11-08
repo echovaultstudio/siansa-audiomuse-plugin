@@ -155,7 +155,7 @@ def _weighted_median(pairs):
 
 
 GRID_HIT = 0.040  # a model beat this close (seconds) to the steady grid sits on it
-GRID_MIN_SHARE = 0.6  # fewer of the model's beats on one steady grid, and the song isn't at one tempo
+GRID_MIN_SHARE = 0.7  # less on one steady grid (of the model's beats, or of the grid's beats heard), and the song isn't at one tempo
 END_MIN_SHARE = 0.5  # an end that holds one tempo for less than half its beat has no steady beat
 
 
@@ -173,25 +173,37 @@ def steady_grid(beats, downbeats, bpm, per_bar=4):
     if not bpm or len(beats) < MIN_BEATS:
         return None
     period = 60.0 / bpm
-    # The phase most beats agree on, in 5 ms steps, each beat counting for those within GRID_HIT of it.
-    steps = max(1, int(period / 0.005))
-    votes = [0] * steps
-    reach = int(GRID_HIT / 0.005)
-    for b in beats:
-        k = int((b % period) / period * steps)
-        for d in range(-reach, reach + 1):
-            votes[(k + d) % steps] += 1
-    origin = votes.index(max(votes)) / steps * period
-    # Refine the tempo and phase with a line through the beats on that grid (twice: the first pass narrows it).
-    for _ in range(2):
-        on = [(round((b - origin) / period), b) for b in beats if abs(_offset(b, origin, period)) <= GRID_HIT]
-        if len(on) < MIN_BEATS:
-            return None
-        origin, period, _ = _fit([n for n, _ in on], [b for _, b in on])
-        if period <= 0:
-            return None
+    # Number the beats one after another from a beat in the middle of the song, each by its gap to the last one that
+    # fitted, so a tempo a fraction off (174.44 for a song at 174) can't make one stretch a beat off from the next,
+    # and extra beats heard in a breakdown (half a beat off) are left out. Then one line through them gives the
+    # tempo and phase; twice, as the sharper tempo numbers long gaps better.
+    best = None
+    for anchor in _anchors(len(beats)):
+        fit = period
+        for _ in range(3):
+            numbered = _number(beats, fit, anchor)
+            if len(numbered) < MIN_BEATS:
+                break
+            origin, fit = _robust_fit(numbered)
+            if fit <= 0:
+                break
+        else:
+            hits = sum(1 for b in beats if abs(_offset(b, origin, fit)) <= GRID_HIT)
+            if best is None or hits > best[0]:
+                best = (hits, origin, fit)
+        if best and best[0] >= 0.9 * len(beats):
+            break
+    if best is None:
+        return None
+    _, origin, period = best
     hits = sum(1 for b in beats if abs(_offset(b, origin, period)) <= GRID_HIT)
-    share = hits / len(beats)
+    # The share on the grid, two ways: of the model's beats (extra beats heard in a breakdown count against it), and
+    # of the grid's beats the model heard (a quiet stretch counts against it). A song at one tempo does well on at
+    # least one; a song that changes tempo on neither.
+    span = [origin + n * period for n in range(math.ceil((beats[0] - origin) / period),
+                                                   math.floor((beats[-1] - origin) / period) + 1)]
+    heard = _heard(span, beats)
+    share = max(hits / len(beats), heard / len(span) if span else 0.0)
     if share < GRID_MIN_SHARE:
         return None
     first = math.ceil((beats[0] - period / 2 - origin) / period)
@@ -240,6 +252,55 @@ def with_sound(steady, levels):
         phrases=downs[found::about["bars"]] if found is not None else [], phrase_bars=about["bars"],
         phrase_big=about["big"], phrase_big_on=about["big_on"])
     return steady
+
+
+def _anchors(count):
+    """Beats to number a song from: its middle, then further out, in case the middle one is an extra beat."""
+    return sorted({min(count - 1, max(0, int(count * f))) for f in (0.5, 0.3, 0.7, 0.15, 0.85)},
+                  key=lambda i: abs(i - count / 2))
+
+
+def _number(beats, period, anchor):
+    """``[(n, seconds)]``: the beats that fit a grid of ``period`` counted from ``beats[anchor]`` (n = 0), each by
+    its gap to the last one that fitted, both ways along the song."""
+    allow = min(GRID_HIT * 1.5, period * 0.2)
+    out = [(0, beats[anchor])]
+    for direction in (1, -1):
+        last_n, last_b = 0, beats[anchor]
+        i = anchor + direction
+        while 0 <= i < len(beats):
+            k = (beats[i] - last_b) / period
+            n = round(k)
+            if n != 0 and abs(k - n) * period <= allow:
+                last_n, last_b = last_n + n, beats[i]
+                out.append((last_n, last_b))
+            i += direction
+    return sorted(out)
+
+
+def _robust_fit(numbered):
+    """``(origin, period)`` of a line through ``[(n, seconds)]``, leaving out those more than :data:`GRID_HIT` off
+    it (a beat the model placed late in a fill) and fitting again."""
+    ns, ts = [n for n, _ in numbered], [t for _, t in numbered]
+    origin, period, _ = _fit(ns, ts)
+    for _ in range(3):
+        kept = [(n, t) for n, t in numbered if abs(t - (origin + n * period)) <= GRID_HIT]
+        if len(kept) < MIN_BEATS or len(kept) == len(ns):
+            break
+        ns, ts = [n for n, _ in kept], [t for _, t in kept]
+        origin, period, _ = _fit(ns, ts)
+    return origin, period
+
+
+def _heard(grid_beats, beats):
+    """How many of ``grid_beats`` have one of the model's ``beats`` within :data:`GRID_HIT` (both sorted)."""
+    found, j = 0, 0
+    for g in grid_beats:
+        while j < len(beats) and beats[j] < g - GRID_HIT:
+            j += 1
+        if j < len(beats) and abs(beats[j] - g) <= GRID_HIT:
+            found += 1
+    return found
 
 
 def _offset(t, origin, period):

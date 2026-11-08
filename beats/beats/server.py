@@ -19,6 +19,7 @@ API (JSON):
     GET  /api/beats/<id>              just the beat grid (the shape the plugin will read later)
     GET  /api/audio/<id>              the song for the page's player (Navidrome's MP3, passed through)
     GET  /api/export.csv              the table as CSV
+    GET  /api/export.json             every song's beats and sound levels, to tune the grid and phrases on
     POST /api/scan {"playlist"}       read the playlist, queue its new songs
     POST /api/songs/<id>/analyse      analyse it again
     POST /api/analyse-all             analyse every song again
@@ -122,6 +123,21 @@ class App:
         else:
             beats, bpm, per_bar = full["beats"], full["bpm"], full.get("beats_per_bar") or 4
         return grid.with_sound(grid.steady_grid(beats, full["downbeats"], bpm, per_bar), full.get("levels"))
+
+    def export(self):
+        """Every analysed song with what the grid and phrases are worked out from (the model's beats and downbeats,
+        the sound's levels) and what they came to: to tune them on real music. Song names and genres, no addresses."""
+        out = []
+        for row in self.store.overview(self.config.model):
+            full = self.store.result(row["id"], self.config.model, with_beats=True)
+            if not full:
+                continue
+            out.append({"id": row["id"], "artist": row.get("artist"), "title": row.get("title"),
+                        "genres": [g["label"] for g in self.store.genres(row["id"])],
+                        "duration": row.get("duration"), "tag_bpm": row.get("tag_bpm"),
+                        "result": {k: v for k, v in full.items() if k not in ("beats", "downbeats", "levels")},
+                        "beats": full["beats"], "downbeats": full["downbeats"], "levels": full.get("levels")})
+        return {"version": __version__, "model": self.config.model, "songs": out}
 
     def beats(self, song_id):
         """The beat grid as the plugin will read it: the steady grid when the song is at one tempo (``steady``
@@ -281,6 +297,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(app.navidrome.playlists())
             if path == "/api/songs":
                 return self._json(app.songs())
+            if path == "/api/export.json":
+                body = json.dumps(app.export()).encode()
+                return self._send(HTTPStatus.OK, body, "application/json",
+                                  {"Content-Disposition": 'attachment; filename="siansa-beats-data.json"'})
             if path == "/api/export.csv":
                 return self._send(HTTPStatus.OK, app.csv(), "text/csv; charset=utf-8",
                                   {"Content-Disposition": 'attachment; filename="siansa-beats.csv"'})

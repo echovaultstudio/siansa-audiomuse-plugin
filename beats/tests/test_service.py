@@ -358,6 +358,17 @@ class ServiceTest(Base):
         self.assertEqual(self.app.worker.regrid(), 0)
         self.assertEqual(self.tracker.calls, 3)  # no model needed
 
+    def test_the_data_comes_out_for_tuning(self):
+        self.start()
+        self.call("/api/scan", "POST", {})
+        self.wait_done()
+        data = self.call("/api/export.json")
+        self.assertEqual(len(data["songs"]), 3)
+        song = {s["id"]: s for s in data["songs"]}["t140"]
+        self.assertTrue(song["beats"])
+        self.assertIn("bpm", song["result"])
+        self.assertNotIn(TOKEN, json.dumps(data))
+
     def test_the_plugin_line_says_what_went_wrong(self):
         self.start()
         self.app.audiomuse.token = "wrong"
