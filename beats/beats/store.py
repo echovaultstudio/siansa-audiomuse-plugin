@@ -51,11 +51,18 @@ CREATE INDEX IF NOT EXISTS marks_song ON marks (song_id);
 """
 
 RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "grid_bpm", "on_grid", "analysis_version", "downbeat_source", "grid_counted",
-                 "changes_share", "phrase_first_ms", "phrase_count", "phrase_bars", "phrase_big", "phrase_big_on", "bpm_median", "steady", "grid_ms", "grid_share", "intro_bpm", "intro_steady", "outro_bpm",
+                 "changes_share", "phrase_first_ms", "phrase_count", "phrase_bars", "phrase_big", "phrase_big_on", "phrase_source", "from_mix", "ends", "bpm_median", "steady", "grid_ms", "grid_share", "intro_bpm", "intro_steady", "outro_bpm",
                  "outro_steady", "beats_per_bar", "bar_share", "first_downbeat_ms", "beat_count", "downbeat_count",
                  "download_seconds", "decode_seconds", "model_seconds")
 PLUGIN_FIELDS = ("intro_bpm", "outro_bpm", "intro_steady", "outro_steady", "intro_bar_ms", "outro_bar_ms")
 BUSY = ("downloading", "decoding", "analysing")
+
+
+def _column(name, value):
+    """A result's value as kept in its column: the app's ends as JSON, the rest as they are."""
+    if name == "ends":
+        return json.dumps(value) if value else None
+    return value
 
 
 class Store:
@@ -71,7 +78,8 @@ class Store:
             for column, kind in (("bpm_fit", "REAL"), ("main_share", "REAL"), ("grid_bpm", "REAL"), ("on_grid", "REAL"),
                                  ("analysis_version", "REAL"), ("downbeat_source", "TEXT"), ("grid_counted", "TEXT"), ("changes_share", "REAL"),
                                  ("phrase_first_ms", "REAL"), ("phrase_count", "INTEGER"), ("phrase_bars", "INTEGER"), ("phrase_big", "INTEGER"),
-                                 ("phrase_big_on", "INTEGER"), ("levels", "TEXT")):
+                                 ("phrase_big_on", "INTEGER"), ("levels", "TEXT"), ("phrase_source", "TEXT"),
+                                 ("from_mix", "INTEGER"), ("ends", "TEXT")):
                 if column not in columns:
                     self.db.execute(f"ALTER TABLE results ADD COLUMN {column} {kind}")
             if self.db.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
@@ -168,7 +176,7 @@ class Store:
             self.db.execute(
                 f"INSERT OR REPLACE INTO results (song_id, model, {', '.join(RESULT_FIELDS)}, analysed_at, beats, downbeats,"
                 f" levels) VALUES (?, ?, {', '.join('?' for _ in RESULT_FIELDS)}, ?, ?, ?, ?)",
-                (song_id, model, *[values.get(f) for f in RESULT_FIELDS], time.time(),
+                (song_id, model, *[_column(f, values.get(f)) for f in RESULT_FIELDS], time.time(),
                  json.dumps([round(b, 3) for b in beats]), json.dumps([round(b, 3) for b in downbeats]),
                  json.dumps(levels) if levels else ""))
 
@@ -177,6 +185,7 @@ class Store:
         if not rows:
             return None
         row = rows[0]
+        row["ends"] = json.loads(row["ends"]) if row.get("ends") else None
         beats, downbeats, levels = row.pop("beats"), row.pop("downbeats"), row.pop("levels", None)
         if with_beats:
             row["beats"], row["downbeats"] = json.loads(beats or "[]"), json.loads(downbeats or "[]")
@@ -199,7 +208,18 @@ class Store:
         keys = [k for k in RESULT_FIELDS if k in values and not k.endswith("_seconds")]
         with self.lock, self.db:
             self.db.execute(f"UPDATE results SET {', '.join(f'{k}=?' for k in keys)} WHERE song_id=? AND model=?",
-                            (*[values[k] for k in keys], song_id, model))
+                            (*[_column(k, values[k]) for k in keys], song_id, model))
+
+    def ends(self, song_ids, model):
+        """``{song_id: ends}`` (:func:`beats.grid.app_ends`) of the songs among ``song_ids`` that have them."""
+        out = {}
+        ids = list(dict.fromkeys(song_ids))
+        for start in range(0, len(ids), 500):  # SQLite's limit on ? in one statement
+            chunk = ids[start:start + 500]
+            for r in self._rows(f"SELECT song_id, ends FROM results WHERE model=? AND ends IS NOT NULL AND ends<>'' "
+                                f"AND song_id IN ({', '.join('?' for _ in chunk)})", (model, *chunk)):
+                out[r["song_id"]] = json.loads(r["ends"])
+        return out
 
     def save_plugin(self, song_id, values):
         with self.lock, self.db:
@@ -221,6 +241,7 @@ class Store:
             "LEFT JOIN plugin p ON p.song_id=s.id ORDER BY s.artist COLLATE NOCASE, s.title COLLATE NOCASE", (model,))
         for row in rows:
             row["result"] = {f: row.pop(f"r_{f}") for f in RESULT_FIELDS}
+            row["result"].pop("ends", None)  # what the app fetches (GET /api/grids), not the table
             row["result"]["analysed_at"] = row.pop("r_analysed_at")
             if row["result"]["analysed_at"] is None:
                 row["result"] = None
