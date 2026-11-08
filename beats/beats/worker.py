@@ -159,8 +159,7 @@ class Worker:
             if row and row.get("beats"):
                 self.store.update_result(song_id, model, grid.analyse(row["beats"], row["downbeats"],
                                                                       song.get("duration") or row["beats"][-1],
-                                                                      row.get("levels"),
-                                                                      [g["label"] for g in self.store.genres(song_id)]))
+                                                                      row.get("levels")))
         if stale:
             self.store.event(f"Worked out the tempo again for {len(stale)} songs from their saved beats")
         unheard = self.store.without_levels()
@@ -326,8 +325,7 @@ class Worker:
                 if note:
                     self.store.event(note, "warn")
 
-            genres = [g["label"] for g in self.store.genres(song_id)]
-            values = grid.analyse(beats, downbeats, duration or song["duration"], levels, genres)
+            values = grid.analyse(beats, downbeats, duration or song["duration"], levels)
             values.update(download_seconds=download_seconds, decode_seconds=decode_seconds, model_seconds=model_seconds)
             self.store.save_result(song_id, self.model_name, values, beats, downbeats, levels)
             self.store.set_state(song_id, "done")

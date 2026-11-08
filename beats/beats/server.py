@@ -98,10 +98,7 @@ class App:
     # ---- what the API returns ----
 
     def song_row(self, row):
-        genres = [g["label"] for g in row["genres"]]
-        row["verdict"] = grid.verdict(row["result"], row["tag_bpm"], row["plugin"], genres) if row["result"] else []
-        found = grid.genre_range(genres)
-        row["genre_range"] = list(found[:2]) if found else None
+        row["verdict"] = grid.verdict(row["result"], row["tag_bpm"], row["plugin"]) if row["result"] else []
         return row
 
     SONGS_SHOWN, SONGS_MOST = 200, 1000  # songs in one answer for the table, unless asked for more (at most)
@@ -133,14 +130,10 @@ class App:
         return row
 
     def steady_grid(self, full):
-        """The even grid of a result with beats, or ``None``: as :func:`beats.grid.analyse` made it (at double the
-        tempo when it counted the song at its genre's speed)."""
+        """The even grid of a result with beats, or ``None``: as :func:`beats.grid.analyse` made it."""
         if not full or not full.get("bpm"):
             return None
-        if full.get("grid_counted") == "double":
-            beats, bpm, per_bar = grid.doubled(full["beats"], 60.0 / full["bpm"]), full["bpm"] * 2, 4
-        else:
-            beats, bpm, per_bar = full["beats"], full["bpm"], full.get("beats_per_bar") or 4
+        beats, bpm, per_bar = full["beats"], full["bpm"], full.get("beats_per_bar") or 4
         return grid.with_sound(grid.steady_grid(beats, full["downbeats"], bpm, per_bar), full.get("levels"))
 
     def export(self, find=None, show="all"):

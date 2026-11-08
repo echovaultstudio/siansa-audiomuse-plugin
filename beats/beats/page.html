@@ -163,7 +163,7 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
     <canvas id="beatview" height="120" aria-label="Beats around the playhead"></canvas>
     <div class="legend"><span><i style="background:var(--frost)"></i>beat</span><span><i style="background:var(--amber)"></i>downbeat (bar number)</span><span><i style="background:var(--ok)"></i>phrase start (every 8 or 16 bars)</span><span><i style="background:var(--mark)"></i>your section marks</span><span id="other-legend"><i style="background:var(--faint);height:6px"></i>the model's beats</span><span><i style="background:var(--text)"></i>now</span><span>8 seconds around what's playing; tap to jump</span></div>
     <canvas id="curve" height="170" aria-label="Tempo along the song"></canvas>
-    <div class="legend"><span><i style="background:var(--amber)"></i>Beat This! tempo</span><span><i style="background:var(--ok)"></i>BPM tag</span><span><i style="background:var(--bad)"></i>plugin's intro / outro</span><span><i style="background:var(--line-strong)"></i>the ends the plugin measures</span><span><i style="background:var(--band);height:10px"></i>genre's usual range</span></div>
+    <div class="legend"><span><i style="background:var(--amber)"></i>Beat This! tempo</span><span><i style="background:var(--ok)"></i>BPM tag</span><span><i style="background:var(--bad)"></i>plugin's intro / outro</span><span><i style="background:var(--line-strong)"></i>the ends the plugin measures</span></div>
     <div id="d-notes"></div>
     <div class="facts" id="d-facts"></div>
   </section>
@@ -423,7 +423,6 @@ async function openSong(id, newSong, fromHistory) {
     ["Beats / downbeats", r.beat_count != null ? `${r.beat_count} / ${r.downbeat_count}` : "–"],
     ["Time", r.model_seconds ? `model ${fmt(r.model_seconds)} s · decode ${fmt(r.decode_seconds)} s · download ${fmt(r.download_seconds)} s` : "–"],
     ["Genre", detail.genres.map((g) => `${g.label} (${g.source})`).join(", ") || "–"],
-    ["Genre's usual range", detail.genre_range ? `${detail.genre_range[0]}–${detail.genre_range[1]} BPM` : "–"],
   ];
   $("d-facts").innerHTML = facts.map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
   drawCurve(); drawMarks();
@@ -496,10 +495,8 @@ function drawCurve() {
   const values = pts.map((q) => q[1]).concat([detail.tag_bpm, p.intro_bpm, p.outro_bpm, r.bpm].filter((v) => v));
   if (!values.length) { g.fillStyle = css("--faint"); g.fillText("Not analysed yet", 12, 20); return; }
   let lo = Math.min(...values), hi = Math.max(...values);
-  if (detail.genre_range) { lo = Math.min(lo, detail.genre_range[0]); hi = Math.max(hi, detail.genre_range[1]); }
   lo = Math.floor((lo - 5) / 10) * 10; hi = Math.ceil((hi + 5) / 10) * 10;
   const x = (t) => 40 + (t / dur) * (w - 50), y = (v) => 10 + (1 - (v - lo) / (hi - lo)) * (h - 30);
-  if (detail.genre_range) { g.fillStyle = css("--band"); g.fillRect(40, y(detail.genre_range[1]), w - 50, y(detail.genre_range[0]) - y(detail.genre_range[1])); }
   g.fillStyle = css("--line"); const end = detail.end_seconds || 30;
   g.fillRect(x(0), 10, x(end) - x(0), h - 30); g.fillRect(x(Math.max(0, dur - end)), 10, x(dur) - x(Math.max(0, dur - end)), h - 30);
   g.strokeStyle = css("--line"); g.fillStyle = css("--faint"); g.font = "11px " + css("--mono"); g.lineWidth = 1;

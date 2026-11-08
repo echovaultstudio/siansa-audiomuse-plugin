@@ -338,7 +338,7 @@ class ServiceTest(Base):
         texts = [t for _, t in control["verdict"]]
         self.assertIn("Plugin's intro 187.1 is 4/3 of this", texts)
         self.assertIn("Matches the BPM tag", texts)
-        self.assertEqual(control["genre_range"], [125, 150])
+        self.assertNotIn("genre_range", control)
 
         self.assertIn(["warn", "BPM tag 61 is half of this"], songs["t122"]["verdict"])
         self.assertEqual(songs["t96w"]["result"]["beats_per_bar"], 3)
