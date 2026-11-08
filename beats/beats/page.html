@@ -64,7 +64,7 @@ input[type=text], input[type=search], select { font: inherit; font-size: 0.9rem;
 .seg button[aria-pressed=true] { background: var(--amber); color: var(--on-amber); }
 .table { overflow-x: auto; }
 table { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 0.88rem; }
-#detail { scroll-margin-top: 76px; }
+#detail { scroll-margin-top: var(--header-h, 76px); }
 th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { color: var(--faint); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
 td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -311,7 +311,7 @@ async function openSong(id, newSong, fromHistory) {
     const player = $("player");
     player.src = "api/audio/" + encodeURIComponent(id);
     resetClicks();
-    $("detail").scrollIntoView({behavior: "smooth", block: "start"});
+    headerHeight(); $("detail").scrollIntoView({behavior: "smooth", block: "start"});
   }
   const r = detail.result || {}, p = detail.plugin || {};
   $("d-notes").innerHTML = (detail.verdict || []).map(([level, text]) => `<span class="note ${level}">${esc(text)}</span>`).join("")
@@ -354,9 +354,17 @@ $("d-remove").addEventListener("click", async () => {
 });
 
 // ---- drawing ----
+// The chart's height in CSS pixels comes from its height attribute, read once: the drawing buffer is that times the
+// screen's pixel ratio, and reading it back each frame made the charts grow on phones (ratio 2.6) until they went
+// white. The buffer is only reset when the size changes, as resetting it clears and reallocates it.
+// The sticky header wraps to two or three lines on a phone: a song scrolled into view lands just below it.
+function headerHeight() { document.documentElement.style.setProperty("--header-h", (document.querySelector("header").offsetHeight + 12) + "px"); }
+window.addEventListener("resize", headerHeight);
 function sizeCanvas(canvas) {
-  const ratio = window.devicePixelRatio || 1, w = canvas.clientWidth, h = Number(canvas.getAttribute("height"));
-  canvas.width = w * ratio; canvas.height = h * ratio; canvas.style.height = h + "px";
+  if (!canvas.dataset.h) canvas.dataset.h = canvas.getAttribute("height");
+  const ratio = window.devicePixelRatio || 1, w = canvas.clientWidth, h = Number(canvas.dataset.h);
+  const W = Math.round(w * ratio), H = Math.round(h * ratio);
+  if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; canvas.style.height = h + "px"; }
   const g = canvas.getContext("2d"); g.setTransform(ratio, 0, 0, ratio, 0, 0);
   return [g, w, h];
 }
