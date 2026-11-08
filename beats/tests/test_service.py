@@ -58,9 +58,11 @@ class FakeTracker:
 
     def __init__(self):
         self.calls = 0
+        self.delay = 0.0
 
     def __call__(self, samples):
         self.calls += 1
+        time.sleep(self.delay)
         song = next(s for s in CATALOG if s["id"] == samples.song_id)
         period = 60.0 / song["expect_bpm"]
         beats = [round((0.3 + i * period) / 0.02) * 0.02 for i in range(int((song["duration"] - 0.5) / period))]
@@ -200,7 +202,45 @@ class StoreTest(unittest.TestCase):
         db.set_state("a", "done")
         self.assertFalse(db.queue("a"))  # done stays done…
         self.assertTrue(db.queue("a", force=True))  # …unless asked again
-        self.assertEqual(db.counts(), {"queued": 1, "songs": 1})
+        self.assertEqual(db.counts(), {"queued": 1, "songs": 1, "playlist": 1})
+
+    def test_the_library_queues_after_the_playlist_and_one_worker_claims_each_song(self):
+        db = self.store()
+        self.assertEqual(db.add_songs([self.song("lib1"), self.song("lib2")]), 2)
+        db.add_song(self.song("pl"), playlist="Beat test")
+        db.queue("pl")
+        self.assertEqual(db.add_songs([self.song("lib1"), self.song("pl")]), 0)  # nothing new
+        self.assertEqual(db.song("pl")["playlist"], "Beat test")  # the library doesn't take it out of the playlist
+        self.assertEqual(db.claim_next(), "pl")  # the playlist's songs first
+        self.assertEqual(db.claim_next(), "lib1")
+        self.assertEqual(db.counts()["downloading"], 2)
+        self.assertEqual(db.unqueue_library(), 1)  # lib2; lib1 is being worked on and stays
+        self.assertIsNone(db.claim_next())
+        self.assertEqual(db.counts()["playlist"], 1)
+
+    def test_the_table_finds_and_limits(self):
+        db = self.store()
+        db.add_songs([dict(self.song("a"), title="Stars Align"), dict(self.song("b"), genres=["Drum & Bass"]),
+                      dict(self.song("c"), title="100%_sure")])
+        db.add_song(self.song("d"), playlist="Beat test")
+        ids = lambda **k: [r["id"] for r in db.overview("final0", **k)]  # noqa: E731
+        self.assertEqual(ids(scope="playlist"), ["d"])
+        self.assertEqual(sorted(ids()), ["a", "b", "c", "d"])
+        self.assertEqual(ids(find="stars ALIGN"), ["a"])
+        self.assertEqual(ids(find="drum"), ["b"])  # genres too
+        self.assertEqual(ids(find="%_"), ["c"])  # as written, not as a pattern
+        self.assertEqual(len(ids(limit=2)), 2)
+        db.set_state("b", "failed", "no")
+        self.assertEqual(ids(failed=True), ["b"])
+        self.assertEqual(db.overview("final0", song_id="b")[0]["genres"][0]["label"], "Drum & Bass")
+
+    def test_settings_are_kept(self):
+        db = self.store()
+        self.assertIsNone(db.setting("library"))
+        db.set_setting("library", True)
+        db.close()
+        self.opened.remove(db)
+        self.assertTrue(self.store().setting("library"))
 
     def test_work_cut_off_by_a_restart_goes_back_in_the_queue(self):
         db = self.store()
@@ -470,6 +510,62 @@ class ServiceTest(Base):
         self.assertIn("counts", self.call("/api/status"))
         _, page = self.call("/", raw=True)
         self.assertIn(b"<title>Siansa Beats</title>", page)
+
+    def test_the_whole_library(self):
+        self.fake.in_playlist = {"t140"}
+        self.start()
+        self.assertEqual(self.call("/api/scan", "POST", {}), {"songs": 1, "queued": 1})
+        self.assertFalse(self.call("/api/status")["library"]["on"])
+        self.assertEqual(self.call("/api/library", "POST", {"on": True}), {"songs": 4, "queued": 3})
+        counts = self.wait_done()
+        self.assertEqual((counts["songs"], counts["playlist"], counts["done"]), (4, 1, 3))
+        status = self.call("/api/status")
+        self.assertTrue(status["library"]["on"])
+        self.assertIsNotNone(status["library"]["read_at"])
+        self.assertEqual([s["id"] for s in self.call("/api/songs")], ["t140"])  # the playlist by default
+        self.assertEqual(len(self.call("/api/songs?scope=library")), 4)
+        self.assertEqual([s["id"] for s in self.call("/api/songs?scope=library&find=waltz")], ["t96w"])
+        self.assertEqual([s["id"] for s in self.call("/api/songs?scope=library&show=failed")], ["bad"])
+        self.assertEqual(len(self.call("/api/songs?scope=library&limit=2")), 2)
+        self.assertEqual(len(self.call("/api/export.json")["songs"]), 1)
+        self.assertEqual(len(self.call("/api/export.json?scope=library")["songs"]), 3)
+        _, csv_body = self.call("/api/export.csv?scope=library", raw=True)
+        self.assertEqual(len(csv_body.decode().strip().splitlines()), 5)
+        self.assertEqual(self.call("/api/grids?ids=t122")["grids"][0]["track_id"], "t122")  # the app finds them all
+        self.assertEqual(self.call("/api/library/read", "POST"), {"songs": 4, "queued": 0})
+        self.assertEqual(self.call("/api/analyse-all", "POST", {"scope": "playlist"}), {"queued": 1})
+        self.wait_done()
+        self.assertEqual(self.call("/api/library", "POST", {"on": False})["queued"], 0)
+        self.assertFalse(self.call("/api/status")["library"]["on"])
+
+    def test_the_library_album_by_album_when_search_finds_nothing(self):
+        self.fake.search_all = False
+        nd = Subsonic(self.fake.url, USER, PASSWORD)
+        self.assertEqual(sorted(s["id"] for s in nd.all_songs()), ["bad", "t122", "t140", "t96w"])
+        self.fake.search_all = True
+        self.assertEqual(len(nd.all_songs(page=3)), 4)  # paged
+
+    def test_turning_the_library_off_empties_its_queue(self):
+        self.fake.in_playlist = {"t140"}
+        self.start()
+        self.call("/api/pause", "POST")
+        self.call("/api/scan", "POST", {})
+        self.call("/api/library", "POST", {"on": True})
+        self.assertEqual(self.call("/api/status")["counts"]["queued"], 4)
+        self.assertEqual(self.call("/api/library", "POST", {"on": False}), {"songs": None, "queued": -3})
+        self.assertEqual(self.call("/api/status")["counts"]["queued"], 1)
+
+    def test_the_next_song_is_downloaded_while_the_model_works(self):
+        self.start()
+        self.tracker.delay = 0.4
+        self.call("/api/scan", "POST", {})
+        end, seen = time.time() + 10, False
+        while time.time() < end and not seen:
+            status = self.call("/api/status")
+            seen = bool(status["current"] and status["next"])
+            time.sleep(0.05)
+        self.assertTrue(seen, "never a song in the model and the next one being prepared at once")
+        self.wait_done()
 
     def test_unknown_routes_and_songs(self):
         self.start()

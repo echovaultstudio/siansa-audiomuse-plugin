@@ -131,6 +131,7 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
       <input type="text" id="playlist" list="playlists" aria-label="Playlist" placeholder="Playlist">
       <datalist id="playlists"></datalist>
       <button class="primary" id="scan">Analyse playlist</button>
+      <button id="library" aria-pressed="false" title="Analyse every song on Navidrome too, after the playlist's, and look for new ones every 6 hours">Analyse whole library</button>
       <button id="pause">Pause</button>
     </div>
     <div class="progress" id="progress" aria-hidden="true"></div>
@@ -165,6 +166,10 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
   <div class="split">
     <section class="card" aria-label="Songs">
       <div class="tools">
+        <div class="seg" role="group" aria-label="Songs from">
+          <button data-scope="playlist" aria-pressed="true">Playlist</button>
+          <button data-scope="library" aria-pressed="false">Whole library</button>
+        </div>
         <input type="search" class="grow" id="search" placeholder="Find a song, artist or genre" aria-label="Find">
         <div class="seg" role="group" aria-label="Show">
           <button data-filter="all" aria-pressed="true">All</button>
@@ -182,11 +187,12 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
           <tbody id="rows"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody>
         </table>
       </div>
+      <div class="sub" id="shown-note" hidden style="margin-top:8px"></div>
       <div class="tools" style="margin-top:12px">
         <button id="all-again">Analyse every song again</button>
         <button id="plugin-refresh">Read the plugin's values again</button>
-        <a class="btn" href="api/export.csv" download>Export CSV</a>
-        <a class="btn" href="api/export.json" download title="Every song's beats and sound levels (a few MB): for tuning the grid and phrases">Download data</a>
+        <a class="btn" id="export-csv" href="api/export.csv" download>Export CSV</a>
+        <a class="btn" id="export-json" href="api/export.json" download title="Every song's beats and sound levels (a few MB): for tuning the grid and phrases">Download data</a>
       </div>
     </section>
     <section class="card" aria-label="Activity">
@@ -202,8 +208,10 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<
 const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v)) ? "–" : Number(v).toFixed(d);
 const pct = (v) => (v === null || v === undefined) ? "–" : Math.round(v * 100) + "%";
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const BUSY = ["downloading", "decoding", "analysing"];
-let songs = [], filter = "all", selected = null, detail = null, lastCounts = "", status = null;
+const BUSY = ["downloading", "decoding", "ready", "analysing"];
+const LIBRARY_SHOWN = 200;  // songs of the whole library in the table at once: the search finds the rest
+let songs = [], filter = "all", scope = "playlist", selected = null, detail = null, lastCounts = "", status = null;
+let songsAsked = 0, songsTimer = null;
 
 async function api(path, options = {}) {
   const r = await fetch(path, {headers: {"Content-Type": "application/json"}, ...options});
@@ -242,7 +250,11 @@ async function refreshStatus() {
   if (!$("playlist").value) $("playlist").value = s.playlist;
   if (s.current) {
     $("now-what").textContent = `${s.current.artist} – ${s.current.title}`;
-    $("now-step").textContent = `${s.current.step} for ${fmt(s.current.for_seconds)} s`;
+    $("now-step").textContent = `${s.current.step} for ${fmt(s.current.for_seconds)} s` +
+      (s.next ? ` · next: ${s.next.artist} – ${s.next.title} (${s.next.step})` : "");
+  } else if (s.next) {
+    $("now-what").textContent = `${s.next.artist} – ${s.next.title}`;
+    $("now-step").textContent = `${s.next.step} for ${fmt(s.next.for_seconds)} s`;
   } else if (s.paused) {
     $("now-what").textContent = "Paused"; $("now-step").textContent = `${queued} waiting`;
   } else {
@@ -250,6 +262,10 @@ async function refreshStatus() {
     $("now-step").textContent = total ? "" : `Make a playlist called "${s.playlist}" in Navidrome, then Analyse playlist.`;
   }
   $("pause").textContent = s.paused ? "Carry on" : "Pause";
+  const lib = s.library || {};
+  $("library").setAttribute("aria-pressed", !!lib.on);
+  $("library").textContent = lib.on ? "Whole library: on" : "Analyse whole library";
+  $("library").title = lib.on ? `Every song on Navidrome is analysed after the playlist's${lib.read_at ? "; last read " + new Date(lib.read_at * 1000).toLocaleString() : ""}. Tap to go back to just the playlist.` : "Analyse every song on Navidrome too, after the playlist's, and look for new ones every 6 hours";
   $("device-note").hidden = !s.device_note; $("device-note").textContent = s.device_note || "";
   const pluginTrouble = s.plugin && ["error", "warn"].includes(s.plugin.state) ? s.plugin.text : "";
   $("plugin-note").hidden = !pluginTrouble; $("plugin-note").textContent = pluginTrouble;
@@ -257,27 +273,42 @@ async function refreshStatus() {
   $("progress").innerHTML = `<span class="done" style="width:${w(done)}"></span><span class="failed" style="width:${w(failed)}"></span><span class="busy" style="width:${w(busy)}"></span>`;
   const times = songs.filter((x) => x.result).map((x) => x.result.model_seconds).filter((x) => x);
   const avg = times.length ? times.reduce((a, b) => a + b, 0) / times.length : null;
-  $("counts").innerHTML = `<span><b>${total}</b> songs</span><span><b>${done}</b> done</span><span><b>${queued + busy}</b> to go</span><span><b>${failed}</b> failed</span>` +
+  $("counts").innerHTML = `<span><b>${total}</b> songs${total !== (c.playlist || 0) ? ` (<b>${c.playlist || 0}</b> in the playlist)` : ""}</span><span><b>${done}</b> done</span><span><b>${queued + busy}</b> to go</span><span><b>${failed}</b> failed</span>` +
     (avg ? `<span>about <b>${fmt(avg)}</b> s a song in the model</span>` : "") +
     (s.last_error ? `<span>last error: ${esc(s.last_error)}</span>` : "");
   $("events").innerHTML = s.events.map((e) => `<li class="${esc(e.level)}"><time>${new Date(e.at * 1000).toLocaleTimeString()}</time>${esc(e.message)}</li>`).join("") || `<li>Nothing yet.</li>`;
   const key = JSON.stringify(c) + (s.current ? s.current.id + s.current.step : "");
-  if (key !== lastCounts) { lastCounts = key; refreshSongs(); }
+  // The whole library is a big list: asked again at most every 15 s while songs are being analysed.
+  if (key !== lastCounts && (scope === "playlist" || Date.now() - songsAsked > 15000)) { lastCounts = key; refreshSongs(); }
 }
 
 // ---- the table ----
+function songsPath() {
+  if (scope === "playlist") return "api/songs";
+  const q = new URLSearchParams({scope, limit: LIBRARY_SHOWN, show: filter});
+  if ($("search").value.trim()) q.set("find", $("search").value.trim());
+  return "api/songs?" + q;
+}
 async function refreshSongs() {
-  try { songs = await api("api/songs"); } catch (e) { return; }
+  songsAsked = Date.now();
+  const asked = scope + songsPath();
+  let found;
+  try { found = await api(songsPath()); } catch (e) { return; }
+  if (asked !== scope + songsPath()) return;  // the scope or search changed meanwhile: a newer answer is on its way
+  songs = found;
   drawRows();
   if (selected && detail && detail.state !== songs.find((s) => s.id === selected)?.state) openSong(selected, false);
 }
 function differs(s) { return (s.verdict || []).some(([level]) => level === "warn"); }
 function drawRows() {
-  const q = $("search").value.trim().toLowerCase();
+  const q = scope === "playlist" ? $("search").value.trim().toLowerCase() : "";  // the library is searched by the service
+  const total = status ? (scope === "playlist" ? status.counts.playlist : status.counts.songs) : 0;
+  $("shown-note").hidden = scope === "playlist" || songs.length < LIBRARY_SHOWN;
+  $("shown-note").textContent = `Showing the first ${songs.length} of ${total} songs: search to find others.`;
   const shown = songs.filter((s) => filter === "all" || (filter === "differ" ? differs(s) : s.state === "failed"))
     .filter((s) => !q || [s.title, s.artist, s.album, ...s.genres.map((g) => g.label)].join(" ").toLowerCase().includes(q));
   if (!shown.length) {
-    $("rows").innerHTML = `<tr><td colspan="9" class="empty">${songs.length ? "Nothing matches." : "No songs yet."}</td></tr>`;
+    $("rows").innerHTML = `<tr><td colspan="9" class="empty">${songs.length || (scope === "library" && ($("search").value.trim() || filter !== "all")) ? "Nothing matches." : scope === "library" ? "No songs yet: Analyse whole library reads them from Navidrome." : "No songs yet."}</td></tr>`;
     return;
   }
   $("rows").innerHTML = shown.map((s) => {
@@ -297,11 +328,24 @@ function drawRows() {
   }).join("");
 }
 $("rows").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-id]"); if (tr) openSong(tr.dataset.id, true); });
-$("search").addEventListener("input", drawRows);
+function songsChanged() {
+  if (scope === "playlist") return drawRows();
+  clearTimeout(songsTimer);
+  songsTimer = setTimeout(refreshSongs, 250);
+}
+$("search").addEventListener("input", songsChanged);
 document.querySelectorAll("[data-filter]").forEach((b) => b.addEventListener("click", () => {
   filter = b.dataset.filter;
   document.querySelectorAll("[data-filter]").forEach((x) => x.setAttribute("aria-pressed", x === b));
-  drawRows();
+  songsChanged();
+}));
+document.querySelectorAll("[data-scope]").forEach((b) => b.addEventListener("click", () => {
+  scope = b.dataset.scope;
+  document.querySelectorAll("[data-scope]").forEach((x) => x.setAttribute("aria-pressed", x === b));
+  $("export-csv").href = "api/export.csv?scope=" + scope;
+  $("export-json").href = "api/export.json?scope=" + scope;
+  $("all-again").textContent = scope === "playlist" ? "Analyse every song again" : "Analyse the whole library again";
+  songs = []; drawRows(); refreshSongs();
 }));
 
 // ---- one song ----
@@ -549,8 +593,20 @@ $("scan").addEventListener("click", async () => {
   finally { $("scan").disabled = false; refreshStatus(); }
 });
 $("pause").addEventListener("click", async () => { await api(status?.paused ? "api/resume" : "api/pause", {method: "POST"}); refreshStatus(); });
-$("all-again").addEventListener("click", async () => { if (confirm("Analyse every song again?")) { await api("api/analyse-all", {method: "POST"}); refreshStatus(); } });
-$("plugin-refresh").addEventListener("click", async () => { try { await api("api/plugin/refresh", {method: "POST"}); } catch (e) { banner(e.message); } lastCounts = ""; refreshStatus(); });
+$("all-again").addEventListener("click", async () => {
+  if (confirm(scope === "playlist" ? "Analyse every song of the playlist again?" : "Analyse every song of the whole library again? That can take days.")) {
+    await api("api/analyse-all", {method: "POST", body: JSON.stringify({scope})}); refreshStatus();
+  }
+});
+$("library").addEventListener("click", async () => {
+  const on = !(status && status.library && status.library.on);
+  if (on && !confirm("Analyse every song on Navidrome? The playlist's songs go first; the rest can take a day or more, and new songs are found every 6 hours.")) return;
+  $("library").disabled = true;
+  try { await api("api/library", {method: "POST", body: JSON.stringify({on})}); banner(null); }
+  catch (e) { banner(e.message); }
+  finally { $("library").disabled = false; refreshStatus(); }
+});
+$("plugin-refresh").addEventListener("click", async () => { try { await api("api/plugin/refresh", {method: "POST", body: JSON.stringify({scope})}); } catch (e) { banner(e.message); } lastCounts = ""; refreshStatus(); });
 api("api/playlists").then((lists) => { $("playlists").innerHTML = lists.map((p) => `<option value="${esc(p.name)}">${p.songs} songs</option>`).join(""); }).catch(() => {});
 refreshStatus();
 setInterval(refreshStatus, 2000);

@@ -9,7 +9,8 @@ Tables:
 - ``jobs``: each song's place in the queue and what's happening to it;
 - ``results``: Beat This!'s readings, one row per song and model, with every beat and downbeat;
 - ``plugin``: the Siansa plugin's current readings, for comparison;
-- ``events``: what the service did, for the page's activity list.
+- ``events``: what the service did, for the page's activity list;
+- ``settings``: what the page turned on (the whole library), kept across restarts.
 
 Nothing here is written back to Navidrome, AudioMuse-AI or the music files.
 """
@@ -48,6 +49,7 @@ CREATE TABLE IF NOT EXISTS marks (
     id INTEGER PRIMARY KEY AUTOINCREMENT, song_id TEXT, seconds REAL, created_at REAL
 );
 CREATE INDEX IF NOT EXISTS marks_song ON marks (song_id);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 """
 
 RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "grid_bpm", "on_grid", "analysis_version", "downbeat_source", "grid_counted",
@@ -55,7 +57,8 @@ RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "grid_bpm", "on_grid", "analysi
                  "outro_steady", "beats_per_bar", "bar_share", "first_downbeat_ms", "beat_count", "downbeat_count",
                  "download_seconds", "decode_seconds", "model_seconds")
 PLUGIN_FIELDS = ("intro_bpm", "outro_bpm", "intro_steady", "outro_steady", "intro_bar_ms", "outro_bar_ms")
-BUSY = ("downloading", "decoding", "analysing")
+BUSY = ("downloading", "decoding", "ready", "analysing")  # ready: downloaded and decoded, waiting for the model
+SCOPES = ("playlist", "library")  # the test playlist's songs (what the table shows first), or every song
 
 
 def _column(name, value):
@@ -100,14 +103,31 @@ class Store:
     def add_song(self, song, playlist=None, source="tag"):
         """Adds or updates ``song`` (from :func:`subsonic.song_from`); its genres replace that source's."""
         with self.lock, self.db:
-            self.db.execute(
-                "INSERT INTO songs (id, title, artist, album, duration, suffix, tag_bpm, playlist, added_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, artist=excluded.artist, "
-                "album=excluded.album, duration=excluded.duration, suffix=excluded.suffix, tag_bpm=excluded.tag_bpm, "
-                "playlist=COALESCE(excluded.playlist, songs.playlist)",
-                (song["id"], song["title"], song["artist"], song["album"], song["duration"], song["suffix"],
-                 song["tag_bpm"], playlist, time.time()))
-            self.set_genres(song["id"], source, song.get("genres") or [])
+            self._add_song(song, playlist, source)
+
+    def add_songs(self, songs, playlist=None, source="tag"):
+        """Adds or updates many songs at once (the whole library) and queues the ones never analysed: the number
+        queued. A song already in the playlist stays in it."""
+        queued = 0
+        now = time.time()
+        with self.lock, self.db:
+            for song in songs:
+                self._add_song(song, playlist, source)
+                queued += self.db.execute("INSERT OR IGNORE INTO jobs (song_id, state, queued_at) VALUES (?, 'queued', ?)",
+                                          (song["id"], now)).rowcount
+        return queued
+
+    def _add_song(self, song, playlist, source):
+        self.db.execute(
+            "INSERT INTO songs (id, title, artist, album, duration, suffix, tag_bpm, playlist, added_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, artist=excluded.artist, "
+            "album=excluded.album, duration=excluded.duration, suffix=excluded.suffix, tag_bpm=excluded.tag_bpm, "
+            "playlist=COALESCE(excluded.playlist, songs.playlist)",
+            (song["id"], song["title"], song["artist"], song["album"], song["duration"], song["suffix"],
+             song["tag_bpm"], playlist, time.time()))
+        self.db.execute("DELETE FROM genres WHERE song_id=? AND source=?", (song["id"], source))
+        for label in song.get("genres") or []:
+            self.db.execute("INSERT OR REPLACE INTO genres VALUES (?,?,?,?)", (song["id"], source, label, 1.0))
 
     def set_genres(self, song_id, source, labels, weights=None):
         with self.lock, self.db:
@@ -147,9 +167,38 @@ class Store:
                             " VALUES (?, 'queued', NULL, ?, NULL, NULL, NULL)", (song_id, time.time()))
             return True
 
+    NEXT = ("SELECT j.song_id FROM jobs j LEFT JOIN songs s ON s.id=j.song_id WHERE j.state='queued' "
+            "ORDER BY s.playlist IS NULL, j.queued_at, j.song_id LIMIT 1")  # the playlist's songs first
+
     def next_queued(self):
-        rows = self._rows("SELECT song_id FROM jobs WHERE state='queued' ORDER BY queued_at, song_id LIMIT 1")
+        rows = self._rows(self.NEXT)
         return rows[0]["song_id"] if rows else None
+
+    def claim_next(self):
+        """The next song in the queue, marked as being downloaded in the same step, so no two workers take it."""
+        with self.lock, self.db:
+            row = self.db.execute(self.NEXT).fetchone()
+            if not row:
+                return None
+            self.db.execute("UPDATE jobs SET state='downloading', step='downloading', started_at=? WHERE song_id=?",
+                            (time.time(), row["song_id"]))
+            return row["song_id"]
+
+    def unqueue_library(self):
+        """Takes the songs that are only in the library (not the playlist) out of the queue: the number taken."""
+        with self.lock, self.db:
+            return self.db.execute("DELETE FROM jobs WHERE state='queued' AND song_id IN "
+                                   "(SELECT id FROM songs WHERE playlist IS NULL)").rowcount
+
+    # ---- settings ----
+
+    def setting(self, key, default=None):
+        rows = self._rows("SELECT value FROM settings WHERE key=?", (key,))
+        return json.loads(rows[0]["value"]) if rows else default
+
+    def set_setting(self, key, value):
+        with self.lock, self.db:
+            self.db.execute("INSERT OR REPLACE INTO settings VALUES (?, ?)", (key, json.dumps(value)))
 
     def set_state(self, song_id, state, error=None):
         now = time.time()
@@ -165,6 +214,7 @@ class Store:
         rows = self._rows("SELECT state, COUNT(*) AS n FROM jobs GROUP BY state")
         counts = {r["state"]: r["n"] for r in rows}
         counts["songs"] = self._rows("SELECT COUNT(*) AS n FROM songs")[0]["n"]
+        counts["playlist"] = self._rows("SELECT COUNT(*) AS n FROM songs WHERE playlist IS NOT NULL")[0]["n"]
         return counts
 
     # ---- results ----
@@ -231,14 +281,32 @@ class Store:
         rows = self._rows("SELECT * FROM plugin WHERE song_id=?", (song_id,))
         return rows[0] if rows else None
 
-    def overview(self, model):
-        """Every song with its job, result (no beats) and plugin readings, for the table."""
+    def overview(self, model, scope="library", find=None, failed=False, limit=None, song_id=None):
+        """The songs with their job, result (no beats) and plugin readings, for the table: every song
+        (``scope`` "library") or the playlist's, those whose name, artist, album or genre has ``find`` in it, only
+        the failed ones, at most ``limit`` of them, or just ``song_id``."""
+        where, args = [], [model]
+        if scope == "playlist":
+            where.append("s.playlist IS NOT NULL")
+        if song_id is not None:
+            where.append("s.id=?")
+            args.append(song_id)
+        if failed:
+            where.append("j.state='failed'")
+        for word in (find or "").split():
+            like = "%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            where.append("(s.title LIKE ? ESCAPE '\\' OR s.artist LIKE ? ESCAPE '\\' OR s.album LIKE ? ESCAPE '\\' OR "
+                         "EXISTS (SELECT 1 FROM genres g WHERE g.song_id=s.id AND g.label LIKE ? ESCAPE '\\'))")
+            args += [like] * 4
         rows = self._rows(
             "SELECT s.*, j.state, j.step, j.error, j.finished_at, "
             + ", ".join(f"r.{f} AS r_{f}" for f in RESULT_FIELDS) + ", r.analysed_at AS r_analysed_at, "
             + ", ".join(f"p.{f} AS p_{f}" for f in PLUGIN_FIELDS)
             + " FROM songs s LEFT JOIN jobs j ON j.song_id=s.id LEFT JOIN results r ON r.song_id=s.id AND r.model=? "
-            "LEFT JOIN plugin p ON p.song_id=s.id ORDER BY s.artist COLLATE NOCASE, s.title COLLATE NOCASE", (model,))
+            "LEFT JOIN plugin p ON p.song_id=s.id" + (" WHERE " + " AND ".join(where) if where else "")
+            + " ORDER BY s.artist COLLATE NOCASE, s.title COLLATE NOCASE" + (" LIMIT ?" if limit else ""),
+            (*args, *([int(limit)] if limit else [])))
+        genres = self._genres_of([r["id"] for r in rows])
         for row in rows:
             row["result"] = {f: row.pop(f"r_{f}") for f in RESULT_FIELDS}
             row["result"].pop("ends", None)  # what the app fetches (GET /api/grids), not the table
@@ -248,11 +316,21 @@ class Store:
             row["plugin"] = {f: row.pop(f"p_{f}") for f in PLUGIN_FIELDS}
             if all(v is None for v in row["plugin"].values()):
                 row["plugin"] = None
-            row["genres"] = self.genres(row["id"])
+            row["genres"] = genres.get(row["id"], [])
         counts = self.mark_counts()
         for row in rows:
             row["marks"] = counts.get(row["id"], 0)
         return rows
+
+    def _genres_of(self, ids):
+        """``{song_id: genres}`` of ``ids`` in one go (all of them for a big list)."""
+        sql = "SELECT song_id, source, label, weight FROM genres"
+        rows = self._rows(sql + f" WHERE song_id IN ({', '.join('?' for _ in ids)})", ids) if len(ids) <= 500 \
+            else self._rows(sql)
+        out = {}
+        for r in sorted(rows, key=lambda r: (r["source"], -(r["weight"] or 0), r["label"])):
+            out.setdefault(r.pop("song_id"), []).append(r)
+        return out
 
     # ---- marks: where the owner heard a section start, to check the phrases against ----
 

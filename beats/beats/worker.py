@@ -1,10 +1,16 @@
-"""The queue: one song at a time, from Navidrome to Beat This! to the database, with what it's doing on show.
+"""The queue: from Navidrome to Beat This! to the database, with what it's doing on show.
 
 Each song is downloaded (its original file, to a temporary file in the data folder), decoded, given to the model,
-and its beats turned into the readings :mod:`grid` works out. The temporary file is deleted straight after.
+and its beats turned into the readings :mod:`grid` works out. The temporary file is deleted straight after. Two
+threads share the work: one downloads, decodes and measures the next song while the other runs the model on this
+one, so the model (the GPU) rarely waits for the network.
+
+With the whole library turned on, every song on Navidrome is queued after the playlist's, and Navidrome is read
+again every few hours for new ones.
 """
 
 import os
+import queue
 import tempfile
 import threading
 import time
@@ -14,6 +20,9 @@ from . import grid
 from . import features
 from .audiomuse import AudioMuseError
 from .subsonic import SubsonicError
+
+
+LIBRARY_RESCAN_SECONDS = 6 * 3600  # how often the whole library is read again for new songs
 
 
 class Worker:
@@ -28,19 +37,24 @@ class Worker:
         self.data_dir = data_dir
         self.model_name = model_name
         self.paused = False
-        self.current = None  # {"id", "title", "artist", "step", "since"}
+        self.current = None  # {"id", "title", "artist", "step", "since"}: in the model
+        self.preparing = None  # the same, for the next song being downloaded and decoded
         self.last_error = None
         self.scan_lock = threading.Lock()
         self._wake = threading.Event()
         self._stop = threading.Event()
-        self._thread = None
+        self._ready = queue.Queue(maxsize=1)
+        self._threads = []
 
     # ---- what the page asks for ----
 
     def start(self):
-        if self._thread is None:
-            self._thread = threading.Thread(target=self._run, name="beats-worker", daemon=True)
-            self._thread.start()
+        if not self._threads:
+            for target, name in ((self._prepare_loop, "beats-prepare"), (self._run, "beats-model"),
+                                 (self._library_loop, "beats-library")):
+                thread = threading.Thread(target=target, name=name, daemon=True)
+                thread.start()
+                self._threads.append(thread)
 
     def stop(self):
         self._stop.set()
@@ -77,6 +91,53 @@ class Worker:
             self.refresh_plugin([s["id"] for s in songs if s.get("id")])
             self.wake()
             return {"songs": len(songs), "queued": queued}
+
+    @property
+    def library(self):
+        """Whether every song on Navidrome is analysed, not just the playlist's (kept across restarts)."""
+        return bool(self.store.setting("library", False))
+
+    def set_library(self, on):
+        """Turns the whole library on (reads it now) or off (its songs not yet analysed leave the queue)."""
+        self.store.set_setting("library", bool(on))
+        if on:
+            self.store.event("Analysing the whole library: reading every song from Navidrome")
+            return self.scan_library()
+        taken = self.store.unqueue_library()
+        self.store.event(f"Just the playlist again: {taken} library songs taken out of the queue")
+        return {"songs": None, "queued": -taken}
+
+    def scan_library(self):
+        """Reads every song from Navidrome, adds them and queues the new ones (after the playlist's). Returns
+        ``{"songs", "queued"}``."""
+        with self.scan_lock:
+            started = time.monotonic()
+            try:
+                songs = [s for s in self.navidrome.all_songs() if s.get("id")]
+            except SubsonicError as e:
+                self.store.event(f"Couldn't read the library: {e}", "error")
+                raise
+            queued = self.store.add_songs(songs)
+            self.store.set_setting("library_read_at", time.time())
+            self.store.event(f"Library: {len(songs)} songs on Navidrome, {queued} new in the queue "
+                             f"(read in {time.monotonic() - started:.0f}s)")
+            self.wake()
+            return {"songs": len(songs), "queued": queued}
+
+    def _library_loop(self):
+        """Reads the whole library again every few hours while it's on, for songs added to Navidrome since."""
+        while not self._stop.wait(60.0):
+            if not self.library:
+                continue
+            last = self.store.setting("library_read_at", 0) or 0
+            if time.time() - last < LIBRARY_RESCAN_SECONDS:
+                continue
+            try:
+                self.scan_library()
+            except Exception as e:  # Navidrome away: try again next time
+                self.store.set_setting("library_read_at", time.time())
+                if not isinstance(e, SubsonicError):
+                    traceback.print_exc()
 
     def regrid(self):
         """Works out again, from their saved beats, the results of an older Siansa Beats (no model needed)."""
@@ -149,41 +210,97 @@ class Worker:
 
     # ---- the work ----
 
-    def _run(self):
+    def _prepare_loop(self):
+        """Downloads, decodes and measures the next song while the model works on this one."""
         while not self._stop.is_set():
-            song_id = None if self.paused else self.store.next_queued()
+            song_id = None if self.paused else self.store.claim_next()
             if song_id is None:
                 self._wake.wait(timeout=5.0)
                 self._wake.clear()
                 continue
-            self.work(song_id)
+            prepared = self.prepare(song_id)
+            while prepared and not self._stop.is_set():
+                try:
+                    self._ready.put(prepared, timeout=1.0)
+                    break
+                except queue.Full:
+                    continue
+            self.preparing = None  # handed to the model (shown as "next" until then)
 
-    def _step(self, song_id, step):
+    def _run(self):
+        """Runs the model on each prepared song in turn."""
+        while not self._stop.is_set():
+            try:
+                prepared = self._ready.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            self.finish(prepared)
+
+    def _step(self, holder, song_id, step):
         self.store.set_state(song_id, step)
-        if self.current:
-            self.current["step"] = step
-            self.current["since"] = time.time()
+        if holder:
+            holder["step"] = step
+            holder["since"] = time.time()
 
     def work(self, song_id):
+        """One song from start to end, in this thread."""
+        prepared = self.prepare(song_id)
+        self.preparing = None
+        if prepared:
+            self.finish(prepared)
+
+    def prepare(self, song_id):
+        """Downloads, decodes and measures the song: what :meth:`finish` needs, or ``None`` when it failed."""
         song = self.store.song(song_id) or {"id": song_id, "title": song_id, "artist": "", "duration": 0}
-        self.current = {"id": song_id, "title": song["title"], "artist": song["artist"], "step": None,
-                        "since": time.time()}
+        holder = self.preparing = {"id": song_id, "title": song["title"], "artist": song["artist"], "step": None,
+                                   "since": time.time()}
         path = None
         try:
-            self._step(song_id, "downloading")
+            self._step(holder, song_id, "downloading")
             started = time.monotonic()
             fd, path = tempfile.mkstemp(prefix="song-", dir=self.data_dir)
             os.close(fd)
             size = self.navidrome.download(song_id, path)
             download_seconds = time.monotonic() - started
 
-            self._step(song_id, "decoding")
+            self._step(holder, song_id, "decoding")
             started = time.monotonic()
             samples = self.decode(path)
             decode_seconds = time.monotonic() - started
-            duration = len(samples) / 22_050.0
+            try:
+                levels = self.measure(samples)
+            except Exception as e:  # the phrases need it, the beats don't: carry on without
+                levels = None
+                self.store.event(f"{song['artist']} – {song['title']}: couldn't measure the sound for phrases: {e}", "warn")
+            self._step(holder, song_id, "ready")
+            return {"song": song, "samples": samples, "levels": levels, "size": size,
+                    "download_seconds": download_seconds, "decode_seconds": decode_seconds}
+        except Exception as e:  # one song failing never stops the queue
+            self.preparing = None
+            self._failed(song, e)
+            return None
+        finally:
+            if path and os.path.exists(path):
+                os.remove(path)
 
-            self._step(song_id, "analysing")
+    def _failed(self, song, e):
+        message = str(e) or e.__class__.__name__
+        self.last_error = message
+        self.store.set_state(song["id"], "failed", message)
+        self.store.event(f"{song['artist']} – {song['title']} failed: {message}", "error")
+        if not isinstance(e, (SubsonicError, RuntimeError)):
+            traceback.print_exc()
+
+    def finish(self, prepared):
+        """Runs the model on a prepared song and saves what it found."""
+        song, samples, levels = prepared["song"], prepared["samples"], prepared["levels"]
+        song_id, size = song["id"], prepared["size"]
+        download_seconds, decode_seconds = prepared["download_seconds"], prepared["decode_seconds"]
+        holder = self.current = {"id": song_id, "title": song["title"], "artist": song["artist"], "step": None,
+                                 "since": time.time()}
+        try:
+            duration = len(samples) / 22_050.0
+            self._step(holder, song_id, "analysing")
             first = not getattr(self.tracker, "loaded", True)
             started = time.monotonic()
             beats, downbeats = self.tracker(samples)
@@ -198,11 +315,6 @@ class Worker:
                 if note:
                     self.store.event(note, "warn")
 
-            try:
-                levels = self.measure(samples)
-            except Exception as e:  # the phrases need it, the beats don't: carry on without
-                levels = None
-                self.store.event(f"{song['artist']} – {song['title']}: couldn't measure the sound for phrases: {e}", "warn")
             genres = [g["label"] for g in self.store.genres(song_id)]
             values = grid.analyse(beats, downbeats, duration or song["duration"], levels, genres)
             values.update(download_seconds=download_seconds, decode_seconds=decode_seconds, model_seconds=model_seconds)
@@ -213,13 +325,6 @@ class Worker:
                              f"{values.get('beats_per_bar') or '?'} a bar · {size / 1e6:.1f} MB in "
                              f"{download_seconds:.1f}s, decoded in {decode_seconds:.1f}s, model {model_seconds:.1f}s")
         except Exception as e:  # one song failing never stops the queue
-            message = str(e) or e.__class__.__name__
-            self.last_error = message
-            self.store.set_state(song_id, "failed", message)
-            self.store.event(f"{song['artist']} – {song['title']} failed: {message}", "error")
-            if not isinstance(e, (SubsonicError, RuntimeError)):
-                traceback.print_exc()
+            self._failed(song, e)
         finally:
-            if path and os.path.exists(path):
-                os.remove(path)
             self.current = None
