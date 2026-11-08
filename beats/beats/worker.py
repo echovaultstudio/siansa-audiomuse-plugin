@@ -20,6 +20,7 @@ class Worker:
         self.store = store
         self.navidrome = navidrome
         self.audiomuse = audiomuse
+        self.plugin_state = {"state": "waiting", "text": "Not asked yet"}
         self.tracker = tracker  # (samples) -> (beats, downbeats)
         self.decode = decode  # (path) -> samples
         self.data_dir = data_dir
@@ -75,20 +76,66 @@ class Worker:
             self.wake()
             return {"songs": len(songs), "queued": queued}
 
+    def regrid(self):
+        """Works out again, from their saved beats, the results of an older Siansa Beats (no model needed)."""
+        stale = self.store.stale_results()
+        for song_id, model in stale:
+            row = self.store.result(song_id, model, with_beats=True)
+            song = self.store.song(song_id) or {}
+            if row and row.get("beats"):
+                self.store.update_result(song_id, model, grid.analyse(row["beats"], row["downbeats"],
+                                                                      song.get("duration") or row["beats"][-1]))
+        if stale:
+            self.store.event(f"Worked out the tempo again for {len(stale)} songs from their saved beats")
+        return len(stale)
+
+    def check_plugin(self):
+        """Asks the Siansa plugin whether it's there, for the page's plugin line."""
+        if not self.audiomuse.configured:
+            self.plugin_state = {"state": "off", "text": "Set AUDIOMUSE_URL (and AUDIOMUSE_TOKEN if AudioMuse-AI "
+                                                         "has a login) to compare with the plugin"}
+            return self.plugin_state
+        try:
+            health = self.audiomuse.health()
+            if health.get("status") == "error":
+                raise AudioMuseError(health.get("error") or "The plugin says it isn't working: AudioMuse-AI's log says more")
+            version = health.get("plugin_version", "?")
+            self.plugin_state = {"state": "ok", "version": version, "text": f"Siansa plugin {version} answers"}
+            self.store.event(f"Siansa plugin {version} answers on AudioMuse-AI")
+        except AudioMuseError as e:
+            self.plugin_state = {"state": "error", "text": f"The Siansa plugin doesn't answer: {e}"}
+            self.store.event(self.plugin_state["text"], "warn")
+        return self.plugin_state
+
     def refresh_plugin(self, ids):
         """The Siansa plugin's readings of ``ids``, kept for comparison. Quietly skipped without AudioMuse-AI."""
         if not self.audiomuse.configured or not ids:
+            self.check_plugin()
             return 0
         try:
             found = self.audiomuse.profiles(ids)
         except AudioMuseError as e:
-            self.store.event(f"Couldn't read the plugin's readings from AudioMuse-AI: {e}", "warn")
+            self.plugin_state = {"state": "error", "text": f"Couldn't read the plugin's readings: {e}"}
+            self.store.event(self.plugin_state["text"], "warn")
             return 0
+        with_beats = 0
         for song_id, values in found.items():
             if any(values.get(f) is not None for f in ("intro_bpm", "outro_bpm")):
                 self.store.save_plugin(song_id, values)
-        self.store.event(f"Plugin readings: {len(found)} of {len(ids)} songs measured by the Siansa plugin")
-        return len(found)
+                with_beats += 1
+        if not found:
+            text = (f"The plugin knows none of these {len(ids)} songs: has AudioMuse-AI analysed them, and is it "
+                    "set up with this Navidrome?")
+            state = "warn"
+        elif with_beats < len(found):
+            text = (f"Plugin readings for {with_beats} of {len(ids)} songs ({len(found) - with_beats} measured "
+                    "before the plugin read beats: it does them as it goes)")
+            state = "ok" if with_beats else "warn"
+        else:
+            text, state = f"Plugin readings for {with_beats} of {len(ids)} songs", "ok"
+        self.plugin_state = {"state": state, "text": text, "found": with_beats, "asked": len(ids)}
+        self.store.event(text, "info" if state == "ok" else "warn")
+        return with_beats
 
     # ---- the work ----
 

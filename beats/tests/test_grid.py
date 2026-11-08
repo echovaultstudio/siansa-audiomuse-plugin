@@ -118,11 +118,59 @@ class VerdictTest(unittest.TestCase):
         self.assertEqual(notes["BPM tag 186 is double of this"], "warn")
         self.assertEqual(notes["93.0 is outside Trance's usual 125–150"], "warn")
 
+    def test_half_speed_for_the_genre_isnt_a_disagreement(self):
+        notes = grid.verdict({"bpm": 87.0, "steady": 0.99}, genres=["Drum And Bass"])
+        self.assertEqual(notes, [("info", "Counted at half speed: 87.0 is 174.0 for Drum And Bass")])
+
+    def test_a_half_time_intro_is_noted_not_flagged(self):
+        result = {"bpm": 174.0, "intro_bpm": 87.0, "intro_steady": 0.95, "outro_bpm": 174.1, "steady": 0.9}
+        self.assertEqual(grid.verdict(result, genres=["Drum And Bass"]), [("info", "Starts at half time (87.0)")])
+
+    def test_an_end_at_another_tempo_is_noted(self):
+        result = {"bpm": 174.0, "intro_bpm": 140.0, "intro_steady": 0.95, "outro_bpm": 120.0, "outro_steady": 0.3,
+                  "steady": 0.9}
+        notes = grid.verdict(result)
+        self.assertIn(("info", "Starts at 140.0, not the song's 174.0"), notes)
+        self.assertIn(("info", "Ends without a steady beat"), notes)
+
     def test_no_beat(self):
         self.assertEqual(grid.verdict({"bpm": None}), [("warn", "No steady beat found")])
 
     def test_unsteady_is_noted(self):
         self.assertIn(("info", "Tempo varies"), grid.verdict({"bpm": 100.0, "steady": 0.4}))
+
+
+class MainTempoTest(unittest.TestCase):
+    def test_a_breakdown_doesnt_drag_the_tempo_off(self):
+        # As Control: 140 most of the way, with a slower stretch in the middle; one line through it all read 149.
+        beats = beats_at(140, 120) + [120 + b for b in beats_at(100, 40, start=0.0)] + [160 + b for b in beats_at(140, 120, start=0.0)]
+        result = grid.analyse(beats, beats[::4], 280.0)
+        self.assertAlmostEqual(result["bpm"], 140.0, delta=0.3)
+        self.assertGreater(result["main_share"], 0.8)
+        self.assertGreater(abs(result["bpm_fit"] - 140.0), 1.0)
+
+    def test_a_half_time_intro_doesnt_drag_the_tempo_off(self):
+        beats = beats_at(87, 60) + [60 + b for b in beats_at(174, 240, start=0.0)]
+        result = grid.analyse(beats, beats[::4], 300.0)
+        self.assertAlmostEqual(result["bpm"], 174.0, delta=0.4)
+        self.assertAlmostEqual(result["intro_bpm"], 87.0, delta=0.4)
+
+    def test_a_steady_song_keeps_the_fine_reading(self):
+        beats = beats_at(128, 240)
+        result = grid.analyse(beats, beats[::4], 240.0)
+        self.assertEqual(result["bpm"], result["bpm_fit"])
+        self.assertAlmostEqual(result["main_share"], 1.0, places=2)
+
+    def test_too_few_beats(self):
+        self.assertEqual(grid.main_tempo([0.5, 1.0, 1.5]), (None, 0.0))
+
+
+class GenreFitTest(unittest.TestCase):
+    def test_half_and_double_are_the_same_beat(self):
+        self.assertIsNone(grid.genre_fit(174, 160, 180))
+        self.assertEqual(grid.genre_fit(87, 160, 180), "half")
+        self.assertEqual(grid.genre_fit(280, 125, 150), "double")
+        self.assertEqual(grid.genre_fit(105, 160, 180), "outside")
 
 
 class CurveTest(unittest.TestCase):

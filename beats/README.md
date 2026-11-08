@@ -87,13 +87,17 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
    time each step took. The first song takes longer while the model loads.
 2. **The table**, a row a song:
    - **Tag**: the file's BPM tag. **Plugin**: the Siansa plugin's intro and outro tempo today.
-   - **Beat This!**: the whole song's tempo, with intro / outro below. **Bar**: beats a bar, and the share of
+   - **Beat This!**: the song's tempo, with intro / outro below. It's the tempo the song spends most of its time at,
+     so a breakdown, a half-time intro or a tempo change doesn't drag it off (the song's page also shows one
+     straight line through every beat, as 0.2 gave it). **Bar**: beats a bar, and the share of
      bars that agree. **Steady**: how evenly the beats fall, and the share on a straight grid (a drum machine is
      near 100 %).
    - **Notes**: what the readings say together: whether they agree, or how they relate (**4/3**, **double**,
      **half**…; a misreading is nearly always one of those), and whether the tempo is outside the genre's usual
-     range (trance 125–150, drum & bass 160–180…).
-   - **Disagreements** shows only the songs with a warning.
+     range (trance 125–150, drum & bass 160–180…, with 3 % to spare). Half or double the genre's tempo is the
+     same beat counted another way (a drum & bass song read at 87 is 174), so it's noted, not flagged; so is an
+     intro or outro at another tempo than the rest of the song.
+   - **Worth a listen** shows only the songs where readings really disagree (a warning).
 3. **Tap a song** to open it:
    - play it: **Clicks on the beats** ticks on every beat, higher on each downbeat. If the clicks sit on the kick
      drum, the beats are right; if they drift or fall between, they're not;
@@ -102,6 +106,10 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
      the ends the plugin measures (shaded) and the genre's range (green band). Tap it to jump there;
    - **Analyse again** reads it once more; **Remove** forgets it (nothing changes on Navidrome).
 4. **Export CSV** gives the table, for a spreadsheet.
+
+**The plugin's readings.** The pill at the top says whether the Siansa plugin answers and for how many songs it has
+readings; when something's wrong, a line under the top says what to check (the address, the token, the plugin not
+installed, a name the container can't look up…). **Read the plugin's values again** asks once more.
 
 To add songs, add them to the playlist and press **Analyse playlist** again: only the new ones are read.
 

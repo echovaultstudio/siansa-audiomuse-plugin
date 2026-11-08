@@ -19,7 +19,7 @@ import sqlite3
 import threading
 import time
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: results have bpm_fit and main_share (0.3.0)
 EVENTS_KEPT = 500
 
 SCHEMA = """
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS plugin (
 CREATE TABLE IF NOT EXISTS events (at REAL, level TEXT, message TEXT);
 """
 
-RESULT_FIELDS = ("bpm", "bpm_median", "steady", "grid_ms", "grid_share", "intro_bpm", "intro_steady", "outro_bpm",
+RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "bpm_median", "steady", "grid_ms", "grid_share", "intro_bpm", "intro_steady", "outro_bpm",
                  "outro_steady", "beats_per_bar", "bar_share", "first_downbeat_ms", "beat_count", "downbeat_count",
                  "download_seconds", "decode_seconds", "model_seconds")
 PLUGIN_FIELDS = ("intro_bpm", "outro_bpm", "intro_steady", "outro_steady", "intro_bar_ms", "outro_bar_ms")
@@ -62,6 +62,10 @@ class Store:
         with self.lock, self.db:
             self.db.execute("PRAGMA journal_mode=WAL")
             self.db.executescript(SCHEMA)
+            columns = {r[1] for r in self.db.execute("PRAGMA table_info(results)")}
+            for column in ("bpm_fit", "main_share"):
+                if column not in columns:
+                    self.db.execute(f"ALTER TABLE results ADD COLUMN {column} REAL")
             if self.db.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
                 self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             # Songs that were being worked on when the service stopped go back in the queue.
@@ -103,6 +107,9 @@ class Store:
     def song(self, song_id):
         rows = self._rows("SELECT * FROM songs WHERE id=?", (song_id,))
         return rows[0] if rows else None
+
+    def song_ids(self):
+        return [r["id"] for r in self._rows("SELECT id FROM songs")]
 
     def remove(self, song_id):
         with self.lock, self.db:
@@ -163,6 +170,19 @@ class Store:
         if with_beats:
             row["beats"], row["downbeats"] = json.loads(beats or "[]"), json.loads(downbeats or "[]")
         return row
+
+    def stale_results(self):
+        """``(song_id, model)`` of results worked out before the main tempo (0.3.0), to be worked out again from
+        their beats."""
+        return [(r["song_id"], r["model"]) for r in
+                self._rows("SELECT song_id, model FROM results WHERE bpm_fit IS NULL AND beats IS NOT NULL")]
+
+    def update_result(self, song_id, model, values):
+        """Rewrites the readings worked out from the beats, keeping the beats and the times."""
+        keys = [k for k in RESULT_FIELDS if k in values and not k.endswith("_seconds")]
+        with self.lock, self.db:
+            self.db.execute(f"UPDATE results SET {', '.join(f'{k}=?' for k in keys)} WHERE song_id=? AND model=?",
+                            (*[values[k] for k in keys], song_id, model))
 
     def save_plugin(self, song_id, values):
         with self.lock, self.db:

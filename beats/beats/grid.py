@@ -97,6 +97,60 @@ def tempo(beats):
     }
 
 
+MAIN_BAND = 0.02  # local tempos within 2 % of each other are the same tempo
+MAIN_WINDOW = 16  # beats in each local reading, as the tempo curve
+
+
+def local_tempos(beats, window=MAIN_WINDOW):
+    """``[(seconds, bpm, length), …]``: the tempo over every run of ``window`` beats along the song, with the
+    middle beat's time and how long the run lasts. A missed beat counts as the two it spans."""
+    beats = sorted(beats)
+    out = []
+    for i in range(len(beats) - window):
+        gaps = [b - a for a, b in zip(beats[i:i + window], beats[i + 1:i + window + 1])]
+        local = statistics.median(gaps)
+        span = beats[i + window] - beats[i]
+        if local <= 0 or span <= 0:
+            continue
+        count = sum(max(1, round(g / local)) for g in gaps)
+        out.append((beats[i + window // 2], 60.0 * count / span, span))
+    return out
+
+
+def main_tempo(beats, band=MAIN_BAND):
+    """``(bpm, share)``: the tempo the song spends most of its time at, and the share of its beat it lasts, or
+    ``(None, 0.0)``. Unlike one line through every beat, a breakdown, a half-time intro or a tempo change doesn't
+    drag it off: each stretch of the song counts for its own tempo."""
+    local = local_tempos(beats)
+    if not local:
+        return None, 0.0
+    # Each run counts for its length, spread over the window's beats so overlapping runs don't count twice.
+    points = sorted((math.log(bpm), span / MAIN_WINDOW, bpm) for _, bpm, span in local)
+    total = sum(w for _, w, _ in points)
+    width = math.log(1.0 + band)
+    best, best_weight, lo, weight = (0, 0), -1.0, 0, 0.0
+    for hi, (x, w, _) in enumerate(points):
+        weight += w
+        while x - points[lo][0] > 2 * width:
+            weight -= points[lo][1]
+            lo += 1
+        if weight > best_weight:
+            best, best_weight = (lo, hi), weight
+    chosen = points[best[0]:best[1] + 1]
+    bpm = _weighted_median([(b, w) for _, w, b in chosen])
+    return bpm, best_weight / total if total else 0.0
+
+
+def _weighted_median(pairs):
+    pairs = sorted(pairs)
+    half, run = sum(w for _, w in pairs) / 2.0, 0.0
+    for value, w in pairs:
+        run += w
+        if run >= half:
+            return value
+    return pairs[-1][0]
+
+
 def section(beats, start, end):
     """:func:`tempo` of the beats between ``start`` and ``end`` (seconds)."""
     return tempo([b for b in beats if start <= b <= end])
@@ -118,21 +172,10 @@ def bars(beats, downbeats):
     return usual, sum(1 for c in counts if c == usual) / len(counts)
 
 
-def tempo_curve(beats, points=240, window=16):
+def tempo_curve(beats, points=240, window=MAIN_WINDOW):
     """The local tempo along the song for a chart: ``[[seconds, bpm], …]``, each over ``window`` beats (the span
     they cover, so the model's 20 ms grid averages out), at most ``points`` of them."""
-    beats = sorted(beats)
-    if len(beats) < window + 1:
-        return []
-    out = []
-    for i in range(len(beats) - window):
-        gaps = [b - a for a, b in zip(beats[i:i + window], beats[i + 1:i + window + 1])]
-        local = statistics.median(gaps)
-        span = beats[i + window] - beats[i]
-        if local <= 0 or span <= 0:
-            continue
-        count = sum(max(1, round(g / local)) for g in gaps)  # a missed beat counts as the two it spans
-        out.append([round(beats[i + window // 2], 2), round(60.0 * count / span, 2)])
+    out = [[round(t, 2), round(bpm, 2)] for t, bpm, _ in local_tempos(beats, window)]
     if len(out) > points:
         step = len(out) / points
         out = [out[int(i * step)] for i in range(points)]
@@ -149,6 +192,9 @@ def relation(a, b, tolerance=RELATION_TOLERANCE):
     return name if abs(ratio / value - 1.0) <= tolerance else "different"
 
 
+GENRE_SLACK = 0.03  # the ranges are rough: 3 % either side still fits (Trance at 152, drum and bass at 182)
+
+
 def genre_range(genres):
     """``(low, high, genre)``: the usual tempos of the first of ``genres`` (labels) that :data:`GENRE_RANGES`
     knows, or ``None``."""
@@ -160,15 +206,37 @@ def genre_range(genres):
     return None
 
 
+def genre_fit(bpm, low, high):
+    """How ``bpm`` fits a genre's usual ``low``–``high``: ``None`` inside it, ``"half"`` when it's half a tempo
+    inside it (the beat counted at half speed, as a half-time intro), ``"double"`` the other way round, else
+    ``"outside"``. Half and double are the same beat, so they aren't a disagreement."""
+    if not bpm:
+        return None
+    low, high = low * (1 - GENRE_SLACK), high * (1 + GENRE_SLACK)
+    if low <= bpm <= high:
+        return None
+    if low <= bpm * 2 <= high:
+        return "half"
+    if low <= bpm / 2 <= high:
+        return "double"
+    return "outside"
+
+
 def analyse(beats, downbeats, duration):
     """Everything Siansa's comparison shows for one song, from Beat This!'s beats and downbeats (seconds) and the
     song's length (seconds)."""
     whole = tempo(beats) or {}
+    main, main_share = main_tempo(beats)
+    fit = whole.get("bpm")
+    if main and fit and abs(fit / main - 1.0) <= 0.005:
+        main = fit  # a steady song: the line through all its beats is the finer reading of the same tempo
     intro = section(beats, 0.0, END_SECONDS) or {}
     outro = section(beats, max(0.0, duration - END_SECONDS), duration + 1.0) or {}
     per_bar, bar_share = bars(beats, downbeats)
     return {
-        "bpm": whole.get("bpm"),
+        "bpm": main if main else fit,
+        "bpm_fit": fit,
+        "main_share": main_share if main else None,
         "bpm_median": whole.get("bpm_median"),
         "steady": whole.get("steady"),
         "grid_ms": whole.get("grid_ms"),
@@ -213,8 +281,24 @@ def verdict(result, tag_bpm=None, plugin=None, genres=()):
     found = genre_range(genres)
     if found:
         low, high, label = found
-        if not low <= bpm <= high:
+        fits = genre_fit(bpm, low, high)
+        if fits == "half":
+            notes.append(("info", f"Counted at half speed: {bpm:.1f} is {bpm * 2:.1f} for {label}"))
+        elif fits == "double":
+            notes.append(("info", f"Counted at double speed: {bpm:.1f} is {bpm / 2:.1f} for {label}"))
+        elif fits == "outside":
             notes.append(("warn", f"{bpm:.1f} is outside {label}'s usual {low}–{high}"))
+    for end in ("intro", "outro"):
+        theirs = result.get(f"{end}_bpm")
+        r = relation(theirs, bpm)
+        name = "Starts" if end == "intro" else "Ends"
+        if r in ("half", "double"):
+            notes.append(("info", f"{name} at {r} time ({theirs:.1f})"))
+        elif r and r != "same":  # how the song is made, not two readings disagreeing: noted, not flagged
+            if (result.get(f"{end}_steady") or 0) >= 0.6:
+                notes.append(("info", f"{name} at {theirs:.1f}, not the song's {bpm:.1f}"))
+            else:
+                notes.append(("info", f"{name} without a steady beat"))
     if (result.get("steady") or 0) < 0.6:
         notes.append(("info", "Tempo varies"))
     return notes
