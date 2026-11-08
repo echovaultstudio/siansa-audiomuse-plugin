@@ -19,7 +19,6 @@ API (JSON):
     GET  /api/beats/<id>              just the beat grid (the shape the plugin will read later)
     GET  /api/audio/<id>              the song for the page's player (Navidrome's MP3, passed through)
     GET  /api/export.csv              the table as CSV
-    (STRUCTURE_URL: Siansa Structure, ../structure, for All-In-One's sections of each song)
     GET  /api/export.json             every song's beats and sound levels, to tune the grid and phrases on
     POST /api/songs/<id>/marks        {"seconds": 67.4}: the owner heard a section start there
     DELETE /api/songs/<id>/marks/<n>  takes a mark away
@@ -48,7 +47,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import __version__, grid
 from .audiomuse import AudioMuse, AudioMuseError
 from .store import Store
-from .structure import Structure
 from .subsonic import Subsonic, SubsonicError
 from .worker import Worker
 
@@ -65,8 +63,6 @@ class Config:
         self.playlist = env.get("PLAYLIST", "Beat test")
         self.audiomuse_url = env.get("AUDIOMUSE_URL", "")
         self.audiomuse_token = env.get("AUDIOMUSE_TOKEN", "")
-        self.structure_url = env.get("STRUCTURE_URL", "")
-        self.structure_token = env.get("STRUCTURE_TOKEN", "")
         self.model = env.get("BEATS_MODEL", "final0")
         self.device = env.get("BEATS_DEVICE", "auto")
         self.float16 = env.get("BEATS_FLOAT16", "").strip().lower() in ("1", "true", "yes", "on")
@@ -80,7 +76,7 @@ class Config:
 class App:
     """Everything the handler needs, so the tests can make one with stand-ins."""
 
-    def __init__(self, config, tracker=None, decode=None, measure=None, structure=None):
+    def __init__(self, config, tracker=None, decode=None, measure=None):
         from . import analyser
 
         self.config = config
@@ -90,9 +86,8 @@ class App:
         self.audiomuse = AudioMuse(config.audiomuse_url, config.audiomuse_token)
         self.tracker = tracker or analyser.BeatThis(config.model, config.device, config.models_dir, config.threads,
                                                     config.float16)
-        self.structure = structure or Structure(config.structure_url, config.structure_token)
         self.worker = Worker(self.store, self.navidrome, self.audiomuse, self.tracker, decode or analyser.decode,
-                             config.data_dir, config.model, measure, self.structure)
+                             config.data_dir, config.model, measure)
         self.started = time.time()
 
     # ---- what the API returns ----
@@ -119,7 +114,6 @@ class App:
         row["grid"] = self.steady_grid(full)
         row["end_seconds"] = grid.END_SECONDS
         row["marks"] = self.store.marks(song_id)
-        row["structure"] = full.get("structure") if full else None
         return row
 
     def steady_grid(self, full):
@@ -146,8 +140,7 @@ class App:
                         "duration": row.get("duration"), "tag_bpm": row.get("tag_bpm"),
                         "result": {k: v for k, v in full.items() if k not in ("beats", "downbeats", "levels")},
                         "beats": full["beats"], "downbeats": full["downbeats"], "levels": full.get("levels"),
-                        "marks": [m["seconds"] for m in self.store.marks(row["id"])],
-                        "structure": full.get("structure")})
+                        "marks": [m["seconds"] for m in self.store.marks(row["id"])]})
         return {"version": __version__, "model": self.config.model, "songs": out}
 
     def beats(self, song_id):
@@ -191,7 +184,6 @@ class App:
             "navidrome": self.config.navidrome_url or None,
             "audiomuse": self.config.audiomuse_url or None,
             "plugin": worker.plugin_state,
-            "structure": worker.structure_state,
             "uptime_seconds": round(time.time() - self.started),
             "events": self.store.events(),
         }
@@ -452,7 +444,6 @@ def main():
     def plugin():  # in the background: a slow AudioMuse-AI doesn't hold up the page
         if app.worker.check_plugin()["state"] == "ok" and app.store.song_ids():
             app.worker.refresh_plugin(app.store.song_ids())
-        app.worker.check_structure()
 
     threading.Thread(target=plugin, name="plugin", daemon=True).start()
     server = make_server(app)

@@ -59,27 +59,7 @@ def main(folder, port=8090):
 
         return features.measure(analyser.decode(samples.path))
 
-    class Structure:  # stands in for Siansa Structure: sections where the test songs' sections start
-        configured = True
-
-        def health(self):
-            return {"version": "stand-in"}
-
-        def analyse(self, path, suffix=""):
-            import hashlib as h
-
-            with open(path, "rb") as f:
-                song = by_hash[h.sha1(f.read()).hexdigest()]
-            bar = song["expect_bar"] * 60.0 / song["expect_bpm"]
-            lead = song.get("expect_phrase_bar", 0)
-            starts = [0.0] + [(lead + 8 * k) * bar for k in range(0, 20) if (lead + 8 * k) * bar < song["duration"] - bar]
-            labels = ["intro", "verse", "chorus", "break", "chorus", "outro"]
-            segments = [{"start": a, "end": b, "label": labels[i % len(labels)]}
-                        for i, (a, b) in enumerate(zip(starts, starts[1:] + [song["duration"]]))]
-            return {"bpm": song["expect_bpm"], "beats": [], "downbeats": [], "segments": segments, "seconds": 0.1,
-                    "device": "stand-in"}
-
-    app = App(Config(env), tracker=Tracker(), decode=decode, measure=measure, structure=Structure())
+    app = App(Config(env), tracker=Tracker(), decode=decode, measure=measure)
     app.worker.start()
     app.store.event("Preview: a stand-in instead of the model")
     print(f"Preview on http://127.0.0.1:{port} (fake Navidrome {fake.url}, data {data})", flush=True)

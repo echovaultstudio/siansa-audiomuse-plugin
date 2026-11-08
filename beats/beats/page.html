@@ -9,7 +9,7 @@
   --page: #000000; --raised: #0B0F13; --raised-2: #121820; --text: #EEF2F5; --muted: #AFC2D3; --faint: #7F93A4;
   --line: rgba(175, 194, 211, 0.16); --line-strong: rgba(175, 194, 211, 0.32);
   --amber: #FFB547; --on-amber: #1A1200; --amber-text: #FFC56E; --frost: #9DB4C8;
-  --ok: #7FD1A0; --warn: #FFB547; --bad: #FF8A80; --band: rgba(127, 209, 160, 0.10); --mark: #E879F9; --section: #67E8F9;
+  --ok: #7FD1A0; --warn: #FFB547; --bad: #FF8A80; --band: rgba(127, 209, 160, 0.10); --mark: #E879F9;
   --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
   color-scheme: dark;
@@ -18,7 +18,7 @@
   :root {
     --page: #F3F6F8; --raised: #FFFFFF; --raised-2: #EDF1F4; --text: #0C1216; --muted: #46576A; --faint: #5C6E80;
     --line: rgba(12, 18, 22, 0.10); --line-strong: rgba(12, 18, 22, 0.22); --amber-text: #8F5200; --frost: #4E6B85;
-    --ok: #1F7A45; --warn: #8F5200; --bad: #B3261E; --band: rgba(31, 122, 69, 0.10); --mark: #A21CAF; --section: #0E7490; color-scheme: light;
+    --ok: #1F7A45; --warn: #8F5200; --bad: #B3261E; --band: rgba(31, 122, 69, 0.10); --mark: #A21CAF; color-scheme: light;
   }
 }
 * { box-sizing: border-box; }
@@ -155,7 +155,7 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
     </div>
     <div class="marks" id="d-marks" aria-live="polite"></div>
     <canvas id="beatview" height="120" aria-label="Beats around the playhead"></canvas>
-    <div class="legend"><span><i style="background:var(--frost)"></i>beat</span><span><i style="background:var(--amber)"></i>downbeat (bar number)</span><span><i style="background:var(--ok)"></i>phrase start (every 8 or 16 bars)</span><span><i style="background:var(--mark)"></i>your section marks</span><span><i style="background:var(--section)"></i>All-In-One's sections</span><span id="other-legend"><i style="background:var(--faint);height:6px"></i>the model's beats</span><span><i style="background:var(--text)"></i>now</span><span>8 seconds around what's playing; tap to jump</span></div>
+    <div class="legend"><span><i style="background:var(--frost)"></i>beat</span><span><i style="background:var(--amber)"></i>downbeat (bar number)</span><span><i style="background:var(--ok)"></i>phrase start (every 8 or 16 bars)</span><span><i style="background:var(--mark)"></i>your section marks</span><span id="other-legend"><i style="background:var(--faint);height:6px"></i>the model's beats</span><span><i style="background:var(--text)"></i>now</span><span>8 seconds around what's playing; tap to jump</span></div>
     <canvas id="curve" height="170" aria-label="Tempo along the song"></canvas>
     <div class="legend"><span><i style="background:var(--amber)"></i>Beat This! tempo</span><span><i style="background:var(--ok)"></i>BPM tag</span><span><i style="background:var(--bad)"></i>plugin's intro / outro</span><span><i style="background:var(--line-strong)"></i>the ends the plugin measures</span><span><i style="background:var(--band);height:10px"></i>genre's usual range</span></div>
     <div id="d-notes"></div>
@@ -202,7 +202,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<
 const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v)) ? "–" : Number(v).toFixed(d);
 const pct = (v) => (v === null || v === undefined) ? "–" : Math.round(v * 100) + "%";
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const BUSY = ["downloading", "decoding", "analysing", "sections"];
+const BUSY = ["downloading", "decoding", "analysing"];
 let songs = [], filter = "all", selected = null, detail = null, lastCounts = "", status = null;
 
 async function api(path, options = {}) {
@@ -237,7 +237,6 @@ async function refreshStatus() {
     `<span class="pill ${s.model_loaded ? (s.device_note ? "wait" : "ok") : "wait"}" title="${esc(s.device_note || "")}">Model ${esc(s.model)} · ${s.model_loaded ? esc(s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") + (s.float16 && s.device !== "cpu" ? " (half precision)" : "") + (s.model_load_seconds ? ` · loaded in ${fmt(s.model_load_seconds)}s` : "") : (s.device === "cpu" ? "CPU" : "GPU if there is one") + " · loads with the first song"}</span>`,
     `<span class="pill ${s.navidrome ? "ok" : "bad"}">Navidrome</span>`,
     `<span class="pill ${PLUGIN_PILL[(s.plugin || {}).state] || "wait"}" title="${esc((s.plugin || {}).text || "")}">${pluginPill(s)}</span>`,
-    s.structure && s.structure.state !== "off" ? `<span class="pill ${s.structure.state === "ok" ? "ok" : "bad"}" title="${esc(s.structure.text || "")}">Sections: All-In-One</span>` : "",
     `<span class="pill">v${esc(s.version)}</span>`,
   ].join("");
   if (!$("playlist").value) $("playlist").value = s.playlist;
@@ -333,7 +332,6 @@ async function openSong(id, newSong, fromHistory) {
     ["Steady grid", detail.grid ? `${fmt(detail.grid.bpm, 2)} BPM · ${pct(detail.grid.on_grid)} of the model's beats on it · bars from ${pct(detail.grid.bar_share)} of its downbeats` : "None: the song isn't at one tempo, so the clicks follow the model's beats"],
     ["Bars", !detail.grid ? "–" : {both: "The model's downbeats and the music's changes agree", model: "From the model's downbeats (no clear changes to check them by)", changes: "Moved to where the music changes: the model's downbeats were off"}[detail.grid.downbeat_source] || "From the model's downbeats"],
     ["Phrases", !detail.grid ? "–" : detail.grid.phrases && detail.grid.phrases.length ? `Every ${detail.grid.phrase_bars} bars from ${fmt(detail.grid.phrases[0], 2)} s · ${detail.grid.phrase_big_on} of ${detail.grid.phrase_big} big changes on them` : detail.grid.phrase_big == null ? "Not measured yet: the song is analysed again for its sound" : `No clear phrases (${detail.grid.phrase_big_on || 0} of ${detail.grid.phrase_big} big changes on one bar of 8)`],
-    ["Sections (All-In-One)", detail.structure ? (sections().map((x) => `${x.label} ${clock(x.start)}`).join(" · ") || "none found") + (detail.structure.seconds ? ` · in ${fmt(detail.structure.seconds, 1)} s` : "") : "–"],
     ["Beats a bar", r.beats_per_bar ? `${r.beats_per_bar} (${pct(r.bar_share)} of bars)` : "–"], ["First downbeat", r.first_downbeat_ms != null ? fmt(r.first_downbeat_ms / 1000, 2) + " s" : "–"],
     ["Steady", pct(r.steady)], ["On a straight grid", `${pct(r.grid_share)} (worst ${fmt(r.grid_ms, 0)} ms)`],
     ["Beats / downbeats", r.beat_count != null ? `${r.beat_count} / ${r.downbeat_count}` : "–"],
@@ -385,10 +383,6 @@ function drawBeatView() {
   g.clearRect(0, 0, w, h);
   if (!detail) return;
   const [beats, downs, other, phrases] = shownBeats();
-  g.fillStyle = css("--section");  // All-In-One's section starts, with their label
-  for (const sec of sections()) if (sec.start >= t0 && sec.start <= t0 + span) {
-    g.fillRect(x(sec.start) - 1, 0, 2, h); g.fillText(sec.label, x(sec.start) + 4, h - 24);
-  }
   g.fillStyle = css("--mark");  // the owner's marks, under the beats
   for (const m of detail.marks || []) if (m.seconds >= t0 && m.seconds <= t0 + span) { g.fillRect(x(m.seconds) - 3, 0, 6, h); }
   g.font = "11px " + css("--mono");
@@ -429,9 +423,6 @@ function drawCurve() {
   line(p.intro_bpm, css("--bad"), 0, Math.min(end, dur)); line(p.outro_bpm, css("--bad"), Math.max(0, dur - end), dur);
   g.fillStyle = css("--ok");  // the phrase starts, as ticks along the top
   for (const t of (detail.grid && detail.grid.phrases) || []) g.fillRect(x(t) - 1, 10, 2, 8);
-  g.fillStyle = css("--section");  // All-In-One's sections along the top, with their label
-  g.font = "10px " + css("--mono");
-  for (const sec of sections()) { g.fillRect(x(sec.start), 0, 1.5, 22); g.fillText(sec.label, x(sec.start) + 3, 30); }
   g.fillStyle = css("--mark");  // the owner's marks, along the bottom
   for (const m of detail.marks || []) g.fillRect(x(m.seconds) - 2, h - 28, 4, 10);
   if (pts.length) { g.strokeStyle = css("--amber"); g.lineWidth = 2; g.beginPath(); pts.forEach(([t, v], i) => i ? g.lineTo(x(t), y(v)) : g.moveTo(x(t), y(v))); g.stroke(); }
@@ -457,11 +448,6 @@ function shownBeats() {
 const near = (list, t) => list.some((d) => Math.abs(d - t) < 0.03);
 $("click-source").addEventListener("change", () => { resetClicks(); drawBeatView(); drawMarks(); });
 
-// All-In-One's sections (from Siansa Structure), without its "start" and "end" (the silence around a song).
-function sections() {
-  return ((detail && detail.structure && detail.structure.segments) || []).filter((sec) => sec.label !== "start" && sec.label !== "end");
-}
-
 // ---- section marks: where the owner hears a section start, to check the phrases against ----
 // Each mark is kept where it was tapped; it's shown at the bar it's nearest the start of (a tap comes a little late).
 function markBar(t) {
@@ -480,9 +466,7 @@ function drawMarks() {
     const at = markBar(m.seconds);
     const where = !at ? "" : !at.hasPhrases ? ` · bar ${at.bar}` : at.phraseBar === 0 ? ` · bar ${at.bar} · on a phrase start ✓` :
       ` · bar ${at.bar} · ${at.phraseBar === null ? "before the first phrase" : at.phraseBar + " bars after a phrase start"}`;
-    const sec = sections().find((x) => Math.abs(x.start - m.seconds) < 1.5);
-    const ai = !detail.structure ? "" : sec ? ` · All-In-One: ${sec.label} ✓` : " · All-In-One: none here";
-    return `<span class="chip"><button data-jump="${m.seconds}" title="Play from just before it">${clock(m.seconds)}${where}${ai}</button>` +
+    return `<span class="chip"><button data-jump="${m.seconds}" title="Play from just before it">${clock(m.seconds)}${where}</button>` +
       `<button data-unmark="${m.id}" aria-label="Take this mark away">✕</button></span>`;
   }).join("") : `<span class="hint">Tap <b>Section starts here</b> (or press M) on every drop, breakdown and big change you hear.</span>`;
 }
