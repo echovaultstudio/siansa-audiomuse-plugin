@@ -143,6 +143,15 @@ addresses or passwords): what the grid and phrases are worked out from, to tune 
 `:dev-cuda` (GPU): put that tag in the YAML instead of `latest` / `cuda` and restart. It keeps the same data; going
 back to `:cuda` keeps it too.
 
+**All-In-One's sections (dev).** [All-In-One](https://github.com/mir-aidj/all-in-one) (MIT) is a trained model that
+finds a song's sections (intro, verse, chorus, break…) after separating its drums, bass, vocals and the rest. It runs
+in its own container, Siansa Structure (`../structure`, published as `siansa-structure:dev-cuda`): `truenas-dev.yml`
+has both. With `STRUCTURE_URL` set, Siansa Beats sends it each song as it analyses it (songs analysed before are
+analysed again once), and shows its sections in light blue on the song's page, next to the phrases and your marks:
+each mark says whether All-In-One found a section there too. If Siansa Structure isn't running, the songs are
+analysed as before and asked again on the next start. It was trained mostly on pop (the Harmonix Set): how well it
+does on drum & bass and trance is what the marks will tell.
+
 To add songs, add them to the playlist and press **Analyse playlist** again: only the new ones are read.
 
 ## Test it
