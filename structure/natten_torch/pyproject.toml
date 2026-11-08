@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "natten"
+version = "0.17.1+torch"
+description = "NATTEN's natten1d/2d qkrpb and av functions in plain PyTorch, for All-In-One (Siansa Structure)"
+requires-python = ">=3.8"
+
+[tool.setuptools]
+packages = ["natten"]

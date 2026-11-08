@@ -1,0 +1,102 @@
+# Siansa Structure (structure): All-In-One in its own image, built, run on the test songs with known sections, and
+# from the dev branch published to ghcr.io/echovaultstudio/siansa-structure as dev (CPU) and dev-cuda.
+name: Siansa Structure
+
+on:
+  push:
+    paths:
+      - "structure/**"
+      - ".github/workflows/structure.yml"
+  pull_request:
+    paths:
+      - "structure/**"
+      - ".github/workflows/structure.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: structure-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  natten:
+    name: Our NATTEN functions against NATTEN's own
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - name: torch, and NATTEN built from source (CPU)
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch==2.3.1
+          pip install numpy==1.26.4 cmake ninja
+          NATTEN_N_WORKERS=4 pip install --no-build-isolation -v natten==0.17.1 2>&1 | tail -20
+      - name: The same answers
+        run: python structure/check_natten.py structure/natten_torch/natten/functional.py
+
+  image:
+    name: Image with All-In-One (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cpu
+            index: https://download.pytorch.org/whl/cpu
+            suffix: ""
+          - variant: cuda
+            index: https://download.pytorch.org/whl/cu121
+            suffix: "-cuda"
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/echovaultstudio/siansa-structure
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
+          df -h / | tail -1
+
+      - name: Build
+        run: |
+          set -o pipefail
+          docker build --progress=plain --build-arg TORCH_INDEX=${{ matrix.index }} \
+            -t siansa-structure:test structure 2>&1 | tail -60
+          docker image ls siansa-structure:test --format 'Image size: {{.Size}}'
+
+      - name: Songs with known sections
+        run: |
+          sudo apt-get install -y --no-install-recommends ffmpeg >/dev/null 2>&1 || true
+          python3 -I beats/tests/make_test_songs.py songs
+
+      - name: Start it
+        run: |
+          docker run -d --name structure -p 8091:8091 siansa-structure:test
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8091/health && break; sleep 2; done
+
+      - name: All-In-One on the test songs
+        run: python3 -I structure/check.py http://127.0.0.1:8091 songs/catalog.json
+
+      - name: Its log
+        if: always()
+        run: docker logs structure 2>&1 | tail -80 || true
+
+      - name: Publish
+        if: github.ref == 'refs/heads/dev' && github.event_name != 'pull_request'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          version=$(python3 -c "import re;print(re.search(r'VERSION = \"(.+)\"', open('structure/server.py').read())[1])")
+          suffix="${{ matrix.suffix }}"
+          first=$([ -z "$suffix" ] && echo dev || echo dev-cuda)
+          for tag in "$first" "$version-dev$suffix" "sha-${GITHUB_SHA::7}$suffix"; do
+            docker tag siansa-structure:test "$IMAGE:$tag" && docker push -q "$IMAGE:$tag"
+          done
+          echo "::notice::Published $IMAGE:$first ($version-dev$suffix)"
