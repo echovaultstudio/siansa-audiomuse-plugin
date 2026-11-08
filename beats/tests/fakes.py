@@ -36,6 +36,8 @@ class FakeServer:
         with open(os.path.join(folder, "catalog.json")) as f:
             self.songs = json.load(f)
         self.requests = []
+        self.in_playlist = None  # the ids in the playlist ("Beat test"), or None for every song
+        self.search_all = True  # whether search3 finds every song for an empty query (else: album by album)
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -84,8 +86,21 @@ class FakeServer:
                 if method == "getPlaylist":
                     if q.get("id") != "pl-1":
                         return self.subsonic({"playlist": {"id": q.get("id"), "entry": []}})
-                    return self.subsonic({"playlist": {"id": "pl-1", "name": PLAYLIST,
-                                                       "entry": [entry(s) for s in fake.songs]}})
+                    return self.subsonic({"playlist": {"id": "pl-1", "name": PLAYLIST, "entry": [
+                        entry(s) for s in fake.songs if fake.in_playlist is None or s["id"] in fake.in_playlist]}})
+                if method == "search3":
+                    found = fake.songs if q.get("query") == "" and fake.search_all else []
+                    start, count = int(q.get("songOffset", 0)), int(q.get("songCount", 20))
+                    return self.subsonic({"searchResult3": {"song": [entry(s) for s in found[start:start + count]]}})
+                albums = sorted({s.get("album", "Test") for s in fake.songs})
+                if method == "getAlbumList2":
+                    start, size = int(q.get("offset", 0)), int(q.get("size", 10))
+                    return self.subsonic({"albumList2": {"album": [{"id": "al-" + a, "name": a}
+                                                                   for a in albums[start:start + size]]}})
+                if method == "getAlbum":
+                    name = q.get("id", "").removeprefix("al-")
+                    return self.subsonic({"album": {"id": q.get("id"), "song": [
+                        entry(s) for s in fake.songs if s.get("album", "Test") == name]}})
                 if method == "getSong":
                     if q.get("id") not in by_id:
                         return self.subsonic(error="Song not found")

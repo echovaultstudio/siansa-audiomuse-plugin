@@ -77,6 +77,30 @@ class Subsonic:
         entries = (self._get("getPlaylist", id=playlist_id).get("playlist") or {}).get("entry") or []
         return [song_from(e) for e in entries]
 
+    def all_songs(self, page=500):
+        """Every song on the server, ``page`` at a time: ``search3`` with an empty query (as clients that sync the
+        whole library ask Navidrome), or album by album when the server finds nothing for an empty query."""
+        songs, offset = [], 0
+        while True:
+            found = (self._get("search3", query="", songCount=page, songOffset=offset, artistCount=0,
+                               albumCount=0).get("searchResult3") or {}).get("song") or []
+            songs += [song_from(e) for e in found]
+            if len(found) < page:
+                break
+            offset += page
+        return songs or self._songs_by_album()
+
+    def _songs_by_album(self, page=500):
+        songs, offset = [], 0
+        while True:
+            albums = (self._get("getAlbumList2", type="alphabeticalByName", size=page, offset=offset)
+                      .get("albumList2") or {}).get("album") or []
+            for album in albums:
+                songs += [song_from(e) for e in (self._get("getAlbum", id=album["id"]).get("album") or {}).get("song") or []]
+            if len(albums) < page:
+                return songs
+            offset += page
+
     def song(self, song_id):
         return song_from(self._get("getSong", id=song_id).get("song") or {})
 

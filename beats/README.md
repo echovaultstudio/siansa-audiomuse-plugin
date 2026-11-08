@@ -11,7 +11,7 @@ AudioMuse-AI or the plugin. If Beat This! proves better, the plugin can later as
 
 | | |
 |---|---|
-| **Reads** | One Navidrome playlist (default **Beat test**): each song's original file, BPM tag and genre. Optionally the Siansa plugin's readings from AudioMuse-AI. |
+| **Reads** | One Navidrome playlist (default **Beat test**), or the whole library when asked: each song's original file, BPM tag and genre. Optionally the Siansa plugin's readings from AudioMuse-AI. |
 | **Finds** | Every beat and downbeat (Beat This!, the `final0` model, on the CPU or an NVIDIA GPU), and from them the tempo of the whole song and of each end (the first and last 30 seconds, as the plugin measures), how steady it is, the beats a bar and the first downbeat. |
 | **Keeps** | `/data/beats.db` (SQLite) in the container's volume. Each song is downloaded to `/data` while it's read, then deleted. |
 | **Shows** | A page at port 8090: what it's doing, a table of every song with what the readings say together, and a page per song with its beats, a player with clicks on the beats, and its tempo along the song. |
@@ -145,6 +145,13 @@ back to `:cuda` keeps it too.
 
 To add songs, add them to the playlist and press **Analyse playlist** again: only the new ones are read.
 
+**The whole library.** **Analyse whole library** reads every song on Navidrome and analyses them all, after the
+playlist's (which always go first). It stays on across restarts and reads the library again every 6 hours for new
+songs; press it again to go back to the playlist alone (the library's songs not yet analysed leave the queue, the
+ones done stay). The next song is downloaded and decoded while the model works on this one, so the model rarely
+waits for the network; the top says how long each song takes, to judge how long the library will. The table shows the **Playlist** or the **Whole library** (the first
+200, the search finding the rest), and **Export CSV** and **Download data** take the songs it shows.
+
 ## Test it
 
 Every change is tested by GitHub Actions (`.github/workflows/beats.yml` in this repository):
@@ -184,9 +191,8 @@ On the server, after setting it up:
 
 - Genres come from the files' tags only (the **tag** source). The database keeps each genre's source, so better
   ones (a genre model, AudioMuse-AI's labels) can be added beside them, and the checks use every source.
-- It doesn't feed the plugin yet. `GET /api/beats/<song id>` already gives a song's grid in the shape the plugin
-  would read: the steady grid when the song is at one tempo (`"steady": true`), else the model's beats, with the
-  model's own in `model_beats` and `model_downbeats`.
+- `GET /api/grids?ids=a,b` gives each song's grid at both ends as the Siansa app reads it (through the Siansa
+  Beats plugin on AudioMuse-AI, for Siansa Dev). `GET /api/beats/<song id>` gives every beat of one song.
 - Phrases are 8 or 16 bars: 16 when three quarters of the big changes (at least 4) fall on every other start of
   8. A song whose sections don't change its sound much (a long, even techno track) may have no clear phrases.
 - Songs analysed before 0.5.0 are analysed again once, on start, to measure their sound (a few seconds each).
@@ -208,8 +214,9 @@ On the server, after setting it up:
 ## API
 
 `GET /api/health`, `/api/status`, `/api/playlists`, `/api/songs`, `/api/songs/<id>` (with every beat),
-`/api/beats/<id>`, `/api/audio/<id>`, `/api/export.csv`; `POST /api/scan {"playlist"}`, `/api/songs/<id>/analyse`,
-`/api/analyse-all`, `/api/plugin/refresh`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`. See
+`/api/beats/<id>`, `/api/audio/<id>`, `/api/grids?ids=`, `/api/export.csv`, `/api/export.json`;
+`POST /api/scan {"playlist"}`, `/api/library {"on"}`, `/api/library/read`, `/api/songs/<id>/analyse`,
+`/api/analyse-all {"scope"}`, `/api/plugin/refresh`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`. See
 `beats/server.py`.
 
 Beat This! is by Francesco Foscarin, Jan Schlüter and Gerhard Widmer (ISMIR 2024), under the MIT licence.
