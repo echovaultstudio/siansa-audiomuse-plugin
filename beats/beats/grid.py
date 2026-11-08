@@ -14,7 +14,7 @@ import statistics
 
 from . import features, phrase
 
-ANALYSIS_VERSION = 7  # what's worked out from the beats: older results are worked out again from their saved beats
+ANALYSIS_VERSION = 8  # what's worked out from the beats: older results are worked out again from their saved beats
 END_SECONDS = 30.0  # each end, as the plugin's beats.SECONDS
 MIN_BEATS = 8  # fewer, and there's no tempo worth reporting
 GRID_MS = 30.0  # a beat this close to the straight grid sits on it
@@ -424,6 +424,9 @@ def doubled(beats, period):
     return out + beats[-1:]
 
 
+BEATLESS_OUTRO_SECONDS = 16.0  # this long without a beat at the end is a beatless outro, as the plugin reads it
+
+
 def app_ends(steady, model_beats, duration, end_seconds=END_SECONDS):
     """The beat grid at each end of the song, in the shape the Siansa app reads from the Siansa plugin (its
     ``BeatEnd``): ``intro_bpm``, ``intro_beat_ms`` (the first beat), ``intro_bar_ms`` (the first downbeat),
@@ -445,7 +448,12 @@ def app_ends(steady, model_beats, duration, end_seconds=END_SECONDS):
         return round(t * 1000.0, 1) if t is not None else None
 
     last_beat = max((b for b in grid_beats if b <= duration), default=grid_beats[-1])
-    out = {"beats_until_ms": ms(model_beats[-1]) if model_beats else None}
+    # Where the beat stops, only when a beatless outro follows (as the plugin sends it): the app then fades after
+    # the last beat instead of beat-matching. Every song's last beat is a few seconds before its end, where its
+    # fade-out gets too quiet to hear the beat; sent for all, the app did no beat-matched blends at all.
+    last_heard = model_beats[-1] if model_beats else None
+    beatless = last_heard is not None and duration - last_heard >= BEATLESS_OUTRO_SECONDS
+    out = {"beats_until_ms": ms(last_heard) if beatless else None}
     for end, beat, bar, phrase_start, lo, hi in (
             ("intro", grid_beats[0], downs[0] if downs else None, phrases[0] if phrases else None,
              0.0, end_seconds),
