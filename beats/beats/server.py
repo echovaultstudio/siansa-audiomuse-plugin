@@ -108,16 +108,31 @@ class App:
         row["beats"] = full["beats"] if full else []
         row["downbeats"] = full["downbeats"] if full else []
         row["tempo_curve"] = grid.tempo_curve(row["beats"])
+        row["grid"] = self.steady_grid(full)
         row["end_seconds"] = grid.END_SECONDS
         return row
 
+    @staticmethod
+    def steady_grid(full):
+        """The even grid of a result with beats, or ``None``."""
+        if not full or not full.get("bpm"):
+            return None
+        return grid.steady_grid(full["beats"], full["downbeats"], full["bpm"], full.get("beats_per_bar") or 4)
+
     def beats(self, song_id):
+        """The beat grid as the plugin will read it: the steady grid when the song is at one tempo (``steady``
+        true), else the model's own beats."""
         full = self.store.result(song_id, self.config.model, with_beats=True)
         if not full:
             return None
+        steady = self.steady_grid(full)
         return {"track_id": song_id, "model": self.config.model, "bpm": full["bpm"], "intro_bpm": full["intro_bpm"],
                 "outro_bpm": full["outro_bpm"], "beats_per_bar": full["beats_per_bar"],
-                "first_downbeat_ms": full["first_downbeat_ms"], "beats": full["beats"], "downbeats": full["downbeats"]}
+                "first_downbeat_ms": full["first_downbeat_ms"], "steady": bool(steady),
+                "on_grid": steady["on_grid"] if steady else None,
+                "beats": steady["beats"] if steady else full["beats"],
+                "downbeats": steady["downbeats"] if steady else full["downbeats"],
+                "model_beats": full["beats"], "model_downbeats": full["downbeats"]}
 
     def status(self):
         counts = self.store.counts()
@@ -154,7 +169,7 @@ class App:
     def csv(self):
         out = io.StringIO()
         columns = ["artist", "title", "album", "genres", "tag_bpm", "plugin_intro_bpm", "plugin_outro_bpm", "bpm",
-                   "main_share", "bpm_fit",
+                   "main_share", "bpm_fit", "grid_bpm", "on_grid",
                    "intro_bpm", "outro_bpm", "steady", "grid_share", "beats_per_bar", "bar_share", "first_downbeat_ms",
                    "model_seconds", "state", "notes"]
         w = csv.writer(out)
@@ -163,7 +178,8 @@ class App:
             r, p = row["result"] or {}, row["plugin"] or {}
             w.writerow([row["artist"], row["title"], row["album"], " / ".join(g["label"] for g in row["genres"]),
                         row["tag_bpm"], p.get("intro_bpm"), p.get("outro_bpm"), _round(r.get("bpm")),
-                        _round(r.get("main_share"), 3), _round(r.get("bpm_fit")),
+                        _round(r.get("main_share"), 3), _round(r.get("bpm_fit")), _round(r.get("grid_bpm")),
+                        _round(r.get("on_grid"), 3),
                         _round(r.get("intro_bpm")), _round(r.get("outro_bpm")), _round(r.get("steady"), 3),
                         _round(r.get("grid_share"), 3), r.get("beats_per_bar"), _round(r.get("bar_share"), 3),
                         r.get("first_downbeat_ms"), _round(r.get("model_seconds"), 1), row["state"],

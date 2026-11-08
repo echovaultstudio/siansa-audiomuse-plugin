@@ -19,7 +19,7 @@ import sqlite3
 import threading
 import time
 
-SCHEMA_VERSION = 2  # 2: results have bpm_fit and main_share (0.3.0)
+SCHEMA_VERSION = 3  # 2: bpm_fit and main_share (0.3.0); 3: grid_bpm, on_grid, analysis_version (0.4.0)
 EVENTS_KEPT = 500
 
 SCHEMA = """
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS plugin (
 CREATE TABLE IF NOT EXISTS events (at REAL, level TEXT, message TEXT);
 """
 
-RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "bpm_median", "steady", "grid_ms", "grid_share", "intro_bpm", "intro_steady", "outro_bpm",
+RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "grid_bpm", "on_grid", "analysis_version", "bpm_median", "steady", "grid_ms", "grid_share", "intro_bpm", "intro_steady", "outro_bpm",
                  "outro_steady", "beats_per_bar", "bar_share", "first_downbeat_ms", "beat_count", "downbeat_count",
                  "download_seconds", "decode_seconds", "model_seconds")
 PLUGIN_FIELDS = ("intro_bpm", "outro_bpm", "intro_steady", "outro_steady", "intro_bar_ms", "outro_bar_ms")
@@ -63,7 +63,7 @@ class Store:
             self.db.execute("PRAGMA journal_mode=WAL")
             self.db.executescript(SCHEMA)
             columns = {r[1] for r in self.db.execute("PRAGMA table_info(results)")}
-            for column in ("bpm_fit", "main_share"):
+            for column in ("bpm_fit", "main_share", "grid_bpm", "on_grid", "analysis_version"):
                 if column not in columns:
                     self.db.execute(f"ALTER TABLE results ADD COLUMN {column} REAL")
             if self.db.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
@@ -171,11 +171,12 @@ class Store:
             row["beats"], row["downbeats"] = json.loads(beats or "[]"), json.loads(downbeats or "[]")
         return row
 
-    def stale_results(self):
-        """``(song_id, model)`` of results worked out before the main tempo (0.3.0), to be worked out again from
-        their beats."""
-        return [(r["song_id"], r["model"]) for r in
-                self._rows("SELECT song_id, model FROM results WHERE bpm_fit IS NULL AND beats IS NOT NULL")]
+    def stale_results(self, version):
+        """``(song_id, model)`` of results worked out by an older Siansa Beats (``analysis_version`` below
+        ``version``), to be worked out again from their beats."""
+        return [(r["song_id"], r["model"]) for r in self._rows(
+            "SELECT song_id, model FROM results WHERE (analysis_version IS NULL OR analysis_version < ?) "
+            "AND beats IS NOT NULL", (version,))]
 
     def update_result(self, song_id, model, values):
         """Rewrites the readings worked out from the beats, keeping the beats and the times."""

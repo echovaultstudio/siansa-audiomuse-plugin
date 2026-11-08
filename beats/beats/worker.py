@@ -78,7 +78,7 @@ class Worker:
 
     def regrid(self):
         """Works out again, from their saved beats, the results of an older Siansa Beats (no model needed)."""
-        stale = self.store.stale_results()
+        stale = self.store.stale_results(grid.ANALYSIS_VERSION)
         for song_id, model in stale:
             row = self.store.result(song_id, model, with_beats=True)
             song = self.store.song(song_id) or {}

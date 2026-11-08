@@ -87,7 +87,8 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
    time each step took. The first song takes longer while the model loads.
 2. **The table**, a row a song:
    - **Tag**: the file's BPM tag. **Plugin**: the Siansa plugin's intro and outro tempo today.
-   - **Beat This!**: the song's tempo, with intro / outro below. It's the tempo the song spends most of its time at,
+   - **Beat This!**: the song's tempo, with intro / outro below (the tempo each end holds for most of its 30
+     seconds, or **–** when it has no steady beat, as a beatless intro). It's the tempo the song spends most of its time at,
      so a breakdown, a half-time intro or a tempo change doesn't drag it off (the song's page also shows one
      straight line through every beat, as 0.2 gave it). **Bar**: beats a bar, and the share of
      bars that agree. **Steady**: how evenly the beats fall, and the share on a straight grid (a drum machine is
@@ -101,6 +102,11 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
 3. **Tap a song** to open it:
    - play it: **Clicks on the beats** ticks on every beat, higher on each downbeat. If the clicks sit on the kick
      drum, the beats are right; if they drift or fall between, they're not;
+   - the clicks come **from the steady grid** when the song is at one tempo: one even grid at the song's tempo,
+     lined up with the model's beats, that carries on through breakdowns and quiet intros (as DJ software does).
+     Its bars come from a vote of the model's downbeats and then follow every 4 beats, so the phrase can't wander.
+     Pick **the model's beats** to hear what Beat This! heard; the other set shows as small ticks along the bottom
+     of the beat view;
    - the beat view shows 8 seconds around what's playing, downbeats in amber with their bar number. Tap it to jump;
    - the chart shows the tempo along the song (amber), the BPM tag (green), the plugin's intro and outro (red),
      the ends the plugin measures (shaded) and the genre's range (green band). Tap it to jump there;
@@ -110,6 +116,9 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
 **The plugin's readings.** The pill at the top says whether the Siansa plugin answers and for how many songs it has
 readings; when something's wrong, a line under the top says what to check (the address, the token, the plugin not
 installed, a name the container can't look up…). **Read the plugin's values again** asks once more.
+
+**Back** (the browser's or the phone's) closes a song, and the **Siansa Beats** logo goes back to all the songs.
+A song's address (`#song=…`) opens it straight away.
 
 To add songs, add them to the playlist and press **Analyse playlist** again: only the new ones are read.
 
@@ -153,7 +162,9 @@ On the server, after setting it up:
 - Genres come from the files' tags only (the **tag** source). The database keeps each genre's source, so better
   ones (a genre model, AudioMuse-AI's labels) can be added beside them, and the checks use every source.
 - It doesn't feed the plugin yet. `GET /api/beats/<song id>` already gives a song's grid in the shape the plugin
-  would read.
+  would read: the steady grid when the song is at one tempo (`"steady": true`), else the model's beats, with the
+  model's own in `model_beats` and `model_downbeats`.
+- Phrases (8 or 16 bars) aren't found yet: the bars are even, but which bar starts a phrase isn't known.
 
 ## Settings
 
