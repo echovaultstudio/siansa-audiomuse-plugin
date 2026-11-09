@@ -107,7 +107,7 @@ canvas { width: 100%; display: block; border-radius: 10px; background: var(--rai
 .fact .v { font-size: 1.05rem; font-weight: 650; font-variant-numeric: tabular-nums; }
 label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0.9rem; color: var(--muted); }
 .banner { border: 1px solid var(--bad); color: var(--bad); border-radius: 12px; padding: 10px 14px; }
-.banner[hidden] { display: none; }
+.banner[hidden], .btn[hidden] { display: none; }
 .banner { display: flex; gap: 12px; align-items: flex-start; }
 .banner span { flex: 1; }
 .banner button { padding: 2px 10px; border-color: currentColor; color: inherit; }
@@ -295,9 +295,9 @@ async function refreshStatus() {
     $("now-step").textContent = total ? "" : (libraries.some((l) => l.on) ? "Reading the libraries…" : "Tick the libraries to analyse below, then Start analysis.");
   }
   $("pause").textContent = s.paused ? "Carry on" : "Pause";
-  const failed = (s.counts || {}).failed || 0;
-  $("export-failed").hidden = !failed;
-  $("export-failed").textContent = `Download failed songs (${failed})`;
+  const failedCount = (s.counts || {}).failed || 0;
+  $("export-failed").hidden = !failedCount;
+  $("export-failed").textContent = `Download failed songs (${failedCount})`;
   const read = (s.libraries || {}).read_at;
   $("read").title = "Read the chosen libraries from Navidrome now (it's done every 6 hours anyway)" + (read ? `. Last read ${new Date(read * 1000).toLocaleString()}.` : "");
   $("device-note").hidden = !s.device_note; $("device-note").textContent = s.device_note || "";
