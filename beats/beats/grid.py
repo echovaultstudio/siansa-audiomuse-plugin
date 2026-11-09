@@ -481,9 +481,9 @@ def analyse(beats, downbeats, duration, levels=None):
     }
 
 
-def verdict(result, tag_bpm=None, plugin=None):
+def verdict(result, tag_bpm=None):
     """What the readings say together, for the table: a list of ``(level, text)``, level ``"ok"``, ``"warn"`` or
-    ``"info"``. ``result`` is :func:`analyse`'s, ``plugin`` the plugin's profile (``intro_bpm``, ``outro_bpm``)."""
+    ``"info"``. ``result`` is :func:`analyse`'s."""
     notes = []
     bpm = (result or {}).get("bpm")
     if not bpm:
@@ -496,16 +496,6 @@ def verdict(result, tag_bpm=None, plugin=None):
             notes.append(("warn", f"BPM tag {tag_bpm:g} differs"))
         elif r:
             notes.append(("warn", f"BPM tag {tag_bpm:g} is {r} of this"))
-    for end in ("intro", "outro"):
-        theirs = (plugin or {}).get(f"{end}_bpm")
-        ours = result.get(f"{end}_bpm") or bpm
-        r = relation(theirs, ours)
-        if r == "same":
-            notes.append(("ok", f"Plugin's {end} agrees"))
-        elif r == "different":
-            notes.append(("warn", f"Plugin's {end} {theirs:.1f} differs"))
-        elif r:
-            notes.append(("warn", f"Plugin's {end} {theirs:.1f} is {r} of this"))
     for end in ("intro", "outro"):
         theirs = result.get(f"{end}_bpm")
         r = relation(theirs, bpm)

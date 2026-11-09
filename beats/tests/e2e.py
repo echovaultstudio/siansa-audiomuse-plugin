@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The real thing: the built image with Beat This! against the fake Navidrome (tests/fakes.py) and the songs from
 make_test_songs.py, whose tempos and bars are known. Checks every part a user touches: the scan, the queue, the
-model's readings, the comparison with the plugin and the BPM tag, the song's page, the audio and the CSV.
+model's readings, the comparison with the BPM tag, the song's page, the audio, the CSV and the log.
 
     python3 tests/e2e.py http://127.0.0.1:8090 <songs folder>/catalog.json
 
@@ -91,10 +91,8 @@ def main(base, catalog_path):
             target.append(f"{sid}: the phrases start at {phrase} ms, expected {expected:.0f} "
                           f"({r.get('phrase_big_on')} of {r.get('phrase_big')} big changes on them)")
 
-    # The comparison: t140 carries the plugin's 4/3 misreading, t122 a BPM tag at half its tempo.
+    # The comparison: t122 carries a BPM tag at half its tempo.
     texts = {sid: [t for _, t in s["verdict"]] for sid, s in songs.items()}
-    if not any("is 4/3 of this" in t for t in texts.get("t140", [])):
-        problems.append(f"t140: the plugin's 4/3 misreading isn't shown ({texts.get('t140')})")
     if not any("is half of this" in t for t in texts.get("t122", [])):
         problems.append(f"t122: the BPM tag at half isn't shown ({texts.get('t122')})")
 
@@ -130,6 +128,13 @@ def checks(base, catalog, problems):
         problems.append("the page didn't load")
     if not call(base, "/api/health")["model_loaded"]:
         problems.append("the model isn't reported as loaded")
+    # The log in the real image: the start and the songs, and the debug report with where each thread is.
+    lines = [l["message"] for l in call(base, "/api/log?limit=5000")["lines"]]
+    if not any("Siansa Beats" in m and "on port" in m for m in lines) or not any("BPM" in m for m in lines):
+        problems.append(f"the log lacks the start or the songs ({len(lines)} lines)")
+    report = call(base, "/api/debug")
+    if "beats-model" not in report.get("threads", {}) or not report.get("versions", {}).get("torch"):
+        problems.append("the debug report lacks the threads or torch's version")
 
 
 if __name__ == "__main__":

@@ -7,9 +7,14 @@ import hashlib
 import json
 import secrets
 import shutil
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from . import log
+
+_log = log.get("navidrome")
 
 CLIENT = "siansa-beats"
 API = "1.16.1"
@@ -44,17 +49,23 @@ class Subsonic:
     def _get(self, method, **extra):
         if not self.configured:
             raise SubsonicError("Navidrome isn't set up (NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASSWORD)")
+        started = time.monotonic()
+        shown = {k: v for k, v in extra.items() if v is not None}
         try:
             with urllib.request.urlopen(self.address(method, **extra), timeout=self.timeout) as response:
                 body = json.load(response)
         except urllib.error.HTTPError as e:
+            _log.warning("%s %s: HTTP %s after %.2fs", method, shown, e.code, time.monotonic() - started)
             raise SubsonicError(f"{method}: HTTP {e.code}") from None
         except (urllib.error.URLError, OSError, ValueError) as e:
+            _log.warning("%s %s: %s after %.2fs", method, shown, getattr(e, "reason", e), time.monotonic() - started)
             raise SubsonicError(f"{method}: {getattr(e, 'reason', e)}") from None
         answer = body.get("subsonic-response") or {}
         if answer.get("status") != "ok":
             error = answer.get("error") or {}
+            _log.warning("%s %s: Navidrome says %s", method, shown, error)
             raise SubsonicError(f"{method}: {error.get('message') or 'the server said no'}")
+        _log.debug("%s %s: ok in %.2fs", method, shown, time.monotonic() - started)
         return answer
 
     def ping(self):
@@ -97,17 +108,25 @@ class Subsonic:
 
     def download(self, song_id, path):
         """The song's original file, saved at ``path``. Returns its size in bytes."""
+        started = time.monotonic()
         try:
             with urllib.request.urlopen(self.address("stream", id=song_id, format="raw"), timeout=self.timeout) as r, \
                     open(path, "wb") as out:
                 kind = r.headers.get("Content-Type", "")
                 if "json" in kind or "xml" in kind:
-                    raise SubsonicError(f"stream: {r.read(300).decode(errors='replace')}")
+                    said = r.read(300).decode(errors="replace")
+                    _log.warning("stream %s: Navidrome sent %s instead of the file: %s", song_id, kind, said)
+                    raise SubsonicError(f"stream: {said}")
                 shutil.copyfileobj(r, out, 1 << 20)
-                return out.tell()
+                size = out.tell()
+                _log.debug("stream %s: %.1f MB (%s) in %.2fs", song_id, size / 1e6, kind or "no type",
+                           time.monotonic() - started)
+                return size
         except urllib.error.HTTPError as e:
+            _log.warning("stream %s: HTTP %s after %.2fs", song_id, e.code, time.monotonic() - started)
             raise SubsonicError(f"stream: HTTP {e.code}") from None
         except (urllib.error.URLError, OSError) as e:
+            _log.warning("stream %s: %s after %.2fs", song_id, getattr(e, "reason", e), time.monotonic() - started)
             raise SubsonicError(f"stream: {getattr(e, 'reason', e)}") from None
 
 
