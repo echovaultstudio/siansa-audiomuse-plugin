@@ -10,6 +10,7 @@ import tempfile
 import time
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -30,6 +31,32 @@ CATALOG = [
     {"id": "bad", "title": "Broken", "artist": "Nobody", "genre": "", "bpm": None, "duration": 30,
      "expect_bpm": None, "expect_bar": None, "plugin": None},
 ]
+
+
+class FakeStyle:
+    """The style model's stand-in: Control sounds like trance, Deep like deep house, Waltz like trance too (its Pop
+    tag is wrong)."""
+
+    HEARD = {"t140": [("Electronic---Trance", 0.71), ("Electronic---Progressive Trance", 0.4)],
+             "t122": [("Electronic---Deep House", 0.66), ("Electronic---House", 0.5)],
+             "t96w": [("Electronic---Trance", 0.55), ("Pop---Ballad", 0.1)]}
+
+    def __init__(self, models_dir, on=True):
+        self.models_dir = models_dir
+        os.makedirs(models_dir, exist_ok=True)
+        labels = sorted({l for heard in self.HEARD.values() for l, _ in heard} | {"Rock---Punk", "Pop---Pop Rock"})
+        with open(os.path.join(models_dir, "discogs-effnet-bs64-1.json"), "w") as f:
+            json.dump({"classes": labels}, f)
+        self.on, self.loaded, self.load_seconds, self.calls = on, False, 0.01, []
+
+    @property
+    def available(self):
+        return self.on
+
+    def __call__(self, samples, rate=16_000):
+        self.loaded = True
+        self.calls.append((samples.song_id, rate))
+        return self.HEARD.get(samples.song_id, [])
 
 
 class Samples:
@@ -248,12 +275,13 @@ class StoreTest(unittest.TestCase):
 
 
 class ServiceTest(Base):
-    def start(self, password=""):
+    def start(self, password="", style=None):
         env = {"NAVIDROME_URL": self.fake.url, "NAVIDROME_USER": USER, "NAVIDROME_PASSWORD": PASSWORD,
                "AUDIOMUSE_URL": self.fake.url, "AUDIOMUSE_TOKEN": TOKEN, "DATA_DIR": os.path.join(self.tmp, "data"),
                "BEATS_PASSWORD": password, "PORT": "0"}
         self.tracker = FakeTracker()
-        self.app = App(Config(env), tracker=self.tracker, decode=fake_decode)
+        self.app = App(Config(env), tracker=self.tracker, decode=fake_decode, style=style or FakeStyle(
+            os.path.join(self.tmp, "models"), on=False))
         self.server = make_server(self.app, host="127.0.0.1", port=0)
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
         import threading
@@ -474,6 +502,54 @@ class ServiceTest(Base):
         states = {s["id"]: s["state"] for s in self.call("/api/songs")}
         self.assertEqual(states["t140"], "done")
         self.assertEqual(states["bad"], "failed")  # its own error, not a fixed bug: left alone
+
+    def test_genres_are_voted_from_the_sound_and_the_tags(self):
+        style = FakeStyle(os.path.join(self.tmp, "models"))
+        self.start(style=style)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        songs = {s["id"]: s for s in self.call("/api/songs")}
+        vote = lambda sid: [g["label"] for g in songs[sid]["genres"] if g["source"] == "vote"]
+        self.assertEqual(vote("t140")[0], "Electronic---Trance")  # its sound and its tag agree
+        self.assertEqual(vote("t96w")[0], "Electronic---Trance")  # its sound wins over its Pop tag
+        self.assertEqual(vote("t122")[:2], ["Electronic---House", "Electronic---Deep House"])  # its House tag tips it
+        self.assertEqual({sid for sid, _ in style.calls}, {"t140", "t122", "t96w"})  # from the samples on hand
+        radio = self.call("/api/genre?name=" + urllib.parse.quote("Electronic / Trance"))
+        self.assertEqual(radio["styles"], ["Electronic---Trance"])
+        self.assertEqual(set(radio["ids"]), {"t140", "t96w"})
+        self.assertEqual(set(self.call("/api/genre?name=Electronic")["ids"]), {"t140", "t122", "t96w"})
+        self.assertEqual(self.call("/api/genre?name=Opera")["ids"], [])
+        listed = self.call("/api/genres")
+        self.assertEqual(listed["genres"][0], {"label": "Electronic---Trance", "genre": "Electronic", "style": "Trance",
+                                               "songs": 2})
+        status = self.call("/api/status")["styles"]
+        self.assertTrue(status["available"])
+        self.assertEqual(status["done"], 3)
+        self.assertEqual(status["failed"], 0)  # the broken one failed before: not asked for its style
+        _, csv_body = self.call("/api/export.csv", raw=True)
+        self.assertIn("Trance 0.71", csv_body.decode())
+
+    def test_songs_analysed_before_get_their_styles_while_the_queue_is_empty(self):
+        style = FakeStyle(os.path.join(self.tmp, "models"), on=False)
+        self.start(style=style)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.assertEqual(style.calls, [])
+        style.on = True  # an update brings the model
+        end = time.time() + 20
+        while time.time() < end and self.call("/api/status")["styles"].get("done", 0) < 3:
+            time.sleep(0.2)
+        self.assertEqual(self.call("/api/status")["styles"]["done"], 3)
+        self.assertEqual(set(self.call("/api/genre?name=Trance")["ids"]), {"t140", "t96w"})
+
+    def test_without_the_style_model_the_app_falls_back_to_tags(self):
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        radio = self.call("/api/genre?name=Trance")
+        self.assertEqual(radio["ids"], [])
+        self.assertIn("no style model", radio["why"])
+        self.assertFalse(self.call("/api/status")["styles"]["available"])
 
     def test_the_debug_report_says_where_everything_is_without_secrets(self):
         self.start(password="pagepass")

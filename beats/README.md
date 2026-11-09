@@ -159,6 +159,24 @@ to judge how long a library will. The table shows the first 200 songs, the searc
 CSV** and **Download data** take the songs it finds (every song when nothing is searched: for a big library the data
 is large).
 
+**Genres by vote.** Each song's genres come from a vote, for Siansa's genre radios:
+
+- **its sound first**: Essentia's Discogs-EffNet (the Music Technology Group, UPF) hears the song and scores each of
+  400 Discogs styles, from Progressive Trance and Deep House to Punk and Boom Bap. It runs on the CPU (ONNX Runtime,
+  `STYLE_THREADS`, 2 by default), about a second a song, so the GPU stays with Beat This!. New songs are heard on
+  their way through the queue; songs analysed before are downloaded once more and heard while the queue is empty;
+- **its tags second**: "Electronic / Trance", "Drum And Bass" and "DnB" are matched onto the same styles. A tag
+  naming a style adds 0.35 to it, one naming a genre (Electronic, Rock) 0.10 to each of its styles; so a tag tips a
+  close call, and a wrong tag (an album tag on a remix) loses to what every bar of the song sounds like. A song
+  without a sound score is voted on its tags alone;
+- a song keeps up to 5 styles of 0.15 or more, and is in a genre's radio from 0.30.
+
+The **Genres** card says how far it is, how often the sound agrees with the tags (the tagged genre, and the tagged
+style in the sound's top 3), and the styles with the most songs. A song's page shows its vote, what its sound said
+and its tags; the table's genre column and the CSV (`voted_genres`, `sound_top`) the vote. Last.fm's tags can join
+the vote later. The model is under CC BY-NC-ND 4.0 (free for non-commercial use, unchanged), downloaded while the
+image is built; how often it's right on your music is what the agreement says, and what you hear.
+
 ## Test it
 
 Every change is tested by GitHub Actions (`.github/workflows/beats.yml` in this repository):
@@ -225,6 +243,7 @@ On the server, after setting it up:
 | Variable | Default | |
 |---|---|---|
 | `NAVIDROME_URL`, `NAVIDROME_USER`, `NAVIDROME_PASSWORD` | | Navidrome, read only. The password never leaves the container: requests carry a salted token. |
+| `STYLE_THREADS` | `2` | The style model's CPU threads. |
 | `LOG_LEVEL` | `info` | `debug`: every step of every song in the log, from the start. The page's **Debug details** switch changes it while running and wins over this. |
 | `BEATS_MODEL` | `final0` | `small0` is smaller and faster, a little less exact. Both are in the image. |
 | `BEATS_DEVICE` | `auto` | `auto` (the GPU when the container has one), `cpu`, `cuda`, `cuda:N`. Needs the `cuda` image for a GPU. |
@@ -237,7 +256,9 @@ On the server, after setting it up:
 
 `GET /api/health`, `/api/status`, `/api/libraries`, `/api/songs`, `/api/songs/<id>` (with every beat),
 `/api/beats/<id>`, `/api/audio/<id>`, `/api/grids?ids=`, `/api/export.csv`, `/api/export.json`;
-`/api/bad-blends`, `/api/failed/export`, `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`; `POST /api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
+`/api/bad-blends`, `/api/failed/export`, `/api/genres`, `/api/genre?name=&limit=`, `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`; `POST /api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
 `beats/server.py`.
 
 Beat This! is by Francesco Foscarin, Jan Schlüter and Gerhard Widmer (ISMIR 2024), under the MIT licence.
+Discogs-EffNet is by Pablo Alonso-Jiménez, Xavier Serra and Dmitry Bogdanov (MTG, Universitat Pompeu Fabra), from
+[Essentia's models](https://essentia.upf.edu/models.html), under CC BY-NC-ND 4.0.

@@ -3,9 +3,9 @@
 Tables:
 
 - ``songs``: each song from the chosen Navidrome libraries, with its BPM tag and its library (``folder``);
-- ``genres``: a song's genres, each with where it came from (``source``: ``tag`` for now). Room for better genres
-  later: another source (a genre model, AudioMuse-AI's labels…) adds its own rows. They're only shown: no reading
-  uses them;
+- ``genres``: a song's genres, each with where it came from (``source``): ``tag`` (its own tags), ``sound`` (the
+  styles :mod:`beats.style` hears, with their scores; ``sound-failed`` when its sound couldn't be read) and ``vote``
+  (:mod:`beats.genres`: what the song's genres are, for the radios);
 - ``jobs``: each song's place in the queue and what's happening to it;
 - ``results``: Beat This!'s readings, one row per song and model, with every beat and downbeat;
 - ``events``: what the service did, for the page's activity list;
@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS songs (
 CREATE TABLE IF NOT EXISTS genres (
     song_id TEXT, source TEXT, label TEXT, weight REAL DEFAULT 1.0, PRIMARY KEY (song_id, source, label)
 );
+CREATE INDEX IF NOT EXISTS genres_by_label ON genres (source, label, weight);
 CREATE TABLE IF NOT EXISTS jobs (
     song_id TEXT PRIMARY KEY, state TEXT, step TEXT, queued_at REAL, started_at REAL, finished_at REAL, error TEXT
 );
@@ -141,6 +142,62 @@ class Store:
             for i, label in enumerate(labels):
                 weight = weights[i] if weights else 1.0
                 self.db.execute("INSERT OR REPLACE INTO genres VALUES (?,?,?,?)", (song_id, source, label, weight))
+
+    # ---- genres by vote (beats.genres): the sound's styles, the tags, and the vote of both ----
+
+    def songs_without_style(self, limit=50):
+        """Songs of the chosen libraries whose sound hasn't been given styles yet (nor failed to): the next ones for
+        the style model, analysed songs first."""
+        return [r["id"] for r in self._rows(
+            "SELECT s.id FROM songs s LEFT JOIN jobs j ON j.song_id=s.id WHERE NOT EXISTS (SELECT 1 FROM genres g "
+            "WHERE g.song_id=s.id AND g.source IN ('sound', 'sound-failed')) AND COALESCE(j.state, '') != 'failed' "
+            "ORDER BY CASE j.state WHEN 'done' THEN 0 ELSE 1 END, s.id LIMIT ?", (limit,))]
+
+    def style_counts(self):
+        """``{"done", "failed", "total"}``: songs with styles from their sound, songs whose sound couldn't be, of all."""
+        rows = self._rows("SELECT source, COUNT(DISTINCT song_id) AS n FROM genres WHERE source IN ('sound', "
+                          "'sound-failed') GROUP BY source")
+        by = {r["source"]: r["n"] for r in rows}
+        total = self._rows("SELECT COUNT(*) AS n FROM songs s LEFT JOIN jobs j ON j.song_id=s.id "
+                           "WHERE COALESCE(j.state, '') != 'failed'")[0]["n"]  # a song that failed has no sound to hear
+        return {"done": by.get("sound", 0), "failed": by.get("sound-failed", 0), "total": total}
+
+    def genre_rows(self, song_ids=None, sources=("sound", "tag")):
+        """``{song_id: {source: [(label, weight)]}}`` of ``song_ids`` (every song when ``None``), for voting."""
+        out = {}
+        marks = ", ".join("?" for _ in sources)
+        where, args = f"source IN ({marks})", list(sources)
+        if song_ids is not None:
+            song_ids = list(song_ids)[:900]
+            where += f" AND song_id IN ({', '.join('?' for _ in song_ids)})"
+            args += song_ids
+        for r in self._rows(f"SELECT song_id, source, label, weight FROM genres WHERE {where} ORDER BY weight DESC",
+                            tuple(args)):
+            out.setdefault(r["song_id"], {}).setdefault(r["source"], []).append((r["label"], r["weight"]))
+        return out
+
+    def replace_votes(self, votes):
+        """Writes each song's ``vote`` rows (``{song_id: [(label, score)]}``) in one go."""
+        with self.lock, self.db:
+            for song_id, voted in votes.items():
+                self.db.execute("DELETE FROM genres WHERE song_id=? AND source='vote'", (song_id,))
+                self.db.executemany("INSERT OR REPLACE INTO genres VALUES (?, 'vote', ?, ?)",
+                                    [(song_id, label, score) for label, score in voted])
+
+    def vote_counts(self, minimum):
+        """``{label: songs}``: how many songs have each style in their vote at ``minimum`` or more."""
+        return {r["label"]: r["n"] for r in self._rows(
+            "SELECT label, COUNT(*) AS n FROM genres WHERE source='vote' AND weight >= ? GROUP BY label", (minimum,))}
+
+    def songs_voted(self, labels, minimum, limit):
+        """Song ids (random order) with any of ``labels`` in their vote at ``minimum`` or more, at most ``limit``."""
+        labels = list(labels)
+        if not labels:
+            return []
+        marks = ", ".join("?" for _ in labels)
+        return [r["song_id"] for r in self._rows(
+            f"SELECT DISTINCT song_id FROM genres WHERE source='vote' AND weight >= ? AND label IN ({marks}) "
+            "ORDER BY RANDOM() LIMIT ?", (minimum, *labels, limit))]
 
     def genres(self, song_id):
         return self._rows("SELECT source, label, weight FROM genres WHERE song_id=? ORDER BY source, weight DESC, label",

@@ -13,6 +13,7 @@ half time, which a DJ would too). Prints a table either way; exits 1 on a failur
 import json
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 STRICT = {"t140", "t122", "t128"}  # the steady 4/4 dance songs: what DJ blends need right
@@ -132,6 +133,18 @@ def checks(base, catalog, problems):
     lines = [l["message"] for l in call(base, "/api/log?limit=5000")["lines"]]
     if not any("Siansa Beats" in m and "on port" in m for m in lines) or not any("BPM" in m for m in lines):
         problems.append(f"the log lacks the start or the songs ({len(lines)} lines)")
+    # The style model, in the real image: each song heard (the test songs are clicks and tones, so their styles are
+    # whatever the model makes of them: only that each has some, and the vote and a radio work).
+    styles = call(base, "/api/status")["styles"]
+    if not styles.get("available") or styles.get("done", 0) < len(catalog) - 1:
+        problems.append(f"the style model didn't hear every song: {styles}")
+    listed = call(base, "/api/genres")["genres"]
+    if not listed:
+        problems.append("no genres were voted")
+    else:
+        top = listed[0]["style"]
+        if not call(base, "/api/genre?name=" + urllib.parse.quote(top))["ids"]:
+            problems.append(f"the radio for {top} found no songs")
     report = call(base, "/api/debug")
     if "beats-model" not in report.get("threads", {}) or not report.get("versions", {}).get("torch"):
         problems.append("the debug report lacks the threads or torch's version")
