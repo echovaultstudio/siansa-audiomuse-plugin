@@ -48,7 +48,12 @@ RUN mkdir -p /models && for name in $CHECKPOINTS; do \
 # The style model (each song's genre from its sound): Essentia's Discogs-EffNet (MTG, UPF; CC BY-NC-ND 4.0), as ONNX
 # with any batch size, and its metadata (the 400 Discogs styles in its order). It runs on the CPU with ONNX Runtime.
 # On a GPU it runs through PyTorch instead, converted with onnx2torch (checked below against ONNX Runtime).
-RUN pip install onnxruntime==1.19.2 onnx==1.17.0 onnx2torch==1.5.15
+# onnx2torch without its dependencies, so torch stays at Beat This!'s version; torchvision (its converters import it)
+# from the same index, matching torch 2.3.1.
+RUN pip install onnxruntime==1.19.2 onnx==1.17.0 \
+ && pip install --index-url "$TORCH_INDEX" torchvision==0.18.1 \
+ && pip install --no-deps onnx2torch==1.5.15 \
+ && python -c "import torch, torchaudio, torchvision, onnx2torch; assert torch.__version__.startswith('2.3.1'), torch.__version__; print('torch', torch.__version__, 'torchvision', torchvision.__version__)"
 ARG ESSENTIA_MODELS=https://essentia.upf.edu/models/feature-extractors/discogs-effnet
 RUN for file in discogs-effnet-bsdynamic-1.onnx discogs-effnet-bs64-1.json; do \
       for try in 1 2 3 4 5; do \
