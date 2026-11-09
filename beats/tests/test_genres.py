@@ -8,7 +8,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from beats import genres, style  # noqa: E402
 
-LABELS = ["Electronic---Trance", "Electronic---Progressive Trance", "Electronic---Drum n Bass",
+LABELS = ["Electronic---Electro", "Hip Hop---Electro", "Electronic---Trance", "Electronic---Progressive Trance", "Electronic---Drum n Bass",
           "Electronic---Deep House", "Electronic---House", "Electronic---Techno", "Rock---Punk", "Rock---Indie Rock",
           "Hip Hop---Boom Bap", "Funk / Soul---Soul", "Folk, World, & Country---Country", "Pop---Ballad"]
 
@@ -55,6 +55,16 @@ class VoteTest(unittest.TestCase):
         sound = {label: 0.3 for label in LABELS}
         self.assertEqual(len(genres.vote(self.t, sound, [])), genres.VOTE_KEEP)
         self.assertEqual(genres.vote(self.t, {"Pop---Ballad": 0.05}, []), [("Pop---Ballad", 0.05)])
+
+    def test_a_style_name_under_two_genres_counts_once(self):
+        # 0.16.0 gave an "Electro" tag to Hip Hop's Electro too: 1035 songs of hip hop electro.
+        alone = dict(genres.vote(self.t, {}, ["Electro"]))
+        self.assertEqual(alone, {"Electronic---Electro": 0.35})  # Electronic: the genre with the most styles
+        heard = dict(genres.vote(self.t, {"Hip Hop---Electro": 0.4}, ["Electro"]))
+        self.assertAlmostEqual(heard["Hip Hop---Electro"], 0.75)  # its sound says hip hop
+        self.assertNotIn("Electronic---Electro", heard)
+        named = dict(genres.vote(self.t, {}, ["Hip Hop / Electro"]))
+        self.assertEqual(set(named), {"Hip Hop---Electro"})
 
     def test_a_radio_plays_the_most_precise_genre_named(self):
         self.assertEqual(genres.target(self.t, "Electronic / Trance"), ({"Electronic---Trance"}, set()))
