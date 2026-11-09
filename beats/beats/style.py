@@ -177,7 +177,11 @@ class StyleModel:
             device, _ = resolve_device(self.requested, True, torch.cuda.device_count())
             if not device.startswith("cuda"):
                 return False
-            module = convert(os.path.join(self.models_dir, MODEL_FILE)).eval().to(device)
+            import onnx
+
+            # Loaded here and handed over in memory: given the path, onnx2torch writes a temporary file beside the
+            # model, and /models is read-only to the service (0.17.0: "Permission denied: '/models/tmp_…'").
+            module = convert(onnx.load(os.path.join(self.models_dir, MODEL_FILE))).eval().to(device)
             with torch.inference_mode():
                 outputs = module(torch.zeros((1, PATCH, BANDS), device=device))
             outputs = outputs if isinstance(outputs, (list, tuple)) else (outputs,)

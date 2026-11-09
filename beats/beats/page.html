@@ -749,10 +749,10 @@ async function refreshGenres(force) {
     <strong>${Math.round((a.family || 0) * 100)} %</strong>; the tagged style is in the sound's top 3 on
     <strong>${a.style == null ? "–" : Math.round(a.style * 100) + " %"}</strong>.</p>` : "";
   const list = answer.genres || [];
-  // A style name under two genres (Electro: Electronic and Hip Hop) says which, beyond the most common one.
-  const firstOf = {};
-  list.forEach((g) => { if (!(g.style in firstOf)) firstOf[g.style] = g.genre; });
-  const name = (g) => firstOf[g.style] === g.genre ? g.style : `${g.style} (${g.genre})`;
+  // A style name under two genres (Electro: Electronic and Hip Hop) says which, for both.
+  const genresOf = {};
+  list.forEach((g) => { (genresOf[g.style] = genresOf[g.style] || new Set()).add(g.genre); });
+  const name = (g) => genresOf[g.style].size > 1 ? `${g.style} (${g.genre})` : g.style;
   $("genre-top").innerHTML = list.slice(0, 60)
     .map((g) => `<span class="chip" title="${esc(g.label)}">${esc(name(g))} <span class="sub">${g.songs}</span></span>`).join("");
 }

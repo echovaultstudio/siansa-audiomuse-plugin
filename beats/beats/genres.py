@@ -57,8 +57,13 @@ class Taxonomy:
             self.by_style.setdefault(key(style or genre), []).append(label)
             self.by_genre.setdefault(key(genre), []).append(label)
 
+    def genre_size(self, genre):
+        """How many styles a genre has: Electronic's many make it the likelier home of a name shared with another."""
+        return len(self.by_genre.get(key(genre), []))
+
     def match(self, tag):
-        """``(styles, genres)``: the labels a tag names as a style, and the genres (families) it names."""
+        """``(styles, genres)``: the labels a tag names as a style, and the genres (families) it names. A style name
+        under two genres (Electro: Electronic and Hip Hop) gives both: :func:`vote` picks one."""
         styles, genres = set(), set()
         for part in parts(tag):
             k = key(part)
@@ -74,11 +79,18 @@ def vote(taxonomy, sound, tags):
     (but always the best one, when there's any vote at all). ``sound``: ``{label: score}`` from the model (may be
     empty); ``tags``: the song's genre tags as they are."""
     scores = {label: float(v) for label, v in (sound or {}).items()}
-    tag_styles, tag_genres = set(), set()
+    tag_styles, tag_genres, shared = set(), set(), []
     for tag in tags or []:
         s, g = taxonomy.match(tag)
-        tag_styles |= s
         tag_genres |= g
+        for part in parts(tag):  # each name once: a style named under two genres counts for one of them
+            named = s & set(taxonomy.by_style.get(key(part), []))
+            if len(named) > 1:
+                shared.append(named)
+            else:
+                tag_styles |= named
+    for named in shared:
+        tag_styles.add(_likeliest(taxonomy, named, scores, tag_genres))
     for label in tag_styles:
         scores[label] = scores.get(label, 0.0) + TAG_STYLE
     if tag_genres:
@@ -90,6 +102,18 @@ def vote(taxonomy, sound, tags):
         return []
     kept = [p for p in ranked[:VOTE_KEEP] if p[1] >= VOTE_MIN]
     return kept or ranked[:1]
+
+
+def _likeliest(taxonomy, labels, sound, tag_genres):
+    """Of one style name under several genres, the one meant: the one the song's sound hears most, else the one in a
+    genre its tags name, else the one in the genre with the most styles (Electronic)."""
+    heard = [l for l in labels if sound.get(l, 0.0) > 0]
+    if heard:
+        return max(heard, key=lambda l: sound[l])
+    tagged = [l for l in labels if l.partition("---")[0] in tag_genres]
+    if tagged:
+        return sorted(tagged)[0]
+    return max(sorted(labels), key=lambda l: taxonomy.genre_size(l.partition("---")[0]))
 
 
 def family(voted):

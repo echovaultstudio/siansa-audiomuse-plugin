@@ -82,6 +82,9 @@ r = m(numpy.zeros(16000 * 5, numpy.float32)); assert len(r) == 400 and 0 <= r[0]
 
 RUN useradd --uid 1000 --create-home beats && mkdir -p /data && chown beats /data
 USER beats
+# As the service runs it: the model converted for the GPU, from read-only /models (0.17.0 wrote a temporary file there).
+RUN python -c "import onnx; from onnx2torch import convert; \
+convert(onnx.load('/models/discogs-effnet-bsdynamic-1.onnx')); print('converts as the service user')"
 # NVIDIA's container toolkit gives a GPU to containers that ask with these (harmless without one).
 ENV DATA_DIR=/data MODELS_DIR=/models PORT=8090 NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
 VOLUME /data
