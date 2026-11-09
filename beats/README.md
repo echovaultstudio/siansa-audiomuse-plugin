@@ -77,6 +77,10 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
 
 ## Use it
 
+The page has one view at a time, picked from the tabs under its name: **Now** (what's happening, the libraries and
+the activity), **Songs** (the table, and a song's page when one is open), **Genres**, **Bad blends** (with how many)
+and **Log**. It remembers the last one.
+
 1. Tick the **libraries to analyse** and press **Start analysis**. It reads their songs from Navidrome and works
    through them a song at a time; the top shows the song
    and the step (downloading, decoding, loading the model, analysing), and **Activity** what's been done, with the
@@ -162,8 +166,9 @@ is large).
 **Genres by vote.** Each song's genres come from a vote, for Siansa's genre radios:
 
 - **its sound first**: Essentia's Discogs-EffNet (the Music Technology Group, UPF) hears the song and scores each of
-  400 Discogs styles, from Progressive Trance and Deep House to Punk and Boom Bap. It runs on the CPU (ONNX Runtime,
-  `STYLE_THREADS`, 2 by default), about a second a song, so the GPU stays with Beat This!. New songs are heard on
+  400 Discogs styles, from Progressive Trance and Deep House to Punk and Boom Bap. It runs on the GPU when there is one
+  (through the PyTorch Beat This! uses; the model is small, so Beat This! hardly notices), else on the CPU (ONNX
+  Runtime, `STYLE_THREADS`, 2 by default); `BEATS_DEVICE=cpu` keeps both on the CPU. New songs are heard on
   their way through the queue; songs analysed before are downloaded once more and heard while the queue is empty;
 - **its tags second**: "Electronic / Trance", "Drum And Bass" and "DnB" are matched onto the same styles. A tag
   naming a style adds 0.35 to it, one naming a genre (Electronic, Rock) 0.10 to each of its styles; so a tag tips a
@@ -171,7 +176,7 @@ is large).
   without a sound score is voted on its tags alone;
 - a song keeps up to 5 styles of 0.15 or more, and is in a genre's radio from 0.30.
 
-The **Genres** card says how far it is, how often the sound agrees with the tags (the tagged genre, and the tagged
+The **Genres** card says how far it is, where the model runs, how often the sound agrees with the tags (the tagged genre, and the tagged
 style in the sound's top 3), and the styles with the most songs. A song's page shows its vote, what its sound said
 and its tags; the table's genre column and the CSV (`voted_genres`, `sound_top`) the vote. Last.fm's tags can join
 the vote later. The model is under CC BY-NC-ND 4.0 (free for non-commercial use, unchanged), downloaded while the
