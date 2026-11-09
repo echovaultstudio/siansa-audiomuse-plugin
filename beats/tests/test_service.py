@@ -538,6 +538,11 @@ class ServiceTest(Base):
         self.wait_done()
         self.assertEqual([s["id"] for s in self.call("/api/songs?find=waltz")], ["t96w"])
         self.assertEqual([s["id"] for s in self.call("/api/songs?show=failed")], ["bad"])
+        failed = self.call("/api/failed/export")["failed"]
+        self.assertEqual([f["id"] for f in failed], ["bad"])
+        self.assertTrue(failed[0]["error"])
+        self.assertEqual(failed[0]["library"], "1")
+        self.assertIn("error", self.call("/api/export.csv?show=failed", raw=True)[1].decode().splitlines()[0].split(","))
         self.assertEqual(sorted(s["id"] for s in self.call("/api/songs?show=done")), ["t122", "t140", "t96w"])
         self.assertEqual(len(self.call("/api/songs?limit=2")), 2)
         self.assertEqual(len(self.call("/api/songs")), 4)
