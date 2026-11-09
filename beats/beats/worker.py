@@ -234,7 +234,10 @@ class Worker:
             ranked = self.style(samples, rate)
             seconds = time.monotonic() - started
             if first:
-                self.store.event(f"Style model (Discogs-EffNet) loaded in {self.style.load_seconds or 0:.1f}s")
+                where = getattr(self.style, "backend", None) or "?"
+                self.store.event(f"Style model (Discogs-EffNet) loaded on the {where} in {self.style.load_seconds or 0:.1f}s")
+                if getattr(self.style, "problem", None):
+                    self.store.event(self.style.problem, "warn")
             top = ranked[:STYLE_KEEP]
             self.store.set_genres(song["id"], "sound", [l for l, _ in top], [round(v, 4) for _, v in top])
             _log.debug("%s – %s: sounds like %s (%.2fs)", song.get("artist"), song.get("title"),
@@ -298,9 +301,15 @@ class Worker:
         try:
             fd, path = tempfile.mkstemp(prefix="style-", dir=self.data_dir)
             os.close(fd)
+            started = time.monotonic()
             self.navidrome.download(song_id, path)
+            downloaded = time.monotonic() - started
             samples = self.decode(path, STYLE_RATE) if self.decode_takes_rate else self.decode(path)
+            decoded = time.monotonic() - started - downloaded
             self._style(song, samples, STYLE_RATE if self.decode_takes_rate else self.decode_rate)
+            _log.debug("%s – %s: style of a song analysed before: download %.2fs, decode %.2fs, model %.2fs",
+                       song.get("artist"), song.get("title"), downloaded, decoded,
+                       time.monotonic() - started - downloaded - decoded)
         except Exception as e:  # Navidrome away, a file ffmpeg can't read: marked, so it isn't tried again and again
             _log.warning("%s – %s: couldn't get its sound for its style: %s", song.get("artist"), song.get("title"), e)
             self.store.set_genres(song_id, "sound-failed", [str(e)[:200] or e.__class__.__name__])

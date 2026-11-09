@@ -3,8 +3,10 @@
 The model is an EfficientNet-B0 trained by the Music Technology Group on over two million recordings labelled with the
 Discogs styles of their releases (``Electronic---Progressive Trance``, ``Rock---Punk``…). It hears 2-second patches of
 a mel spectrogram and gives each style a score from 0 to 1; a song's scores are the mean over its patches, as
-Essentia's own examples do. It runs on the CPU with ONNX Runtime (``discogs-effnet-bsdynamic-1.onnx``, about 18 MB,
-downloaded while the image is built), so the GPU stays free for Beat This!.
+Essentia's own examples do. The model (``discogs-effnet-bsdynamic-1.onnx``, about 18 MB, downloaded while the image is
+built) runs on the GPU when there is one, through the PyTorch Beat This! already uses (converted from ONNX with
+onnx2torch; the image build checks it gives ONNX Runtime's scores), and on the CPU with ONNX Runtime otherwise: the
+model is small, so it barely slows Beat This! down.
 
 The mel spectrogram is Essentia's ``TensorflowInputMusiCNN``, reproduced here in numpy (checked against Essentia to
 within 0.0001): 16 kHz mono, 512-sample frames every 256 samples, a symmetric Hann window, the power spectrum through
@@ -110,9 +112,12 @@ class StyleModel:
     """Discogs-EffNet, loaded with the first song. Thread-safe; ``available`` is False when the image has no model
     (an older image, or a test), and then nothing is asked of it."""
 
-    def __init__(self, models_dir, threads=2):
+    def __init__(self, models_dir, threads=2, device="auto"):
         self.models_dir = models_dir
         self.threads = threads
+        self.requested = device  # BEATS_DEVICE: auto, cpu, cuda, cuda:N
+        self.device = None  # where it runs once loaded: "cuda", "cuda:1" or "cpu"
+        self._torch = None  # the model as a PyTorch module, on the GPU
         self._lock = threading.Lock()
         self._session = None
         self._labels = None
@@ -128,12 +133,16 @@ class StyleModel:
 
     @property
     def loaded(self):
-        return self._session is not None
+        return self._session is not None or self._torch is not None
 
     def load(self):
         with self._lock:
-            if self._session is None:
+            if self._session is None and self._torch is None:
                 started = time.monotonic()
+                self._labels = labels(self.models_dir)
+                if self._load_gpu():
+                    self.load_seconds = time.monotonic() - started
+                    return self._torch
                 import onnxruntime
 
                 options = onnxruntime.SessionOptions()
@@ -141,27 +150,68 @@ class StyleModel:
                 options.inter_op_num_threads = 1
                 session = onnxruntime.InferenceSession(os.path.join(self.models_dir, MODEL_FILE), options,
                                                        providers=["CPUExecutionProvider"])
-                names = labels(self.models_dir)
+                names = self._labels
                 self._input = session.get_inputs()[0].name
                 # The output with a score for each of the 400 styles (the other is the 1280-number embedding).
                 outputs = session.get_outputs()
                 self._output = next((o.name for o in outputs if o.shape and o.shape[-1] == len(names)), outputs[0].name)
-                self._labels = names
                 self._session = session
+                self.device = "cpu"
                 self.load_seconds = time.monotonic() - started
-        return self._session
+        return self._torch if self._torch is not None else self._session
+
+    def _load_gpu(self):
+        """The model on the GPU (onnx2torch), when there is one and it isn't turned off; False otherwise, and the CPU
+        takes it. A GPU that fails to take it is said in :attr:`problem`, never an error."""
+        if (self.requested or "auto").strip().lower() == "cpu":
+            return False
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                return False
+            from onnx2torch import convert
+
+            from .analyser import resolve_device
+
+            device, _ = resolve_device(self.requested, True, torch.cuda.device_count())
+            if not device.startswith("cuda"):
+                return False
+            module = convert(os.path.join(self.models_dir, MODEL_FILE)).eval().to(device)
+            with torch.inference_mode():
+                outputs = module(torch.zeros((1, PATCH, BANDS), device=device))
+            outputs = outputs if isinstance(outputs, (list, tuple)) else (outputs,)
+            self._pick = next(i for i, o in enumerate(outputs) if o.shape[-1] == len(self._labels))
+            self._torch, self.device = module, device
+            return True
+        except Exception as e:  # no onnx2torch, an odd driver: the CPU does it
+            self.problem = f"the style model couldn't use the GPU ({e.__class__.__name__}: {e}), so it runs on the CPU"
+            return False
+
+    @property
+    def backend(self):
+        """Where it runs, for the page: "GPU" or "CPU" (None until loaded)."""
+        return None if self.device is None else ("GPU" if self.device.startswith("cuda") else "CPU")
 
     def __call__(self, samples, rate=RATE):
         """``[(label, score)]``: every style's score for the song, best first. ``samples`` mono at ``rate``."""
         import numpy as np
 
-        session = self.load()
+        model = self.load()
         if rate != RATE:
             import soxr
 
             samples = soxr.resample(np.asarray(samples, dtype=np.float32), rate, RATE)
         batch = patches(mel(samples))
-        scores = session.run([self._output], {self._input: batch})[0]
+        if model is self._torch:
+            import torch
+
+            with torch.inference_mode():
+                outputs = model(torch.from_numpy(batch).to(self.device))
+            outputs = outputs if isinstance(outputs, (list, tuple)) else (outputs,)
+            scores = outputs[self._pick].float().cpu().numpy()
+        else:
+            scores = model.run([self._output], {self._input: batch})[0]
         mean = np.asarray(scores, dtype=np.float64).reshape(len(batch), -1).mean(axis=0)
         ranked = sorted(zip(self._labels, (float(v) for v in mean)), key=lambda p: -p[1])
         return ranked

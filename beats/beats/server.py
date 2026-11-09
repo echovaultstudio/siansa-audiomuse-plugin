@@ -109,7 +109,7 @@ class App:
         self.navidrome = Subsonic(config.navidrome_url, config.navidrome_user, config.navidrome_password)
         self.tracker = tracker or analyser.BeatThis(config.model, config.device, config.models_dir, config.threads,
                                                     config.float16)
-        self.style = style if style is not None else style_module.StyleModel(config.models_dir, config.style_threads)
+        self.style = style if style is not None else style_module.StyleModel(config.models_dir, config.style_threads, config.device)
         self.worker = Worker(self.store, self.navidrome, self.tracker, decode or analyser.decode,
                              config.data_dir, config.model, measure, self.style)
         self.started = time.time()
@@ -247,7 +247,8 @@ class App:
         """The style model: whether the image has it, how far the songs are, and how often it agrees with the tags."""
         worker, style = self.worker, self.style
         available = bool(style is not None and style.available)
-        out = {"available": available, "loaded": bool(available and style.loaded)}
+        out = {"available": available, "loaded": bool(available and style.loaded),
+               "device": getattr(style, "backend", None), "problem": getattr(style, "problem", None)}
         if available:
             out.update(self.store.style_counts())
             out["agreement"] = worker.genre_report

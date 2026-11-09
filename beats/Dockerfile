@@ -47,7 +47,8 @@ RUN mkdir -p /models && for name in $CHECKPOINTS; do \
 
 # The style model (each song's genre from its sound): Essentia's Discogs-EffNet (MTG, UPF; CC BY-NC-ND 4.0), as ONNX
 # with any batch size, and its metadata (the 400 Discogs styles in its order). It runs on the CPU with ONNX Runtime.
-RUN pip install onnxruntime==1.19.2
+# On a GPU it runs through PyTorch instead, converted with onnx2torch (checked below against ONNX Runtime).
+RUN pip install onnxruntime==1.19.2 onnx==1.17.0 onnx2torch==1.5.15
 ARG ESSENTIA_MODELS=https://essentia.upf.edu/models/feature-extractors/discogs-effnet
 RUN for file in discogs-effnet-bsdynamic-1.onnx discogs-effnet-bs64-1.json; do \
       for try in 1 2 3 4 5; do \
@@ -60,7 +61,13 @@ s = onnxruntime.InferenceSession('/models/discogs-effnet-bsdynamic-1.onnx', prov
 print('inputs', [(i.name, i.shape) for i in s.get_inputs()], 'outputs', [(o.name, o.shape) for o in s.get_outputs()]); \
 out = s.run(None, {s.get_inputs()[0].name: numpy.zeros((2, 128, 96), numpy.float32)}); \
 labels = json.load(open('/models/discogs-effnet-bs64-1.json'))['classes']; \
-assert any(o.shape == (2, len(labels)) for o in out), [o.shape for o in out]; print(len(labels), 'styles')"
+assert any(o.shape == (2, len(labels)) for o in out), [o.shape for o in out]; print(len(labels), 'styles')" \
+ && python -c "import numpy, torch, onnxruntime; from onnx2torch import convert; \
+path = '/models/discogs-effnet-bsdynamic-1.onnx'; x = numpy.random.RandomState(0).rand(4, 128, 96).astype(numpy.float32) * 4; \
+s = onnxruntime.InferenceSession(path, providers=['CPUExecutionProvider']); ref = s.run(None, {s.get_inputs()[0].name: x}); \
+m = convert(path).eval(); out = m(torch.from_numpy(x)); out = out if isinstance(out, (list, tuple)) else (out,); \
+diff = max(float(numpy.abs(a - b.detach().numpy()).max()) for a, b in zip(ref, out)); \
+assert diff < 1e-3, diff; print('onnx2torch matches ONNX Runtime within', diff)"
 
 WORKDIR /app
 COPY beats/ /app/beats/

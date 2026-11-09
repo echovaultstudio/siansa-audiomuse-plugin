@@ -65,8 +65,20 @@ button:disabled { opacity: 0.5; cursor: default; }
 input[type=text], input[type=search], select { font: inherit; font-size: 0.9rem; border-radius: 999px; padding: 7px 12px;
   border: 1px solid var(--line-strong); background: var(--raised-2); color: var(--text); min-width: 0; }
 :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
-.split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 16px; align-items: start; }
-@media (max-width: 980px) { .split { grid-template-columns: minmax(0, 1fr); } }
+.split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+/* One view at a time (the owner, 9 Nov: scrolling through everything on a phone was a nightmare). */
+.tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; padding-bottom: 8px; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { flex: 0 0 auto; border-radius: 999px; padding: 6px 14px; background: transparent; border: 1px solid var(--line-strong); color: var(--muted); }
+.tabs button[aria-selected=true] { background: var(--amber); border-color: var(--amber); color: var(--on-amber); }
+.tabs .count:empty { display: none; }
+.tabs .count { margin-left: 4px; font-size: 0.8em; opacity: 0.85; }
+main [data-view] { display: none; }
+body[data-view=now] main [data-view~=now], body[data-view=songs] main [data-view~=songs],
+body[data-view=genres] main [data-view~=genres], body[data-view=blends] main [data-view~=blends],
+body[data-view=log] main [data-view~=log] { display: block; }
+body[data-view=now] main .card.now { display: grid; }
+main #detail[data-view][hidden] { display: none; }
 .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
 .tools .grow { flex: 1 1 180px; }
 .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 999px; overflow: hidden; }
@@ -124,13 +136,20 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
     <h1><a href="./" id="home" title="Back to all songs"><b>Siansa</b> Beats</a></h1>
     <div class="pills" id="pills" aria-live="polite"></div>
   </div>
+  <nav class="wrap tabs" role="tablist" aria-label="Views">
+    <button role="tab" data-view="now">Now</button>
+    <button role="tab" data-view="songs">Songs</button>
+    <button role="tab" data-view="genres">Genres</button>
+    <button role="tab" data-view="blends">Bad blends <span class="count" id="tab-blends"></span></button>
+    <button role="tab" data-view="log">Log</button>
+  </nav>
 </header>
 <main class="wrap">
   <div class="banner" id="offline" role="alert" hidden></div>
   <div class="banner" id="banner" role="alert" hidden><span id="banner-text"></span><button id="banner-close" aria-label="Close">✕</button></div>
   <div class="banner warn" id="device-note" role="status" hidden></div>
 
-  <section class="card now" aria-label="What's happening">
+  <section class="card now" data-view="now" aria-label="What's happening">
     <div>
       <div class="what" id="now-what">Starting…</div>
       <div class="step" id="now-step"></div>
@@ -146,7 +165,7 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
     <div class="counts" id="counts"></div>
   </section>
 
-  <section class="card" id="detail" hidden aria-label="Song">
+  <section class="card" id="detail" data-view="songs" hidden aria-label="Song">
     <div class="detail-head">
       <span class="title" id="d-title"></span><span class="sub" id="d-sub"></span>
       <span style="margin-left:auto" class="controls">
@@ -172,7 +191,7 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
   </section>
 
   <div class="split">
-    <section class="card" aria-label="Songs">
+    <section class="card" data-view="songs" aria-label="Songs">
       <div class="tools">
         <input type="search" class="grow" id="search" placeholder="Find a song, artist or genre" aria-label="Find">
         <div class="seg" role="group" aria-label="Show">
@@ -200,7 +219,7 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
         <a class="btn" id="export-failed" href="api/failed/export" download hidden title="The songs that couldn't be analysed, with why: the one file to send">Download failed songs</a>
       </div>
     </section>
-    <section class="card" aria-label="Genres" id="genre-card" hidden>
+    <section class="card" data-view="genres" aria-label="Genres" id="genre-card">
       <h2>Genres</h2>
       <p class="sub">Each song's genres by vote: what its sound says (Essentia's Discogs-EffNet, 400 Discogs styles)
         first, its own tags second. Siansa's genre radios play by this vote, and by the tags without Siansa Beats.</p>
@@ -208,17 +227,17 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
       <div id="genre-agree"></div>
       <div id="genre-top" class="chips"></div>
     </section>
-    <section class="card" aria-label="Bad blends" id="bad-card" hidden>
+    <section class="card" data-view="blends" aria-label="Bad blends" id="bad-card">
       <h2>Bad blends</h2>
       <p class="sub">Song changes marked as bad in Siansa Dev, with how the app blended them. Tap a song to check its beats.</p>
       <p><a class="btn" href="api/bad-blends/export" download title="Every bad blend with both songs' beats and sound levels: the one file to send">Download bad blends</a></p>
       <ul class="events" id="bad"></ul>
     </section>
-    <section class="card" aria-label="Activity">
+    <section class="card" data-view="now log" aria-label="Activity">
       <h2>Activity</h2>
       <ul class="events" id="events"></ul>
     </section>
-    <section class="card" aria-label="Log">
+    <section class="card" data-view="log" aria-label="Log">
       <h2>Log</h2>
       <p class="sub">Everything Siansa Beats does, as in the container's log. <strong>Debug details</strong> adds every
         step of every song, with its times, and every request to Navidrome: turn it on to find a problem, off when it's
@@ -265,8 +284,8 @@ let badCount = -1;
 async function refreshBad() {
   let rows;
   try { rows = await api("api/bad-blends"); } catch (e) { return; }
-  $("bad-card").hidden = !rows.length;
-  $("bad").innerHTML = rows.map((b) => {
+  $("tab-blends").textContent = rows.length ? String(rows.length) : "";
+  $("bad").innerHTML = (rows.length ? "" : '<li class="sub">None marked: in Siansa Dev, the button over the cover during a DJ blend marks one.</li>') + rows.map((b) => {
     const d = b.details || {};
     const facts = [b.technique, d.bars ? `${d.bars} bars` : "", d.from_bpm && d.to_bpm ? `${d.from_bpm} → ${d.to_bpm} BPM` : "",
       d.from_rhythm != null && d.to_rhythm != null ? `confidence ${Math.round(d.from_rhythm * 100)} % / ${Math.round(d.to_rhythm * 100)} %` : "",
@@ -444,6 +463,7 @@ $("read").addEventListener("click", async () => {
 // ---- one song ----
 async function openSong(id, newSong, fromHistory) {
   if (newSong && !fromHistory) history.pushState({song: id}, "", "#song=" + encodeURIComponent(id));
+  if (typeof showView === "function" && document.body.dataset.view !== "songs") showView("songs");
   selected = id;
   drawRows();
   try { detail = await api("api/songs/" + encodeURIComponent(id)); } catch (e) { banner(e.message); return; }
@@ -687,6 +707,17 @@ refreshLibraries();
 refreshStatus();
 setInterval(refreshStatus, 2000);
 
+// ---- views ----
+function showView(view) {
+  if (!["now", "songs", "genres", "blends", "log"].includes(view)) view = "now";
+  document.body.dataset.view = view;
+  document.querySelectorAll(".tabs [data-view]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.view === view)));
+  try { localStorage.setItem("beats-view", view); } catch (e) { /* private window: not kept */ }
+  if (view === "genres") refreshGenres(true);
+}
+document.querySelectorAll(".tabs [data-view]").forEach((b) => b.addEventListener("click", () => { showView(b.dataset.view); window.scrollTo({top: 0}); }));
+{ let kept = null; try { kept = localStorage.getItem("beats-view"); } catch (e) { /* none */ } showView(location.hash.startsWith("#song=") ? "songs" : kept || "now"); }
+
 // ---- genres ----
 function styleOf(label) { return (label || "").split("---").pop(); }
 function byGenreSource(list, source) { return (list || []).filter((g) => g.source === source); }
@@ -703,18 +734,27 @@ async function refreshGenres(force) {
   let answer;
   try { answer = await api("api/genres"); } catch (e) { return; }
   const st = answer.styles || {};
-  $("genre-card").hidden = !st.available;
-  if (!st.available) return;
+  if (!st.available) {
+    $("genre-progress").textContent = "No style model in this image: genres are the songs' tags.";
+    $("genre-agree").innerHTML = ""; $("genre-top").innerHTML = "";
+    return;
+  }
   const left = (st.total || 0) - (st.done || 0) - (st.failed || 0);
   $("genre-progress").textContent = `${st.done || 0} of ${st.total || 0} songs heard` +
     (st.failed ? ` · ${st.failed} couldn't be` : "") +
-    (st.current ? ` · now ${st.current.artist} – ${st.current.title}` : left > 0 ? " · the rest while the queue is empty" : "");
+    (st.current ? ` · now ${st.current.artist} – ${st.current.title}` : left > 0 ? " · the rest while the queue is empty" : "") +
+    (st.device ? ` · on the ${st.device}` : "");
   const a = st.agreement;
   $("genre-agree").innerHTML = a && a.songs ? `<p>Over ${a.songs} songs with tags: the sound's genre matches the tags' on
     <strong>${Math.round((a.family || 0) * 100)} %</strong>; the tagged style is in the sound's top 3 on
     <strong>${a.style == null ? "–" : Math.round(a.style * 100) + " %"}</strong>.</p>` : "";
-  $("genre-top").innerHTML = (answer.genres || []).slice(0, 24)
-    .map((g) => `<span class="chip" title="${esc(g.label)}">${esc(g.style)} <span class="sub">${g.songs}</span></span>`).join("");
+  const list = answer.genres || [];
+  // A style name under two genres (Electro: Electronic and Hip Hop) says which, beyond the most common one.
+  const firstOf = {};
+  list.forEach((g) => { if (!(g.style in firstOf)) firstOf[g.style] = g.genre; });
+  const name = (g) => firstOf[g.style] === g.genre ? g.style : `${g.style} (${g.genre})`;
+  $("genre-top").innerHTML = list.slice(0, 60)
+    .map((g) => `<span class="chip" title="${esc(g.label)}">${esc(name(g))} <span class="sub">${g.songs}</span></span>`).join("");
 }
 refreshGenres(true);
 setInterval(refreshGenres, 10000);
