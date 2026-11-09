@@ -22,6 +22,9 @@ from .subsonic import SubsonicError
 
 _log = log.get("worker")
 
+# Errors of bugs that are fixed: songs that failed with them are analysed again on start.
+FIXED_ERRORS = ("'bars'", "not supported between instances of 'NoneType'")
+
 
 LIBRARY_RESCAN_SECONDS = 6 * 3600  # how often the chosen libraries are read again for new songs
 
@@ -173,6 +176,15 @@ class Worker:
         if stale:
             self.store.event(f"Worked out {len(stale)} songs again from their saved beats in "
                              f"{time.monotonic() - started:.0f}s")
+        # Songs that failed on a bug since fixed (0.15.0: short tracks off mixed CDs, bars past the measured sound)
+        # are analysed again, once: a song that fails again keeps its new error.
+        retry = [r["id"] for r in self.store.overview(None, None, "failed", None)
+                 if any(sign in (r.get("error") or "") for sign in FIXED_ERRORS)]
+        for song_id in retry:
+            self.store.queue(song_id, force=True)
+        if retry:
+            self.store.event(f"Analysing {len(retry)} failed songs again: what failed them is fixed")
+            self.wake()
         unheard = self.store.without_levels()
         for song_id in unheard:
             self.store.queue(song_id, force=True)

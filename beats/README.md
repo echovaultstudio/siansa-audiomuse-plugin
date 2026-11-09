@@ -217,7 +217,8 @@ On the server, after setting it up:
   8. A song whose sections don't change its sound much (a long, even techno track) may have no clear phrases.
 - Songs analysed before 0.5.0 are analysed again once, on start, to measure their sound (a few seconds each).
 - 0.15.0 works every song out again once from its saved beats, on start, for the following grid (no download or
-  model: about 40 ms a song, so half an hour for 45,000; the top shows how far it is).
+  model: about 40 ms a song, so half an hour for 45,000; the top shows how far it is), and analyses again the songs
+  that failed on the two bugs it fixes.
 
 ## Settings
 
