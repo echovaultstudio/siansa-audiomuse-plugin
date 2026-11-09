@@ -195,6 +195,7 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
         <button id="plugin-refresh">Read the plugin's values again</button>
         <a class="btn" id="export-csv" href="api/export.csv" download>Export CSV</a>
         <a class="btn" id="export-json" href="api/export.json" download title="Every song's beats and sound levels (a few MB): for tuning the grid and phrases">Download data</a>
+        <a class="btn" id="export-failed" href="api/failed/export" download hidden title="The songs that couldn't be analysed, with why: the one file to send">Download failed songs</a>
       </div>
     </section>
     <section class="card" aria-label="Bad blends" id="bad-card" hidden>
@@ -294,6 +295,9 @@ async function refreshStatus() {
     $("now-step").textContent = total ? "" : (libraries.some((l) => l.on) ? "Reading the libraries…" : "Tick the libraries to analyse below, then Start analysis.");
   }
   $("pause").textContent = s.paused ? "Carry on" : "Pause";
+  const failed = (s.counts || {}).failed || 0;
+  $("export-failed").hidden = !failed;
+  $("export-failed").textContent = `Download failed songs (${failed})`;
   const read = (s.libraries || {}).read_at;
   $("read").title = "Read the chosen libraries from Navidrome now (it's done every 6 hours anyway)" + (read ? `. Last read ${new Date(read * 1000).toLocaleString()}.` : "");
   $("device-note").hidden = !s.device_note; $("device-note").textContent = s.device_note || "";

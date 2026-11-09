@@ -200,6 +200,9 @@ On the server, after setting it up:
 - **Bad blends**: a song change marked as bad in Siansa Dev lands in a list on the page, with how the app blended it
   (technique, bars, tempos, confidence at each end), and both songs a tap away. **Download bad blends** saves them all
   with both songs' beats, sound levels and results in one file (`GET /api/bad-blends/export`).
+- **Failed songs**: when songs couldn't be analysed, **Download failed songs (N)** beside the exports saves them with
+  why (the error), their file type, length and library in one file (`GET /api/failed/export`); the CSV export has the
+  error too. Filter **Failed** shows them in the table.
 - Phrases are 8 or 16 bars: 16 when three quarters of the big changes (at least 4) fall on every other start of
   8. A song whose sections don't change its sound much (a long, even techno track) may have no clear phrases.
 - Songs analysed before 0.5.0 are analysed again once, on start, to measure their sound (a few seconds each).

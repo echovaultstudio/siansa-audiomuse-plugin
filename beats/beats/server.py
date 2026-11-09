@@ -32,6 +32,7 @@ API (JSON):
     POST /api/analyse-all             analyse every song again
     GET  /api/bad-blends              the song changes marked as bad in Siansa Dev, newest first
     GET  /api/bad-blends/export       all of them with both songs' beats, sound levels and results, as a file
+    GET  /api/failed/export           the songs that couldn't be analysed, with why, as a file
     POST /api/bad-blends              {"from_id", "to_id", "technique", "details"}: one more (from the app, through
                                       the Siansa Beats (dev) plugin)
     DELETE /api/bad-blends/<n>        takes one away
@@ -162,6 +163,14 @@ class App:
                 "beats": full["beats"], "downbeats": full["downbeats"], "levels": full.get("levels"),
                 "marks": [m["seconds"] for m in self.store.marks(song_id)]}
 
+    def failed_export(self):
+        """Every song that couldn't be analysed, with why and what kind of file it is: one file to look into them with."""
+        rows = self.store.overview(self.config.model, None, "failed", None)
+        return {"version": __version__, "model": self.config.model, "failed": [
+            {"id": r["id"], "artist": r.get("artist"), "title": r.get("title"), "album": r.get("album"),
+             "suffix": r.get("suffix"), "duration": r.get("duration"), "library": r.get("folder"),
+             "error": r.get("error"), "failed_at": r.get("finished_at")} for r in rows]}
+
     def bad_blends_export(self):
         """Every bad blend with both songs' data (:meth:`song_data`): one file to look into them with."""
         blends = self.store.bad_blends(limit=1000)
@@ -230,7 +239,7 @@ class App:
                    "main_share", "bpm_fit", "grid_bpm", "on_grid", "downbeat_source", "phrase_first_ms", "phrase_bars", "phrase_count",
                    "phrase_big", "phrase_big_on",
                    "intro_bpm", "outro_bpm", "steady", "grid_share", "beats_per_bar", "bar_share", "first_downbeat_ms",
-                   "model_seconds", "state", "notes"]
+                   "model_seconds", "state", "notes", "error"]
         w = csv.writer(out)
         w.writerow(columns)
         for row in self.songs(find, show, 0):
@@ -243,7 +252,7 @@ class App:
                         _round(r.get("intro_bpm")), _round(r.get("outro_bpm")), _round(r.get("steady"), 3),
                         _round(r.get("grid_share"), 3), r.get("beats_per_bar"), _round(r.get("bar_share"), 3),
                         r.get("first_downbeat_ms"), _round(r.get("model_seconds"), 1), row["state"],
-                        "; ".join(text for _, text in row["verdict"])])
+                        "; ".join(text for _, text in row["verdict"]), row.get("error")])
         return out.getvalue()
 
 
@@ -335,6 +344,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(app.worker.libraries())
             if path == "/api/bad-blends":
                 return self._json(app.store.bad_blends())
+            if path == "/api/failed/export":
+                body = json.dumps(app.failed_export(), indent=1).encode()
+                return self._send(HTTPStatus.OK, body, "application/json",
+                                  {"Content-Disposition": 'attachment; filename="siansa-beats-failed.json"'})
             if path == "/api/bad-blends/export":
                 body = json.dumps(app.bad_blends_export()).encode()
                 return self._send(HTTPStatus.OK, body, "application/json",
