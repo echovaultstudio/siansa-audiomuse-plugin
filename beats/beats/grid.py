@@ -12,9 +12,9 @@ Pure Python, so it's tested without numpy or the model.
 import math
 import statistics
 
-from . import features, phrase
+from . import ends, features, phrase
 
-ANALYSIS_VERSION = 9  # what's worked out from the beats: older results are worked out again from their saved beats
+ANALYSIS_VERSION = 10  # what's worked out from the beats: older results are worked out again from their saved beats
 END_SECONDS = 30.0  # each end, as the plugin's beats.SECONDS
 MIN_BEATS = 8  # fewer, and there's no tempo worth reporting
 GRID_MS = 30.0  # a beat this close to the straight grid sits on it
@@ -366,18 +366,27 @@ def relation(a, b, tolerance=RELATION_TOLERANCE):
     return name if abs(ratio / value - 1.0) <= tolerance else "different"
 
 
-def app_ends(steady, model_beats, duration, end_seconds=END_SECONDS):
+def app_ends(steady, model_beats, duration, levels=None, end_seconds=END_SECONDS):
     """The beat grid at each end of the song, in the shape the Siansa app reads from the Siansa plugin (its
     ``BeatEnd``): ``intro_bpm``, ``intro_beat_ms`` (the first beat), ``intro_bar_ms`` (the first downbeat),
     ``intro_phrase_ms`` and ``intro_phrase_bars`` (the first phrase start, when there are phrases), ``intro_rhythm``
     (the share of the grid's beats in the first :data:`END_SECONDS` the model heard: low for a beatless intro) and
     ``intro_steady`` (the share on the grid); the same for ``outro_`` (the last beat, downbeat and phrase start, from
     the last :data:`END_SECONDS`); and ``beats_until_ms``, the model's last beat. From the steady grid, so the
-    tempo is the song's, to a hundredth of a BPM."""
+    tempo is the song's, to a hundredth of a BPM.
+
+    Each end is taken inside the song's lock (:func:`beats.ends.lock_points`): the first beat, bar and phrase from
+    where the beat locks onto the grid, the last ones up to where it last holds, and the rhythm over the
+    :data:`END_SECONDS` inside it. So a track cut from a mixed CD, whose first and last seconds carry the DJ's own
+    transitions, is blended where its own beat is. With the other fields of :func:`beats.ends.describe`."""
     grid_beats, downs, phrases = steady["beats"], steady["downbeats"], steady.get("phrases") or []
     if not grid_beats:
         return None
     model_beats = sorted(model_beats)
+    hits = [bool(_heard([g], model_beats)) for g in grid_beats]
+    extra = ends.describe(steady, hits, duration, levels)
+    lock_in = extra["intro_lock_ms"] / 1000.0 if extra["intro_lock_ms"] is not None else 0.0
+    lock_out = extra["outro_lock_ms"] / 1000.0 if extra["outro_lock_ms"] is not None else duration
 
     def heard(lo, hi):
         inside = [b for b in grid_beats if lo <= b <= hi]
@@ -386,7 +395,8 @@ def app_ends(steady, model_beats, duration, end_seconds=END_SECONDS):
     def ms(t):
         return round(t * 1000.0, 1) if t is not None else None
 
-    last_beat = max((b for b in grid_beats if b <= duration), default=grid_beats[-1])
+    last_beat = max((b for b in grid_beats if b <= min(duration, lock_out + 0.05)), default=grid_beats[-1])
+    first_beat = next((b for b in grid_beats if b >= lock_in - 0.05), grid_beats[0])
     # Where the beat stops, only when a beatless outro follows (as the plugin sends it): the app then fades after
     # the last beat instead of beat-matching. Every song's last beat is a few seconds before its end, where its
     # fade-out gets too quiet to hear the beat; sent for all, the app did no beat-matched blends at all.
@@ -394,10 +404,11 @@ def app_ends(steady, model_beats, duration, end_seconds=END_SECONDS):
     beatless = last_heard is not None and duration - last_heard >= BEATLESS_OUTRO_SECONDS
     out = {"beats_until_ms": ms(last_heard) if beatless else None}
     for end, beat, bar, phrase_start, lo, hi in (
-            ("intro", grid_beats[0], downs[0] if downs else None, phrases[0] if phrases else None,
-             0.0, end_seconds),
-            ("outro", last_beat, max((d for d in downs if d <= last_beat), default=None),
-             max((p for p in phrases if p <= last_beat), default=None), max(0.0, duration - end_seconds), duration)):
+            ("intro", first_beat, next((d for d in downs if d >= first_beat - 0.05), None),
+             next((p for p in phrases if p >= first_beat - 0.05), None), first_beat, first_beat + end_seconds),
+            ("outro", last_beat, max((d for d in downs if d <= last_beat + 0.05), default=None),
+             max((p for p in phrases if p <= last_beat + 0.05), default=None), max(0.0, last_beat - end_seconds),
+             last_beat + 0.05)):
         out.update({
             f"{end}_bpm": round(steady["bpm"], 3),
             f"{end}_beat_ms": ms(beat),
@@ -407,6 +418,7 @@ def app_ends(steady, model_beats, duration, end_seconds=END_SECONDS):
             f"{end}_rhythm": round(heard(lo, hi), 3),
             f"{end}_steady": round(steady["on_grid"], 3),
         })
+    out.update(extra)
     return out
 
 
@@ -456,7 +468,7 @@ def analyse(beats, downbeats, duration, levels=None):
         "grid_counted": "same" if steady else None,
         "phrase_source": steady.get("phrase_source"),
         "from_mix": steady.get("from_mix"),
-        "ends": app_ends(steady, beats, duration) if steady else None,
+        "ends": app_ends(steady, beats, duration, levels) if steady else None,
         "changes_share": steady.get("changes_share"),
         "phrase_first_ms": round(steady["phrases"][0] * 1000.0) if steady.get("phrases") else None,
         "phrase_count": len(steady["phrases"]) if steady.get("phrases") is not None and levels else None,

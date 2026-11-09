@@ -191,6 +191,14 @@ On the server, after setting it up:
   source, so better ones (AudioMuse-AI's labels, say) can be added beside them later.
 - `GET /api/grids?ids=a,b` gives each song's grid at both ends as the Siansa app reads it (through the Siansa
   Beats plugin on AudioMuse-AI, for Siansa Dev). `GET /api/beats/<song id>` gives every beat of one song.
+- Each end is taken **inside the lock**: from the first 4 bars where the model's beats sit on the grid to the last
+  (`intro_lock_ms`, `outro_lock_ms`). A track cut from a mixed CD carries the DJ's own transitions at its ends, the
+  next or last record still playing; its blends belong inside the lock. Each end also says how many bars the bass
+  stays out (`intro_bass_bars`, `outro_bass_bars`), how loud it is next to the song (`intro_energy`,
+  `outro_energy`, dB), and the song where the bass drops out and comes back (`breakdowns_ms`, `drops_ms`), for the
+  app to choose how to blend.
+- **Bad blends**: a song change marked as bad in Siansa Dev lands in a list on the page, with how the app blended it
+  (technique, bars, tempos, confidence at each end), and both songs a tap away.
 - Phrases are 8 or 16 bars: 16 when three quarters of the big changes (at least 4) fall on every other start of
   8. A song whose sections don't change its sound much (a long, even techno track) may have no clear phrases.
 - Songs analysed before 0.5.0 are analysed again once, on start, to measure their sound (a few seconds each).
@@ -212,7 +220,7 @@ On the server, after setting it up:
 
 `GET /api/health`, `/api/status`, `/api/libraries`, `/api/songs`, `/api/songs/<id>` (with every beat),
 `/api/beats/<id>`, `/api/audio/<id>`, `/api/grids?ids=`, `/api/export.csv`, `/api/export.json`;
-`POST /api/libraries {"ids"}`, `/api/libraries/read`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/plugin/refresh`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`. See
+`/api/bad-blends`; `POST /api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/plugin/refresh`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
 `beats/server.py`.
 
 Beat This! is by Francesco Foscarin, Jan Schlüter and Gerhard Widmer (ISMIR 2024), under the MIT licence.
