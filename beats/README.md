@@ -100,6 +100,11 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
    - the clicks come **from the steady grid** when the song is at one tempo: one even grid at the song's tempo,
      lined up with the model's beats, that carries on through breakdowns and quiet intros (as DJ software does).
      Its bars come from a vote of the model's downbeats and then follow every 4 beats, so the phrase can't wander.
+     A track off a mixed CD, where the DJ rode the pitch (its tempo creeps, 123.4 to 124.0 BPM, say), gets a grid
+     that **follows the drift** instead: its local tempo read every 16 beats and joined smoothly, up to 4 % apart
+     (more is a real tempo change, and gets no grid). Its row says "The grid follows a drifting tempo (0.8 %)", each
+     end then carries the tempo it plays at there, and the CSV has `grid_drift`. A song whose even grid holds takes
+     the following one only when clearly more of its beats sit on it;
      Pick **the model's beats** to hear what Beat This! heard; the other set shows as small ticks along the bottom
      of the beat view;
    - **bars and phrases come from the sound too.** While a song is analysed, Siansa Beats measures how loud its sub
@@ -211,6 +216,9 @@ On the server, after setting it up:
 - Phrases are 8 or 16 bars: 16 when three quarters of the big changes (at least 4) fall on every other start of
   8. A song whose sections don't change its sound much (a long, even techno track) may have no clear phrases.
 - Songs analysed before 0.5.0 are analysed again once, on start, to measure their sound (a few seconds each).
+- 0.15.0 works every song out again once from its saved beats, on start, for the following grid (no download or
+  model: about 40 ms a song, so half an hour for 45,000; the top shows how far it is), and analyses again the songs
+  that failed on the two bugs it fixes.
 
 ## Settings
 

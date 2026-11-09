@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS bad_blends (
 );
 """
 
-RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "grid_bpm", "on_grid", "analysis_version", "downbeat_source", "grid_counted",
+RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "grid_bpm", "on_grid", "grid_drift", "analysis_version", "downbeat_source", "grid_counted",
                  "changes_share", "phrase_first_ms", "phrase_count", "phrase_bars", "phrase_big", "phrase_big_on", "phrase_source", "from_mix", "ends", "bpm_median", "steady", "grid_ms", "grid_share", "intro_bpm", "intro_steady", "outro_bpm",
                  "outro_steady", "beats_per_bar", "bar_share", "first_downbeat_ms", "beat_count", "downbeat_count",
                  "download_seconds", "decode_seconds", "model_seconds")
@@ -83,7 +83,7 @@ class Store:
             if "folder" not in {r[1] for r in self.db.execute("PRAGMA table_info(songs)")}:
                 self.db.execute("ALTER TABLE songs ADD COLUMN folder TEXT")
             columns = {r[1] for r in self.db.execute("PRAGMA table_info(results)")}
-            for column, kind in (("bpm_fit", "REAL"), ("main_share", "REAL"), ("grid_bpm", "REAL"), ("on_grid", "REAL"),
+            for column, kind in (("bpm_fit", "REAL"), ("main_share", "REAL"), ("grid_bpm", "REAL"), ("on_grid", "REAL"), ("grid_drift", "REAL"),
                                  ("analysis_version", "REAL"), ("downbeat_source", "TEXT"), ("grid_counted", "TEXT"), ("changes_share", "REAL"),
                                  ("phrase_first_ms", "REAL"), ("phrase_count", "INTEGER"), ("phrase_bars", "INTEGER"), ("phrase_big", "INTEGER"),
                                  ("phrase_big_on", "INTEGER"), ("levels", "TEXT"), ("phrase_source", "TEXT"),

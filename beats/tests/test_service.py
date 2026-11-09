@@ -462,6 +462,19 @@ class ServiceTest(Base):
         self.wait_done()
         self.assertFalse([l for l in self.call(f"/api/log?after={before}&limit=5000")["lines"] if l["level"] == "debug"])
 
+    def test_songs_that_failed_on_a_fixed_bug_are_analysed_again(self):
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.app.store.set_state("t140", "failed", "'bars'")
+        calls = self.tracker.calls
+        self.app.worker.regrid()
+        self.wait_done()
+        self.assertEqual(self.tracker.calls, calls + 1)
+        states = {s["id"]: s["state"] for s in self.call("/api/songs")}
+        self.assertEqual(states["t140"], "done")
+        self.assertEqual(states["bad"], "failed")  # its own error, not a fixed bug: left alone
+
     def test_the_debug_report_says_where_everything_is_without_secrets(self):
         self.start(password="pagepass")
         self.call("/api/libraries", "POST", {"ids": ["1"]})

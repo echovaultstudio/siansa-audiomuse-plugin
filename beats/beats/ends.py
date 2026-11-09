@@ -47,10 +47,23 @@ def _bars(downbeats, start, stop):
     return [(a, b) for a, b in zip(downbeats, downbeats[1:]) if a >= start - 0.01 and b <= stop + 0.01]
 
 
+def _span(hop, start, stop):
+    """The frames from ``start`` to ``stop`` seconds, kept inside the song (a beat can sit a few ms before 0)."""
+    lo = max(0, int(start / hop))
+    return lo, max(lo + 1, int(stop / hop))
+
+
 def _level(frames, hop, start, stop, band):
-    lo, hi = int(start / hop), max(int(start / hop) + 1, int(stop / hop))
+    lo, hi = _span(hop, start, stop)
     values = [f[band] for f in frames[lo:hi]]
     return statistics.fmean(values) if values else None
+
+
+def _bass(frames, hop, start, stop):
+    """The louder of the bass and sub bass from ``start`` to ``stop``; ``None`` past the measured sound."""
+    values = [v for v in (_level(frames, hop, start, stop, BAND_BASS), _level(frames, hop, start, stop, BAND_SUB))
+              if v is not None]
+    return max(values) if values else None
 
 
 def _total(f):
@@ -69,10 +82,12 @@ def describe(steady, heard, duration, levels):
     hop, frames = features.unpack(levels)
     if not frames or intro is None:
         return out
-    bars = _bars(downs, intro, outro)
+    # The bars with sound measured (the levels can end a moment before the last beat of a song).
+    bars = [(a, b, v) for a, b in _bars(downs, intro, outro) for v in [_bass(frames, hop, a, b)] if v is not None]
     if not bars:
         return out
-    bass = [max(_level(frames, hop, a, b, BAND_BASS), _level(frames, hop, a, b, BAND_SUB)) for a, b in bars]
+    bass = [v for _, _, v in bars]
+    bars = [(a, b) for a, b, _ in bars]
     loud_bass = statistics.median(sorted(bass)[len(bass) // 2:])  # the usual bass of the song's fuller half
     is_in = [v >= loud_bass - BASS_IN_DB for v in bass]
     out["intro_bass_bars"] = next((i for i, v in enumerate(is_in) if v), len(is_in))
@@ -101,7 +116,7 @@ def describe(steady, heard, duration, levels):
     loud = statistics.median(sorted(total)[len(total) // 2:])
     span = 30.0
     for name, a, b in (("intro", intro, min(outro, intro + span)), ("outro", max(intro, outro - span), outro)):
-        lo, hi = int(a / hop), max(int(a / hop) + 1, int(b / hop))
+        lo, hi = _span(hop, a, b)
         part = total[lo:hi]
         out[f"{name}_energy"] = round(statistics.fmean(part) - loud, 1) if part else None
     return out

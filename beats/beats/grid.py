@@ -14,7 +14,7 @@ import statistics
 
 from . import ends, features, phrase
 
-ANALYSIS_VERSION = 10  # what's worked out from the beats: older results are worked out again from their saved beats
+ANALYSIS_VERSION = 11  # what's worked out from the beats: older results are worked out again from their saved beats
 END_SECONDS = 30.0  # each end, as the plugin's beats.SECONDS
 MIN_BEATS = 8  # fewer, and there's no tempo worth reporting
 GRID_MS = 30.0  # a beat this close to the straight grid sits on it
@@ -212,6 +212,138 @@ def steady_grid(beats, downbeats, bpm, per_bar=4):
     }
 
 
+FOLLOW_KNOT = 16  # a following grid reads the local tempo every 16 beats…
+FOLLOW_SPAN = 32  # …over the 32 beats either side (about 30 s at 128 BPM)
+FOLLOW_MIN_POINTS = 12  # fewer of the model's beats around a reading (a breakdown), and it's left out
+FOLLOW_BETTER = 0.03  # a song with an even grid takes the following one when that has this many more beats on it
+FOLLOW_MAX_DRIFT = 0.04  # a DJ riding the pitch moves a few %: more is a tempo change, not a drift
+
+
+def following_grid(beats, downbeats, bpm, per_bar=4):
+    """A grid of beats that follows a tempo drifting slowly along the song: a track cut from a mixed CD, where the
+    DJ rode the pitch to keep the next record in time (it creeps from 123.4 to 124.0 BPM, say). One even grid
+    can't follow it, so :func:`steady_grid` finds none, though every bar is as steady as a drum machine's.
+
+    The beats are numbered as for the even grid, but with the tempo of the last ones fitted, so the count follows
+    the drift; then the local tempo and phase are read every :data:`FOLLOW_KNOT` beats from the
+    :data:`FOLLOW_SPAN` beats either side, and joined smoothly (each reading's time and tempo kept). Bars come
+    from the model's downbeats voting, as for the even grid.
+
+    ``None`` when fewer than :data:`GRID_MIN_SHARE` of the beats sit on it, or the tempo moves more than
+    :data:`FOLLOW_MAX_DRIFT` (a real tempo change), else the dict of :func:`steady_grid` with ``follows`` and
+    ``drift`` (how far the tempo moves, 0.008 for 0.8 %); its ``bpm`` is the average over the song."""
+    beats = sorted(beats)
+    if not bpm or len(beats) < 2 * FOLLOW_SPAN:
+        return None
+    period = 60.0 / bpm
+    best = None
+    for anchor in _anchors(len(beats)):
+        numbered = _number_following(beats, period, anchor)
+        if best is None or len(numbered) > len(best):
+            best = numbered
+        if len(best) >= 0.9 * len(beats):
+            break
+    knots = _knots(best)
+    if len(knots) < 2:
+        return None
+    periods = [p for _, _, p in knots]
+    drift = max(periods) / min(periods) - 1.0
+    if drift > FOLLOW_MAX_DRIFT:
+        return None
+    first_n = knots[0][0] - math.ceil(max(0.0, knots[0][1] - beats[0] + knots[0][2] / 2) / knots[0][2])
+    last_n = knots[-1][0] + math.ceil(max(0.0, beats[-1] - knots[-1][1] + knots[-1][2] / 2) / knots[-1][2])
+    grid_beats = [_curve(knots, n) for n in range(first_n, last_n + 1)]
+    grid_beats = [b for b in grid_beats if beats[0] - period / 2 <= b <= beats[-1] + period / 2]
+    if len(grid_beats) < MIN_BEATS:
+        return None
+    share = max(_heard(beats, grid_beats) / len(beats), _heard(grid_beats, beats) / len(grid_beats))
+    if share < GRID_MIN_SHARE:
+        return None
+    per_bar = per_bar if per_bar in (2, 3, 4, 6, 7) else 4
+    tally = [0] * per_bar
+    j = 0
+    for d in sorted(downbeats):
+        while j < len(grid_beats) - 1 and abs(grid_beats[j + 1] - d) <= abs(grid_beats[j] - d):
+            j += 1
+        if abs(grid_beats[j] - d) <= GRID_HIT * 1.5:
+            tally[j % per_bar] += 1
+    voted = sum(tally)
+    start = tally.index(max(tally)) if voted else 0
+    grid_downs = grid_beats[start::per_bar]
+    return {
+        "bpm": 60.0 * (len(grid_beats) - 1) / (grid_beats[-1] - grid_beats[0]),
+        "on_grid": share,
+        "beats": [round(b, 3) or 0.0 for b in grid_beats],
+        "downbeats": [round(b, 3) or 0.0 for b in grid_downs],
+        "per_bar": per_bar,
+        "bar_share": max(tally) / voted if voted else 0.0,
+        "first_downbeat_ms": round(grid_downs[0] * 1000.0) if grid_downs else None,
+        "follows": True,
+        "drift": round(drift, 4),
+    }
+
+
+def _number_following(beats, period, anchor):
+    """As :func:`_number`, but each step goes by the tempo of the last 16 beats fitted, so the count follows a
+    slow drift (and never strays more than :data:`FOLLOW_MAX_DRIFT` from ``period``)."""
+    allow = min(GRID_HIT * 1.5, period * 0.2)
+    out = [(0, beats[anchor])]
+    for direction in (1, -1):
+        recent, local = [(0, beats[anchor])], period
+        i = anchor + direction
+        while 0 <= i < len(beats):
+            last_n, last_b = recent[-1]
+            k = (beats[i] - last_b) / local
+            n = round(k)
+            if n != 0 and abs(k - n) * local <= allow:
+                recent.append((last_n + n, beats[i]))
+                out.append(recent[-1])
+                window = recent[-16:]
+                if len(window) >= 8 and window[-1][0] != window[0][0]:
+                    measured = (window[-1][1] - window[0][1]) / (window[-1][0] - window[0][0])
+                    if abs(measured / period - 1.0) <= FOLLOW_MAX_DRIFT:
+                        local = measured
+            i += direction
+    return sorted(out)
+
+
+def _knots(numbered):
+    """``[(n, seconds, period)]``: the local beat time and length every :data:`FOLLOW_KNOT` beats, each from a
+    line through the numbered beats within :data:`FOLLOW_SPAN` of it (beats far off it left out, as
+    :func:`_robust_fit`)."""
+    if not numbered:
+        return []
+    out = []
+    lo, hi = numbered[0][0], numbered[-1][0]
+    for centre in range(lo, hi + 1, FOLLOW_KNOT):
+        near = [(n - centre, t) for n, t in numbered if abs(n - centre) <= FOLLOW_SPAN]
+        if len(near) < FOLLOW_MIN_POINTS:
+            continue
+        origin, period = _robust_fit(near)
+        if period > 0:
+            out.append((centre, origin, period))
+    return out
+
+
+def _curve(knots, n):
+    """The time of beat ``n`` on the curve through ``knots``: each stretch between two readings is the smooth
+    curve that keeps both their times and tempos (a cubic Hermite); before the first and after the last, straight
+    on at their tempo."""
+    if n <= knots[0][0]:
+        c, t, p = knots[0]
+        return t + (n - c) * p
+    if n >= knots[-1][0]:
+        c, t, p = knots[-1]
+        return t + (n - c) * p
+    for (c0, t0, p0), (c1, t1, p1) in zip(knots, knots[1:]):
+        if c0 <= n <= c1:
+            h = c1 - c0
+            s = (n - c0) / h
+            return ((2 * s ** 3 - 3 * s ** 2 + 1) * t0 + (s ** 3 - 2 * s ** 2 + s) * h * p0
+                    + (-2 * s ** 3 + 3 * s ** 2) * t1 + (s ** 3 - s ** 2) * h * p1)
+    return knots[-1][1]
+
+
 PHRASE_SHIFTS = (0, 4)  # where the sound may put a normal track's phrases: from bar 1, or a 4-bar intro later
 
 
@@ -395,6 +527,19 @@ def app_ends(steady, model_beats, duration, levels=None, end_seconds=END_SECONDS
     def ms(t):
         return round(t * 1000.0, 1) if t is not None else None
 
+    def local(lo, hi):
+        """The tempo and share on the grid over one end: the song's own for an even grid; for one that follows a
+        drift, what the grid holds there (that's what the next song is matched to)."""
+        if not steady.get("follows"):
+            return steady["bpm"], steady["on_grid"]
+        inside = [b for b in grid_beats if lo <= b <= hi]
+        if len(inside) < 2:
+            return steady["bpm"], steady["on_grid"]
+        bpm = 60.0 * (len(inside) - 1) / (inside[-1] - inside[0])
+        played = [b for b in model_beats if lo - GRID_HIT <= b <= hi + GRID_HIT]
+        on = _heard(played, inside) / len(played) if played else 0.0
+        return bpm, max(on, _heard(inside, model_beats) / len(inside))
+
     last_beat = max((b for b in grid_beats if b <= min(duration, lock_out + 0.05)), default=grid_beats[-1])
     first_beat = next((b for b in grid_beats if b >= lock_in - 0.05), grid_beats[0])
     # Where the beat stops, only when a beatless outro follows (as the plugin sends it): the app then fades after
@@ -409,14 +554,15 @@ def app_ends(steady, model_beats, duration, levels=None, end_seconds=END_SECONDS
             ("outro", last_beat, max((d for d in downs if d <= last_beat + 0.05), default=None),
              max((p for p in phrases if p <= last_beat + 0.05), default=None), max(0.0, last_beat - end_seconds),
              last_beat + 0.05)):
+        end_bpm, end_on = local(lo, hi)
         out.update({
-            f"{end}_bpm": round(steady["bpm"], 3),
+            f"{end}_bpm": round(end_bpm, 3),
             f"{end}_beat_ms": ms(beat),
             f"{end}_bar_ms": ms(bar),
             f"{end}_phrase_ms": ms(phrase_start),
             f"{end}_phrase_bars": steady.get("phrase_bars") if phrase_start is not None else None,
             f"{end}_rhythm": round(heard(lo, hi), 3),
-            f"{end}_steady": round(steady["on_grid"], 3),
+            f"{end}_steady": round(end_on, 3),
         })
     out.update(extra)
     return out
@@ -443,7 +589,13 @@ def analyse(beats, downbeats, duration, levels=None):
     intro_bpm, intro_share, _ = end_tempo(beats, 0.0, intro_end)
     outro_bpm, outro_share, _ = end_tempo(beats, outro_start, duration + 1.0)
     per_bar, bar_share = bars(beats, downbeats)
-    steady = with_sound(steady_grid(beats, downbeats, bpm, per_bar or 4), levels) or {}
+    # One even grid, or, when the DJ rode the pitch (a track off a mixed CD), one that follows it: also when the even
+    # grid holds but the following one fits clearly better (India in Me: 79 % of the beats on the even grid, all of
+    # them on the following one).
+    even = steady_grid(beats, downbeats, bpm, per_bar or 4)
+    follows = following_grid(beats, downbeats, bpm, per_bar or 4)
+    found = follows if follows and (not even or follows["on_grid"] >= even["on_grid"] + FOLLOW_BETTER) else even
+    steady = with_sound(found, levels) or {}
     if steady:  # the even grid's bars, not the model's downbeats, which wander in breakdowns
         per_bar = steady["per_bar"]
     return {
@@ -464,6 +616,7 @@ def analyse(beats, downbeats, duration, levels=None):
                                         round(min(downbeats) * 1000.0) if len(downbeats) else None),
         "grid_bpm": steady.get("bpm"),
         "on_grid": steady.get("on_grid"),
+        "grid_drift": steady.get("drift", 0.0) if steady else None,
         "downbeat_source": steady.get("downbeat_source"),
         "grid_counted": "same" if steady else None,
         "phrase_source": steady.get("phrase_source"),
@@ -513,6 +666,8 @@ def verdict(result, tag_bpm=None):
         big, on = result.get("phrase_big") or 0, result.get("phrase_big_on") or 0
         notes.append(("warn", f"No clear phrases ({on} of {big} big changes on one bar of 8)" if big else
                       "No clear phrases (no big changes)"))
+    if (result.get("grid_drift") or 0) >= 0.002:
+        notes.append(("info", f"The grid follows a drifting tempo ({result['grid_drift'] * 100:.1f} %)"))
     if result.get("on_grid") is None and "on_grid" in result:
         notes.append(("info", "Not at one tempo: no steady grid"))
     if (result.get("steady") or 0) < 0.6:

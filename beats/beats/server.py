@@ -283,7 +283,7 @@ class App:
     def csv(self, find=None, show="all"):
         out = io.StringIO()
         columns = ["artist", "title", "album", "genres", "tag_bpm", "bpm",
-                   "main_share", "bpm_fit", "grid_bpm", "on_grid", "downbeat_source", "phrase_first_ms", "phrase_bars", "phrase_count",
+                   "main_share", "bpm_fit", "grid_bpm", "on_grid", "grid_drift", "downbeat_source", "phrase_first_ms", "phrase_bars", "phrase_count",
                    "phrase_big", "phrase_big_on",
                    "intro_bpm", "outro_bpm", "steady", "grid_share", "beats_per_bar", "bar_share", "first_downbeat_ms",
                    "model_seconds", "state", "notes", "error"]
@@ -294,7 +294,7 @@ class App:
             w.writerow([row["artist"], row["title"], row["album"], " / ".join(g["label"] for g in row["genres"]),
                         row["tag_bpm"], _round(r.get("bpm")),
                         _round(r.get("main_share"), 3), _round(r.get("bpm_fit")), _round(r.get("grid_bpm")),
-                        _round(r.get("on_grid"), 3), r.get("downbeat_source"), r.get("phrase_first_ms"), r.get("phrase_bars"),
+                        _round(r.get("on_grid"), 3), _round(r.get("grid_drift"), 4), r.get("downbeat_source"), r.get("phrase_first_ms"), r.get("phrase_bars"),
                         r.get("phrase_count"), r.get("phrase_big"), r.get("phrase_big_on"),
                         _round(r.get("intro_bpm")), _round(r.get("outro_bpm")), _round(r.get("steady"), 3),
                         _round(r.get("grid_share"), 3), r.get("beats_per_bar"), _round(r.get("bar_share"), 3),
@@ -597,7 +597,14 @@ def _id(text):
 
 class _Server(ThreadingHTTPServer):
     def handle_error(self, request, client_address):  # a request that broke: the traceback goes to the log
-        _log.exception("A request from %s went wrong", client_address[0] if client_address else "?")
+        import sys
+
+        who = client_address[0] if client_address else "?"
+        if isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError, TimeoutError)):
+            # The other end stopped listening (a health check that gave up, a page closed): nothing broke here.
+            _log.debug("%s left before its answer was sent: %s", who, sys.exc_info()[1])
+            return
+        _log.exception("A request from %s went wrong", who)
 
 
 def make_server(app, host="0.0.0.0", port=None):
