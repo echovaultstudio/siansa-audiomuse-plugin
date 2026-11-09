@@ -626,6 +626,11 @@ class ServiceTest(Base):
         self.assertEqual(rows[0]["details"], {})
         self.assertEqual(self.call("/api/status")["bad_blends"], 2)
         self.assertTrue(any("Bad blend marked" in e["message"] for e in self.call("/api/status")["events"]))
+        export = self.call("/api/bad-blends/export")
+        marked = next(b for b in export["bad_blends"] if b["id"] == made["id"])
+        self.assertEqual((marked["from"]["id"], marked["to"]["id"]), ("t140", "t122"))
+        self.assertTrue(marked["from"]["beats"])
+        self.assertIsNone(next(b for b in export["bad_blends"] if b["from_id"] == "gone")["from"])
         self.assertEqual(self.call(f"/api/bad-blends/{made['id']}", "DELETE"), {"removed": True})
         with self.assertRaises(urllib.error.HTTPError) as e:
             self.call(f"/api/bad-blends/{made['id']}", "DELETE")

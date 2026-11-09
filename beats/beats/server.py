@@ -31,6 +31,7 @@ API (JSON):
     DELETE /api/libraries/<id>/songs  forget the songs of a library that's left out, with what was found in them
     POST /api/analyse-all             analyse every song again
     GET  /api/bad-blends              the song changes marked as bad in Siansa Dev, newest first
+    GET  /api/bad-blends/export       all of them with both songs' beats, sound levels and results, as a file
     POST /api/bad-blends              {"from_id", "to_id", "technique", "details"}: one more (from the app, through
                                       the Siansa Beats (dev) plugin)
     DELETE /api/bad-blends/<n>        takes one away
@@ -144,18 +145,30 @@ class App:
         """The analysed songs the table finds (every one without ``find`` and ``show``) with what the grid and
         phrases are worked out from (the model's beats and downbeats, the sound's levels) and what they came to: to
         tune them on real music. Song names and genres, no addresses."""
-        out = []
-        for row in self.songs(find, show, 0):
-            full = self.store.result(row["id"], self.config.model, with_beats=True)
-            if not full:
-                continue
-            out.append({"id": row["id"], "artist": row.get("artist"), "title": row.get("title"),
-                        "genres": [g["label"] for g in self.store.genres(row["id"])],
-                        "duration": row.get("duration"), "tag_bpm": row.get("tag_bpm"),
-                        "result": {k: v for k, v in full.items() if k not in ("beats", "downbeats", "levels")},
-                        "beats": full["beats"], "downbeats": full["downbeats"], "levels": full.get("levels"),
-                        "marks": [m["seconds"] for m in self.store.marks(row["id"])]})
+        out = [s for s in (self.song_data(row["id"], row) for row in self.songs(find, show, 0)) if s]
         return {"version": __version__, "model": self.config.model, "songs": out}
+
+    def song_data(self, song_id, row=None):
+        """One song as the data export has it (its beats, downbeats, sound levels, results and marks), or None when
+        it isn't analysed."""
+        full = self.store.result(song_id, self.config.model, with_beats=True)
+        if not full:
+            return None
+        row = row or self.store.song(song_id) or {}
+        return {"id": song_id, "artist": row.get("artist"), "title": row.get("title"),
+                "genres": [g["label"] for g in self.store.genres(song_id)],
+                "duration": row.get("duration"), "tag_bpm": row.get("tag_bpm"),
+                "result": {k: v for k, v in full.items() if k not in ("beats", "downbeats", "levels")},
+                "beats": full["beats"], "downbeats": full["downbeats"], "levels": full.get("levels"),
+                "marks": [m["seconds"] for m in self.store.marks(song_id)]}
+
+    def bad_blends_export(self):
+        """Every bad blend with both songs' data (:meth:`song_data`): one file to look into them with."""
+        blends = self.store.bad_blends(limit=1000)
+        ids = {i for b in blends for i in (b["from_id"], b["to_id"])}
+        songs = {i: self.song_data(i) for i in ids}
+        return {"version": __version__, "model": self.config.model, "bad_blends": [
+            {**b, "from": songs.get(b["from_id"]), "to": songs.get(b["to_id"])} for b in blends]}
 
     def beats(self, song_id):
         """The beat grid as the plugin will read it: the steady grid when the song is at one tempo (``steady``
@@ -322,6 +335,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(app.worker.libraries())
             if path == "/api/bad-blends":
                 return self._json(app.store.bad_blends())
+            if path == "/api/bad-blends/export":
+                body = json.dumps(app.bad_blends_export()).encode()
+                return self._send(HTTPStatus.OK, body, "application/json",
+                                  {"Content-Disposition": 'attachment; filename="siansa-bad-blends.json"'})
             find, show = (query.get("find") or [""])[0], (query.get("show") or ["all"])[0]
             if path == "/api/songs":
                 try:
