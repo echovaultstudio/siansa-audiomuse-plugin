@@ -90,6 +90,9 @@ tbody tr[aria-selected=true] { background: color-mix(in srgb, var(--amber) 12%, 
 .state { font-size: 0.8rem; white-space: nowrap; }
 .state.failed { color: var(--bad); } .state.done { color: var(--ok); } .state.busy { color: var(--amber-text); }
 .events { list-style: none; margin: 0; padding: 0; max-height: 520px; overflow-y: auto; font-size: 0.84rem; }
+.log { margin: 12px 0 0; max-height: 420px; overflow: auto; font: 0.74rem/1.45 var(--mono); color: var(--muted);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px; white-space: pre-wrap; word-break: break-word; }
+.log .warn { color: var(--warn); } .log .error { color: var(--bad); } .log .debug { color: var(--faint); }
 .events li { padding: 6px 0; border-bottom: 1px solid var(--line); color: var(--muted); }
 .events time { color: var(--faint); font-family: var(--mono); font-size: 0.76rem; margin-right: 6px; }
 .events .error { color: var(--bad); } .events .warn { color: var(--warn); }
@@ -125,7 +128,6 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
   <div class="banner" id="offline" role="alert" hidden></div>
   <div class="banner" id="banner" role="alert" hidden><span id="banner-text"></span><button id="banner-close" aria-label="Close">✕</button></div>
   <div class="banner warn" id="device-note" role="status" hidden></div>
-  <div class="banner warn" id="plugin-note" role="status" hidden></div>
 
   <section class="card now" aria-label="What's happening">
     <div>
@@ -163,7 +165,7 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
     <canvas id="beatview" height="120" aria-label="Beats around the playhead"></canvas>
     <div class="legend"><span><i style="background:var(--frost)"></i>beat</span><span><i style="background:var(--amber)"></i>downbeat (bar number)</span><span><i style="background:var(--ok)"></i>phrase start (every 8 or 16 bars)</span><span><i style="background:var(--mark)"></i>your section marks</span><span id="other-legend"><i style="background:var(--faint);height:6px"></i>the model's beats</span><span><i style="background:var(--text)"></i>now</span><span>8 seconds around what's playing; tap to jump</span></div>
     <canvas id="curve" height="170" aria-label="Tempo along the song"></canvas>
-    <div class="legend"><span><i style="background:var(--amber)"></i>Beat This! tempo</span><span><i style="background:var(--ok)"></i>BPM tag</span><span><i style="background:var(--bad)"></i>plugin's intro / outro</span><span><i style="background:var(--line-strong)"></i>the ends the plugin measures</span></div>
+    <div class="legend"><span><i style="background:var(--amber)"></i>Beat This! tempo</span><span><i style="background:var(--ok)"></i>BPM tag</span><span><i style="background:var(--line-strong)"></i>the ends (first and last 30 s)</span></div>
     <div id="d-notes"></div>
     <div class="facts" id="d-facts"></div>
   </section>
@@ -182,17 +184,16 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
       <div class="table">
         <table>
           <thead><tr>
-            <th>Song</th><th>Genre</th><th title="The file's BPM tag">Tag</th><th title="The Siansa plugin today: intro / outro">Plugin</th>
+            <th>Song</th><th>Genre</th><th title="The file's BPM tag">Tag</th>
             <th title="Beat This!: whole song (intro / outro)">Beat This!</th><th title="Beats a bar, and the share of bars that agree">Bar</th>
             <th title="Share of beats within 4 % of the usual gap">Steady</th><th>Notes</th><th>State</th>
           </tr></thead>
-          <tbody id="rows"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody>
+          <tbody id="rows"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
         </table>
       </div>
       <div class="sub" id="shown-note" hidden style="margin-top:8px"></div>
       <div class="tools" style="margin-top:12px">
         <button id="all-again">Analyse every song again</button>
-        <button id="plugin-refresh">Read the plugin's values again</button>
         <a class="btn" id="export-csv" href="api/export.csv" download>Export CSV</a>
         <a class="btn" id="export-json" href="api/export.json" download title="Every song's beats and sound levels (a few MB): for tuning the grid and phrases">Download data</a>
         <a class="btn" id="export-failed" href="api/failed/export" download hidden title="The songs that couldn't be analysed, with why: the one file to send">Download failed songs</a>
@@ -207,6 +208,23 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
     <section class="card" aria-label="Activity">
       <h2>Activity</h2>
       <ul class="events" id="events"></ul>
+    </section>
+    <section class="card" aria-label="Log">
+      <h2>Log</h2>
+      <p class="sub">Everything Siansa Beats does, as in the container's log. <strong>Debug details</strong> adds every
+        step of every song, with its times, and every request to Navidrome: turn it on to find a problem, off when it's
+        found. Passwords and tokens are never written.</p>
+      <div class="tools">
+        <label class="toggle"><input type="checkbox" id="log-debug"> Debug details</label>
+        <div class="seg" role="group" aria-label="Show lines">
+          <button data-log="debug" aria-pressed="true">All</button>
+          <button data-log="info" aria-pressed="false">Info</button>
+          <button data-log="warn" aria-pressed="false" title="Warnings and errors">Problems</button>
+        </div>
+        <a class="btn" href="api/log/download" download>Download log</a>
+        <a class="btn" href="api/debug" download title="Versions, setup (no passwords), where each part is right now, the queue and the log: the one file to send when something's stuck or wrong">Download debug report</a>
+      </div>
+      <pre class="log" id="log" aria-live="off">Loading…</pre>
     </section>
   </div>
 </main>
@@ -234,14 +252,6 @@ $("banner-close").addEventListener("click", () => banner(null));
 function offline(text) { $("offline").hidden = !text; $("offline").textContent = text || ""; }
 
 // ---- status ----
-const PLUGIN_PILL = {ok: "ok", error: "bad", warn: "wait", waiting: "wait", off: ""};
-function pluginPill(s) {
-  const p = s.plugin || {};
-  if (p.state === "off") return "No plugin to compare with";
-  if (p.state === "error") return "Plugin can't be reached";
-  if (p.asked) return `Plugin: ${p.found} of ${p.asked}`;
-  return p.state === "ok" ? "Plugin answers" : "Plugin: checking…";
-}
 let badCount = -1;
 async function refreshBad() {
   let rows;
@@ -275,9 +285,9 @@ async function refreshStatus() {
   $("pills").innerHTML = [
     `<span class="pill ${s.model_loaded ? (s.device_note ? "wait" : "ok") : "wait"}" title="${esc(s.device_note || "")}">Model ${esc(s.model)} · ${s.model_loaded ? esc(s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") + (s.float16 && s.device !== "cpu" ? " (half precision)" : "") + (s.model_load_seconds ? ` · loaded in ${fmt(s.model_load_seconds)}s` : "") : (s.device === "cpu" ? "CPU" : "GPU if there is one") + " · loads with the first song"}</span>`,
     `<span class="pill ${s.navidrome ? "ok" : "bad"}">Navidrome</span>`,
-    `<span class="pill ${PLUGIN_PILL[(s.plugin || {}).state] || "wait"}" title="${esc((s.plugin || {}).text || "")}">${pluginPill(s)}</span>`,
+    s.log_level === "debug" ? `<span class="pill wait" title="The log says every step: turn it off under Log when you're done">Debug details on</span>` : "",
     `<span class="pill">v${esc(s.version)}</span>`,
-  ].join("");
+  ].filter(Boolean).join("");
   if (s.current) {
     $("now-what").textContent = `${s.current.artist} – ${s.current.title}`;
     $("now-step").textContent = `${s.current.step} for ${fmt(s.current.for_seconds)} s` +
@@ -301,8 +311,6 @@ async function refreshStatus() {
   const read = (s.libraries || {}).read_at;
   $("read").title = "Read the chosen libraries from Navidrome now (it's done every 6 hours anyway)" + (read ? `. Last read ${new Date(read * 1000).toLocaleString()}.` : "");
   $("device-note").hidden = !s.device_note; $("device-note").textContent = s.device_note || "";
-  const pluginTrouble = s.plugin && ["error", "warn"].includes(s.plugin.state) ? s.plugin.text : "";
-  $("plugin-note").hidden = !pluginTrouble; $("plugin-note").textContent = pluginTrouble;
   const w = (n) => total ? (100 * n / total) + "%" : "0";
   $("progress").innerHTML = `<span class="done" style="width:${w(done)}"></span><span class="failed" style="width:${w(failed)}"></span><span class="busy" style="width:${w(busy)}"></span>`;
   const times = songs.filter((x) => x.result).map((x) => x.result.model_seconds).filter((x) => x);
@@ -340,17 +348,16 @@ function drawRows() {
   $("shown-note").textContent = `Showing the first ${songs.length} of ${total} songs: search to find others.`;
   const shown = songs;  // found and filtered by the service
   if (!shown.length) {
-    $("rows").innerHTML = `<tr><td colspan="9" class="empty">${$("search").value.trim() || filter !== "all" ? "Nothing matches." : "No songs yet: tick the libraries to analyse above, then Start analysis."}</td></tr>`;
+    $("rows").innerHTML = `<tr><td colspan="8" class="empty">${$("search").value.trim() || filter !== "all" ? "Nothing matches." : "No songs yet: tick the libraries to analyse above, then Start analysis."}</td></tr>`;
     return;
   }
   $("rows").innerHTML = shown.map((s) => {
-    const r = s.result || {}, p = s.plugin || {};
+    const r = s.result || {};
     const state = BUSY.includes(s.state) ? "busy" : s.state;
     return `<tr data-id="${esc(s.id)}" aria-selected="${s.id === selected}">
       <td><div class="big">${esc(s.title)}${s.marks ? ` <span class="sub" style="color:var(--mark)" title="Your section marks">◆ ${s.marks}</span>` : ""}</div><div class="sub">${esc(s.artist)}</div></td>
       <td>${s.genres.map((g) => `<span class="chip" title="from ${esc(g.source)}">${esc(g.label)}</span>`).join("") || '<span class="sub">–</span>'}</td>
       <td class="num">${s.tag_bpm ? fmt(s.tag_bpm, 0) : "–"}</td>
-      <td class="num">${fmt(p.intro_bpm)}<div class="sub">${fmt(p.outro_bpm)}</div></td>
       <td class="num"><span class="big">${fmt(r.bpm, 2)}</span><div class="sub">${fmt(r.intro_bpm)} / ${fmt(r.outro_bpm)}</div></td>
       <td class="num">${r.beats_per_bar ? r.beats_per_bar + " beats" : "–"}<div class="sub">${r.phrase_source === "sound" || r.phrase_source === "mix: sound" ? "phrases: sound" : r.phrase_source === "bar 1" ? "phrases: bar 1" : r.from_mix ? "mix: no phrases" : r.beats_per_bar ? pct(r.bar_share) : ""}</div></td>
       <td class="num">${pct(r.steady)}<div class="sub">grid ${pct(r.grid_share)}</div></td>
@@ -412,7 +419,7 @@ $("start").addEventListener("click", async () => {
 });
 $("left-out").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-remove]");
-  if (!b || !confirm(`Remove the ${b.dataset.songs} songs of ${b.dataset.name} from Siansa Beats, with their beats and marks? Nothing changes on Navidrome. The Siansa Dev app then falls back to the Siansa plugin's readings for them.`)) return;
+  if (!b || !confirm(`Remove the ${b.dataset.songs} songs of ${b.dataset.name} from Siansa Beats, with their beats and marks? Nothing changes on Navidrome. Siansa Dev then gets their beats from the Siansa Beats (dev) plugin's own reading, or none (its page's choice).`)) return;
   b.disabled = true;
   try { await api(`api/libraries/${encodeURIComponent(b.dataset.remove)}/songs`, {method: "DELETE"}); banner(null); }
   catch (err) { banner(err.message); }
@@ -442,14 +449,14 @@ async function openSong(id, newSong, fromHistory) {
     resetClicks();
     headerHeight(); $("detail").scrollIntoView({behavior: "smooth", block: "start"});
   }
-  const r = detail.result || {}, p = detail.plugin || {};
+  const r = detail.result || {};
   $("d-notes").innerHTML = (detail.verdict || []).map(([level, text]) => `<span class="note ${level}">${esc(text)}</span>`).join("")
     + (detail.error ? `<span class="note warn">${esc(detail.error)}</span>` : "");
   const facts = [
     ["Beat This! tempo", r.bpm ? fmt(r.bpm, 2) + " BPM" + (r.main_share != null ? ` (${pct(r.main_share)} of the song)` : "") : "–"],
     ["One line through every beat", r.bpm_fit ? fmt(r.bpm_fit, 2) + " BPM" : "–"],
     ["Intro (first 30 s)", fmt(r.intro_bpm, 2)], ["Outro (last 30 s)", fmt(r.outro_bpm, 2)],
-    ["Plugin intro / outro", `${fmt(p.intro_bpm, 2)} / ${fmt(p.outro_bpm, 2)}`], ["BPM tag", detail.tag_bpm ? fmt(detail.tag_bpm, 0) : "–"],
+    ["BPM tag", detail.tag_bpm ? fmt(detail.tag_bpm, 0) : "–"],
     ["Steady grid", detail.grid ? `${fmt(detail.grid.bpm, 2)} BPM · ${pct(detail.grid.on_grid)} of the model's beats on it · bars from ${pct(detail.grid.bar_share)} of its downbeats` : "None: the song isn't at one tempo, so the clicks follow the model's beats"],
     ["Bars", !detail.grid ? "–" : {both: "The model's downbeats and the music's changes agree", model: "From the model's downbeats (no clear changes to check them by)", changes: "Moved to where the music changes: the model's downbeats were off"}[detail.grid.downbeat_source] || "From the model's downbeats"],
     ["Phrases", !detail.grid ? "–" : phraseText(detail.grid)],
@@ -525,10 +532,10 @@ function drawBeatView() {
 }
 function drawCurve() {
   const canvas = $("curve"); if (!detail) return;
-  const [g, w, h] = sizeCanvas(canvas), r = detail.result || {}, p = detail.plugin || {};
+  const [g, w, h] = sizeCanvas(canvas), r = detail.result || {};
   const dur = detail.duration || (detail.beats || []).slice(-1)[0] || 1, pts = detail.tempo_curve || [];
   g.clearRect(0, 0, w, h);
-  const values = pts.map((q) => q[1]).concat([detail.tag_bpm, p.intro_bpm, p.outro_bpm, r.bpm].filter((v) => v));
+  const values = pts.map((q) => q[1]).concat([detail.tag_bpm, r.bpm].filter((v) => v));
   if (!values.length) { g.fillStyle = css("--faint"); g.fillText("Not analysed yet", 12, 20); return; }
   let lo = Math.min(...values), hi = Math.max(...values);
   lo = Math.floor((lo - 5) / 10) * 10; hi = Math.ceil((hi + 5) / 10) * 10;
@@ -539,7 +546,6 @@ function drawCurve() {
   for (let v = lo; v <= hi; v += (hi - lo > 80 ? 20 : 10)) { g.beginPath(); g.moveTo(40, y(v)); g.lineTo(w - 10, y(v)); g.stroke(); g.fillText(String(v), 6, y(v) + 4); }
   const line = (v, color, from = 0, to = dur, dash = []) => { if (!v) return; g.strokeStyle = color; g.setLineDash(dash); g.lineWidth = 2; g.beginPath(); g.moveTo(x(from), y(v)); g.lineTo(x(to), y(v)); g.stroke(); g.setLineDash([]); };
   line(detail.tag_bpm, css("--ok"), 0, dur, [6, 4]);
-  line(p.intro_bpm, css("--bad"), 0, Math.min(end, dur)); line(p.outro_bpm, css("--bad"), Math.max(0, dur - end), dur);
   g.fillStyle = css("--ok");  // the phrase starts, as ticks along the top
   for (const t of (detail.grid && detail.grid.phrases) || []) g.fillRect(x(t) - 1, 10, 2, 8);
   g.fillStyle = css("--mark");  // the owner's marks, along the bottom
@@ -666,10 +672,41 @@ $("all-again").addEventListener("click", async () => {
     await api("api/analyse-all", {method: "POST"}); refreshStatus();
   }
 });
-$("plugin-refresh").addEventListener("click", async () => { try { await api("api/plugin/refresh", {method: "POST"}); } catch (e) { banner(e.message); } lastCounts = ""; refreshStatus(); });
 refreshLibraries();
 refreshStatus();
 setInterval(refreshStatus, 2000);
+
+// ---- the log ----
+let logLines = [], logAfter = 0, logShow = "debug";
+const LOG_RANK = {debug: 0, info: 1, warn: 2, error: 3};
+function drawLog() {
+  const box = $("log"), atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+  const shown = logLines.filter((l) => LOG_RANK[l.level] >= LOG_RANK[logShow]);
+  box.innerHTML = shown.map((l) => `<span class="${esc(l.level)}">${new Date(l.at * 1000).toLocaleTimeString()} ${esc(l.level.toUpperCase().padEnd(5))} ${esc(l.where)}: ${esc(l.message)}</span>`).join("\n") || "Nothing yet.";
+  if (atEnd) box.scrollTop = box.scrollHeight;
+}
+async function refreshLog() {
+  let answer;
+  try { answer = await api(`api/log?after=${logAfter}&limit=1000`); } catch (e) { return; }
+  $("log-debug").checked = answer.level === "debug";
+  if (!answer.lines.length) { if (!logAfter) drawLog(); return; }
+  if (answer.lines[0].n < logAfter) logLines = [];  // the service restarted: its lines start again
+  logLines = logLines.concat(answer.lines).slice(-1500);
+  logAfter = logLines[logLines.length - 1].n;
+  drawLog();
+}
+$("log-debug").addEventListener("change", async (e) => {
+  try { await api("api/log/level", {method: "POST", body: JSON.stringify({level: e.target.checked ? "debug" : "info"}),
+    headers: {"Content-Type": "application/json"}}); } catch (err) { banner(err.message); }
+  refreshStatus(); refreshLog();
+});
+document.querySelectorAll("[data-log]").forEach((b) => b.addEventListener("click", () => {
+  logShow = b.dataset.log;
+  document.querySelectorAll("[data-log]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  drawLog();
+}));
+refreshLog();
+setInterval(refreshLog, 3000);
 { const m = location.hash.match(/^#song=(.+)$/); if (m) { history.replaceState({song: decodeURIComponent(m[1])}, "", location.hash); openSong(decodeURIComponent(m[1]), true, true); } }
 </script>
 </body>

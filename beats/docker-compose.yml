@@ -11,11 +11,10 @@ services:
       NAVIDROME_URL: ${NAVIDROME_URL}
       NAVIDROME_USER: ${NAVIDROME_USER}
       NAVIDROME_PASSWORD: ${NAVIDROME_PASSWORD}
-      AUDIOMUSE_URL: ${AUDIOMUSE_URL:-}
-      AUDIOMUSE_TOKEN: ${AUDIOMUSE_TOKEN:-}
       BEATS_MODEL: ${BEATS_MODEL:-final0}
       BEATS_THREADS: ${BEATS_THREADS:-0}
       BEATS_PASSWORD: ${BEATS_PASSWORD:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - beats-data:/data
     # A song at a time; the model uses the CPU's cores while it reads one. Lower to keep the server responsive.

@@ -11,12 +11,11 @@ services:
       NAVIDROME_URL: "<http://navidrome.local:4533>"
       NAVIDROME_USER: "<your Navidrome user>"
       NAVIDROME_PASSWORD: "<its password>"
-      AUDIOMUSE_URL: "<http://audiomuse.local:8000, or empty>"
-      AUDIOMUSE_TOKEN: "<an AudioMuse-AI API token, or empty>"
       BEATS_MODEL: "final0"
       BEATS_DEVICE: "auto"
       BEATS_FLOAT16: "0"
       BEATS_PASSWORD: ""
+      LOG_LEVEL: "info"
       NVIDIA_VISIBLE_DEVICES: "all"
     volumes:
       - beats-data:/data

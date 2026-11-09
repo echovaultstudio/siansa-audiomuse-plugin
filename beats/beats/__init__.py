@@ -1,3 +1,3 @@
-"""Siansa Beats: Beat This! beat and downbeat tracking for a test library, beside the Siansa plugin's readings."""
+"""Siansa Beats: Beat This! beat and downbeat tracking for the Navidrome libraries chosen, for Siansa Dev's DJ blends."""
 
-__version__ = "0.13.3"
+__version__ = "0.14.0"

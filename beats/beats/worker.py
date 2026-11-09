@@ -14,24 +14,23 @@ import queue
 import tempfile
 import threading
 import time
-import traceback
 
-from . import grid
 from . import features
-from .audiomuse import AudioMuseError
+from . import grid
+from . import log
 from .subsonic import SubsonicError
+
+_log = log.get("worker")
 
 
 LIBRARY_RESCAN_SECONDS = 6 * 3600  # how often the chosen libraries are read again for new songs
 
 
 class Worker:
-    def __init__(self, store, navidrome, audiomuse, tracker, decode, data_dir, model_name, measure=None):
+    def __init__(self, store, navidrome, tracker, decode, data_dir, model_name, measure=None):
         self.store = store
         self.navidrome = navidrome
-        self.audiomuse = audiomuse
         self.measure = measure or features.measure
-        self.plugin_state = {"state": "waiting", "text": "Not asked yet"}
         self.tracker = tracker  # (samples) -> (beats, downbeats)
         self.decode = decode  # (path) -> samples
         self.data_dir = data_dir
@@ -129,8 +128,6 @@ class Worker:
             self.store.set_setting("library_read_at", time.time())
             self.store.event(f"Read the libraries in {time.monotonic() - started:.0f}s")
             self.wake()
-            if queued:  # the plugin's readings of the new songs, for comparison: in the background, as they can be many
-                threading.Thread(target=self.refresh_plugin, args=(queued,), name="plugin", daemon=True).start()
             return {"songs": total, "queued": len(queued)}
 
     def _library_loop(self):
@@ -148,8 +145,10 @@ class Worker:
                 self.read_libraries()
             except Exception as e:  # Navidrome away: try again next time
                 self.store.set_setting("library_read_at", time.time())
-                if not isinstance(e, SubsonicError):
-                    traceback.print_exc()
+                if isinstance(e, SubsonicError):
+                    _log.warning("Couldn't read the libraries (tried again in %d hours): %s", LIBRARY_RESCAN_SECONDS // 3600, e)
+                else:
+                    _log.exception("Reading the libraries went wrong")
 
     def regrid(self):
         """Works out again, from their saved beats, the results of an older Siansa Beats (no model needed)."""
@@ -167,6 +166,7 @@ class Worker:
                                                                           song.get("duration") or row["beats"][-1],
                                                                           row.get("levels")))
             except Exception as e:  # one odd song never stops the rest
+                _log.debug("Working out %s again failed", song_id, exc_info=True)
                 self.store.event(f"Couldn't work out {song_id} again: {e}", "warn")
             self.regridding["done"] += 1
         self.regridding = None
@@ -181,60 +181,14 @@ class Worker:
             self.wake()
         return len(stale)
 
-    def check_plugin(self):
-        """Asks the Siansa plugin whether it's there, for the page's plugin line."""
-        if not self.audiomuse.configured:
-            self.plugin_state = {"state": "off", "text": "Set AUDIOMUSE_URL (and AUDIOMUSE_TOKEN if AudioMuse-AI "
-                                                         "has a login) to compare with the plugin"}
-            return self.plugin_state
-        try:
-            health = self.audiomuse.health()
-            if health.get("status") == "error":
-                raise AudioMuseError(health.get("error") or "The plugin says it isn't working: AudioMuse-AI's log says more")
-            version = health.get("plugin_version", "?")
-            self.plugin_state = {"state": "ok", "version": version, "text": f"Siansa plugin {version} answers"}
-            self.store.event(f"Siansa plugin {version} answers on AudioMuse-AI")
-        except AudioMuseError as e:
-            self.plugin_state = {"state": "error", "text": f"The Siansa plugin doesn't answer: {e}"}
-            self.store.event(self.plugin_state["text"], "warn")
-        return self.plugin_state
-
-    def refresh_plugin(self, ids):
-        """The Siansa plugin's readings of ``ids``, kept for comparison. Quietly skipped without AudioMuse-AI."""
-        if not self.audiomuse.configured or not ids:
-            self.check_plugin()
-            return 0
-        try:
-            found = self.audiomuse.profiles(ids)
-        except AudioMuseError as e:
-            self.plugin_state = {"state": "error", "text": f"Couldn't read the plugin's readings: {e}"}
-            self.store.event(self.plugin_state["text"], "warn")
-            return 0
-        with_beats = 0
-        for song_id, values in found.items():
-            if any(values.get(f) is not None for f in ("intro_bpm", "outro_bpm")):
-                self.store.save_plugin(song_id, values)
-                with_beats += 1
-        if not found:
-            text = (f"The plugin knows none of these {len(ids)} songs: has AudioMuse-AI analysed them, and is it "
-                    "set up with this Navidrome?")
-            state = "warn"
-        elif with_beats < len(found):
-            text = (f"Plugin readings for {with_beats} of {len(ids)} songs ({len(found) - with_beats} measured "
-                    "before the plugin read beats: it does them as it goes)")
-            state = "ok" if with_beats else "warn"
-        else:
-            text, state = f"Plugin readings for {with_beats} of {len(ids)} songs", "ok"
-        self.plugin_state = {"state": state, "text": text, "found": with_beats, "asked": len(ids)}
-        self.store.event(text, "info" if state == "ok" else "warn")
-        return with_beats
-
     # ---- the work ----
 
     def _prepare_loop(self):
         """Downloads, decodes and measures the next song while the model works on this one."""
         while not self._stop.is_set():
             song_id = None if self.paused else self.store.claim_next()
+            if song_id is not None:
+                _log.debug("Next song: %s", song_id)
             if song_id is None:
                 self._wake.wait(timeout=5.0)
                 self._wake.clear()
@@ -276,6 +230,8 @@ class Worker:
         holder = self.preparing = {"id": song_id, "title": song["title"], "artist": song["artist"], "step": None,
                                    "since": time.time()}
         path = None
+        label = f"{song['artist']} – {song['title']} ({song_id})"
+        _log.debug("%s: preparing (%s, %.0fs on Navidrome)", label, song.get("suffix") or "?", song.get("duration") or 0)
         try:
             self._step(holder, song_id, "downloading")
             started = time.monotonic()
@@ -283,15 +239,20 @@ class Worker:
             os.close(fd)
             size = self.navidrome.download(song_id, path)
             download_seconds = time.monotonic() - started
+            _log.debug("%s: downloaded %.1f MB in %.2fs", label, size / 1e6, download_seconds)
 
             self._step(holder, song_id, "decoding")
             started = time.monotonic()
             samples = self.decode(path)
             decode_seconds = time.monotonic() - started
+            _log.debug("%s: decoded %d samples (%.1fs of sound) in %.2fs", label, len(samples), len(samples) / 22_050.0,
+                       decode_seconds)
             try:
                 levels = self.measure(samples)
+                _log.debug("%s: measured the sound", label)
             except Exception as e:  # the phrases need it, the beats don't: carry on without
                 levels = None
+                _log.debug("%s: measuring the sound failed", label, exc_info=True)
                 self.store.event(f"{song['artist']} – {song['title']}: couldn't measure the sound for phrases: {e}", "warn")
             self._step(holder, song_id, "ready")
             return {"song": song, "samples": samples, "levels": levels, "size": size,
@@ -309,8 +270,11 @@ class Worker:
         self.last_error = message
         self.store.set_state(song["id"], "failed", message)
         self.store.event(f"{song['artist']} – {song['title']} failed: {message}", "error")
-        if not isinstance(e, (SubsonicError, RuntimeError)):
-            traceback.print_exc()
+        # The whole story for anything unexpected; Navidrome's and the decoder's own errors say enough.
+        if isinstance(e, (SubsonicError, RuntimeError)):
+            _log.debug("%s (%s): %s", song.get("title"), song["id"], e.__class__.__name__)
+        else:
+            _log.error("Unexpected error on %s (%s)", song.get("title"), song["id"], exc_info=e)
 
     def finish(self, prepared):
         """Runs the model on a prepared song and saves what it found."""
@@ -336,7 +300,13 @@ class Worker:
                 if note:
                     self.store.event(note, "warn")
 
+            _log.debug("%s – %s: the model found %d beats, %d downbeats in %.2fs", song["artist"], song["title"],
+                       len(beats), len(downbeats), model_seconds)
             values = grid.analyse(beats, downbeats, duration or song["duration"], levels)
+            _log.debug("%s – %s: %s", song["artist"], song["title"],
+                       ", ".join(f"{k} {round(values[k], 3) if isinstance(values[k], float) else values[k]}" for k in ("bpm", "grid_bpm", "steady", "on_grid", "beats_per_bar",
+                                                                    "first_downbeat_ms", "phrase_bars", "phrase_count",
+                                                                    "downbeat_source") if k in values))
             values.update(download_seconds=download_seconds, decode_seconds=decode_seconds, model_seconds=model_seconds)
             self.store.save_result(song_id, self.model_name, values, beats, downbeats, levels)
             self.store.set_state(song_id, "done")

@@ -86,14 +86,10 @@ class RelationTest(unittest.TestCase):
 
 
 class VerdictTest(unittest.TestCase):
-    def test_control_shows_the_plugins_misreading(self):
+    def test_control_matches_its_tag(self):
         result = {"bpm": 140.2, "intro_bpm": 140.3, "outro_bpm": 140.1, "steady": 0.98}
-        notes = grid.verdict(result, tag_bpm=140, plugin={"intro_bpm": 187.1, "outro_bpm": 140.0})
-        texts = [t for _, t in notes]
-        self.assertIn("Matches the BPM tag", texts)
-        self.assertIn("Plugin's intro 187.1 is 4/3 of this", texts)
-        self.assertIn("Plugin's outro agrees", texts)
-        self.assertFalse(any("outside" in t for t in texts))
+        texts = [t for _, t in grid.verdict(result, tag_bpm=140)]
+        self.assertEqual(texts, ["Matches the BPM tag"])
 
     def test_a_tag_at_double(self):
         notes = dict((t, level) for level, t in grid.verdict({"bpm": 93.0, "steady": 0.99}, tag_bpm=186))

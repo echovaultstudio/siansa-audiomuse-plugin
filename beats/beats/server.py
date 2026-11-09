@@ -1,13 +1,13 @@
-"""Siansa Beats: Beat This! for the songs of the chosen Navidrome libraries, with a page to watch it and compare
-its readings.
+"""Siansa Beats: Beat This! for the songs of the chosen Navidrome libraries, with a page to watch it, its log and
+a debug report.
 
 Run with ``python -m beats.server``. Set up with environment variables (see the README):
 
     NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASSWORD   the music server (read only)
-    AUDIOMUSE_URL, AUDIOMUSE_TOKEN                       optional: the Siansa plugin's readings, for comparison
     BEATS_MODEL (final0 | small0), BEATS_DEVICE (auto | cpu | cuda | cuda:N), BEATS_FLOAT16, BEATS_THREADS
     BEATS_PASSWORD                                       optional: the page and API ask for it (user "siansa")
     DATA_DIR (/data), MODELS_DIR (/models), PORT (8090)
+    LOG_LEVEL (info | debug)                             how much the log says at start (the page can change it)
 
 API (JSON):
 
@@ -36,7 +36,11 @@ API (JSON):
     POST /api/bad-blends              {"from_id", "to_id", "technique", "details"}: one more (from the app, through
                                       the Siansa Beats (dev) plugin)
     DELETE /api/bad-blends/<n>        takes one away
-    POST /api/plugin/refresh          read the plugin's readings again
+    GET  /api/log?after=&limit=&level= the latest log lines (numbered; ``after`` for only newer ones), oldest first
+    GET  /api/log/download            every kept log line, as a text file
+    POST /api/log/level {"level"}     "debug" or "info": how much the log says (kept across restarts)
+    GET  /api/debug                   the debug report: versions, setup (no secrets), threads with where each one is,
+                                      the queue, the database and the log, as a file to send
     POST /api/pause, /api/resume
     DELETE /api/songs/<id>            forget it (nothing changes on Navidrome)
 """
@@ -57,10 +61,12 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import __version__, grid
-from .audiomuse import AudioMuse, AudioMuseError
 from .store import Store
 from .subsonic import Subsonic, SubsonicError
 from .worker import Worker
+from . import log
+
+_log = log.get("server")
 
 PAGE = os.path.join(os.path.dirname(__file__), "page.html")
 PASSTHROUGH = ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges")
@@ -72,8 +78,6 @@ class Config:
         self.navidrome_url = env.get("NAVIDROME_URL", "")
         self.navidrome_user = env.get("NAVIDROME_USER", "")
         self.navidrome_password = env.get("NAVIDROME_PASSWORD", "")
-        self.audiomuse_url = env.get("AUDIOMUSE_URL", "")
-        self.audiomuse_token = env.get("AUDIOMUSE_TOKEN", "")
         self.model = env.get("BEATS_MODEL", "final0")
         self.device = env.get("BEATS_DEVICE", "auto")
         self.float16 = env.get("BEATS_FLOAT16", "").strip().lower() in ("1", "true", "yes", "on")
@@ -82,6 +86,9 @@ class Config:
         self.data_dir = env.get("DATA_DIR", "/data")
         self.models_dir = env.get("MODELS_DIR", "/models")
         self.port = int(env.get("PORT", "8090"))
+        self.log_level = env.get("LOG_LEVEL", "info")
+        # Set but no longer used (the plugin comparison went in 0.14.0): said once in the log, so it can be removed.
+        self.unused = [k for k in ("AUDIOMUSE_URL", "AUDIOMUSE_TOKEN") if env.get(k)]
 
 
 class App:
@@ -94,17 +101,16 @@ class App:
         os.makedirs(config.data_dir, exist_ok=True)
         self.store = Store(os.path.join(config.data_dir, "beats.db"))
         self.navidrome = Subsonic(config.navidrome_url, config.navidrome_user, config.navidrome_password)
-        self.audiomuse = AudioMuse(config.audiomuse_url, config.audiomuse_token)
         self.tracker = tracker or analyser.BeatThis(config.model, config.device, config.models_dir, config.threads,
                                                     config.float16)
-        self.worker = Worker(self.store, self.navidrome, self.audiomuse, self.tracker, decode or analyser.decode,
+        self.worker = Worker(self.store, self.navidrome, self.tracker, decode or analyser.decode,
                              config.data_dir, config.model, measure)
         self.started = time.time()
 
     # ---- what the API returns ----
 
     def song_row(self, row):
-        row["verdict"] = grid.verdict(row["result"], row["tag_bpm"], row["plugin"]) if row["result"] else []
+        row["verdict"] = grid.verdict(row["result"], row["tag_bpm"]) if row["result"] else []
         return row
 
     SONGS_SHOWN, SONGS_MOST = 200, 1000  # songs in one answer for the table, unless asked for more (at most)
@@ -224,18 +230,59 @@ class App:
             "model_loaded": self.tracker_loaded(),
             "model_load_seconds": getattr(self.tracker, "load_seconds", None),
             "navidrome": self.config.navidrome_url or None,
-            "audiomuse": self.config.audiomuse_url or None,
-            "plugin": worker.plugin_state,
+            "log_level": log.level(),
             "uptime_seconds": round(time.time() - self.started),
             "events": self.store.events(),
         }
+
+    def debug_report(self):
+        """Everything that helps find out why something's wrong, in one file: versions, the setup (addresses, never
+        passwords or tokens), where each thread is right now (a stuck one shows where), the status, the queue's
+        states, the database's size and the log."""
+        import platform
+        import sys
+        import traceback
+
+        threads = {t.ident: t for t in threading.enumerate()}
+        stacks = {}
+        for ident, frame in sys._current_frames().items():
+            thread = threads.get(ident)
+            stacks[thread.name if thread else str(ident)] = "".join(traceback.format_stack(frame)[-12:])
+        versions = {"siansa_beats": __version__, "python": sys.version.split()[0], "platform": platform.platform()}
+        for name in ("torch", "numpy", "beat_this", "soxr", "soundfile"):
+            module = sys.modules.get(name)
+            if module is not None:
+                versions[name] = getattr(module, "__version__", "?")
+        torch = sys.modules.get("torch")
+        if torch is not None:
+            try:
+                versions["cuda"] = torch.version.cuda
+                versions["cuda_available"] = torch.cuda.is_available()
+                if torch.cuda.is_available():
+                    versions["gpu"] = torch.cuda.get_device_name(0)
+            except Exception as e:
+                versions["cuda"] = f"? ({e})"
+        c = self.config
+        setup = {"navidrome_url": c.navidrome_url or None, "navidrome_user": c.navidrome_user or None,
+                 "navidrome_password": "set" if c.navidrome_password else "not set", "model": c.model,
+                 "device": c.device, "float16": c.float16, "threads": c.threads,
+                 "page_password": "set" if c.password else "not set", "data_dir": c.data_dir,
+                 "models_dir": c.models_dir, "port": c.port, "log_level": log.level(), "unused": c.unused}
+        db = os.path.join(c.data_dir, "beats.db")
+        status = self.status()
+        status.pop("events", None)
+        report = {"made_at": time.strftime("%Y-%m-%d %H:%M:%S"), "versions": versions, "setup": setup,
+                  "status": status,
+                  "database_mb": round(os.path.getsize(db) / 1e6, 1) if os.path.exists(db) else None,
+                  "threads": stacks, "activity": self.store.events(200), "log": log.lines(limit=2000)}
+        return json.loads(log.redact(json.dumps(report, default=str)))
 
     def tracker_loaded(self):
         return bool(getattr(self.tracker, "loaded", True))
 
     def csv(self, find=None, show="all"):
         out = io.StringIO()
-        columns = ["artist", "title", "album", "genres", "tag_bpm", "plugin_intro_bpm", "plugin_outro_bpm", "bpm",
+        columns = ["artist", "title", "album", "genres", "tag_bpm", "bpm",
                    "main_share", "bpm_fit", "grid_bpm", "on_grid", "downbeat_source", "phrase_first_ms", "phrase_bars", "phrase_count",
                    "phrase_big", "phrase_big_on",
                    "intro_bpm", "outro_bpm", "steady", "grid_share", "beats_per_bar", "bar_share", "first_downbeat_ms",
@@ -243,9 +290,9 @@ class App:
         w = csv.writer(out)
         w.writerow(columns)
         for row in self.songs(find, show, 0):
-            r, p = row["result"] or {}, row["plugin"] or {}
+            r = row["result"] or {}
             w.writerow([row["artist"], row["title"], row["album"], " / ".join(g["label"] for g in row["genres"]),
-                        row["tag_bpm"], p.get("intro_bpm"), p.get("outro_bpm"), _round(r.get("bpm")),
+                        row["tag_bpm"], _round(r.get("bpm")),
                         _round(r.get("main_share"), 3), _round(r.get("bpm_fit")), _round(r.get("grid_bpm")),
                         _round(r.get("on_grid"), 3), r.get("downbeat_source"), r.get("phrase_first_ms"), r.get("phrase_bars"),
                         r.get("phrase_count"), r.get("phrase_big"), r.get("phrase_big_on"),
@@ -265,8 +312,21 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "SiansaBeats"
     protocol_version = "HTTP/1.1"
 
-    def log_message(self, fmt, *args):  # quiet: the page's activity list says what matters
-        pass
+    # The page asks for these every few seconds: logged only when they fail, so the debug log stays readable.
+    POLLED = ("/api/status", "/api/songs", "/api/libraries", "/api/log", "/api/bad-blends", "/api/health")
+
+    def log_message(self, fmt, *args):  # http.server's own complaints (a malformed request); requests: log_request
+        _log.debug("%s: %s", self.client_address[0], log.redact(fmt % args if args else fmt))
+
+    def log_request(self, code="-", size="-"):
+        path = self.path.split("?", 1)[0]
+        code = int(getattr(code, "value", code)) if str(getattr(code, "value", code)).isdigit() else 0
+        if code >= 500:
+            _log.warning("%s %s -> %s", self.command, log.redact(self.path), code)
+        elif code >= 400 and path not in ("/favicon.ico",):
+            _log.info("%s %s -> %s", self.command, log.redact(self.path), code)
+        elif self.command != "GET" or not path.startswith(self.POLLED):
+            _log.debug("%s %s -> %s", self.command, log.redact(self.path), code)
 
     # ---- plumbing ----
 
@@ -340,6 +400,22 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(HTTPStatus.OK, f.read(), "text/html; charset=utf-8")
             if path == "/api/status":
                 return self._json(app.status())
+            if path == "/api/log":
+                def number(key, default):
+                    try:
+                        return max(0, int((query.get(key) or [default])[0]))
+                    except ValueError:
+                        return default
+                least = (query.get("level") or ["debug"])[0]
+                return self._json({"level": log.level(), "lines": log.lines(number("after", 0), min(number("limit", 300), 5000), least)})
+            if path == "/api/log/download":
+                stamp = time.strftime("%Y%m%d-%H%M")
+                return self._send(HTTPStatus.OK, log.text(), "text/plain; charset=utf-8",
+                                  {"Content-Disposition": f'attachment; filename="siansa-beats-{stamp}.log"'})
+            if path == "/api/debug":
+                stamp = time.strftime("%Y%m%d-%H%M")
+                return self._send(HTTPStatus.OK, json.dumps(app.debug_report(), indent=1, default=str), "application/json",
+                                  {"Content-Disposition": f'attachment; filename="siansa-beats-debug-{stamp}.json"'})
             if path == "/api/libraries":
                 return self._json(app.worker.libraries())
             if path == "/api/bad-blends":
@@ -420,9 +496,13 @@ class Handler(BaseHTTPRequestHandler):
                 app.store.event(f"Analysing every song again: {queued} queued")
                 app.worker.wake()
                 return self._json({"queued": queued})
-            if path == "/api/plugin/refresh":
-                ids = [r["id"] for r in app.store.overview(app.config.model)]
-                return self._json({"found": app.worker.refresh_plugin(ids)})
+            if path == "/api/log/level":
+                if str(body.get("level") or "").lower() not in ("debug", "info"):
+                    return self._error(HTTPStatus.BAD_REQUEST, 'level needed: "debug" or "info"')
+                name = log.set_level(body["level"])
+                app.store.set_setting("log_level", name)
+                app.store.event("Debug details on: the log says every step" if name == "debug" else "Debug details off")
+                return self._json({"level": name})
             if path in ("/api/pause", "/api/resume"):
                 app.worker.pause(path == "/api/pause")
                 return self._json({"paused": app.worker.paused})
@@ -447,7 +527,7 @@ class Handler(BaseHTTPRequestHandler):
                 app.worker.wake()
                 return self._json({"queued": queued})
             return self._error(HTTPStatus.NOT_FOUND, "not found")
-        except (SubsonicError, AudioMuseError) as e:
+        except SubsonicError as e:
             return self._error(HTTPStatus.BAD_GATEWAY, str(e))
 
     def do_DELETE(self):
@@ -515,16 +595,34 @@ def _id(text):
     return urllib.parse.unquote(text)
 
 
+class _Server(ThreadingHTTPServer):
+    def handle_error(self, request, client_address):  # a request that broke: the traceback goes to the log
+        _log.exception("A request from %s went wrong", client_address[0] if client_address else "?")
+
+
 def make_server(app, host="0.0.0.0", port=None):
     handler = type("BoundHandler", (Handler,), {"app": app})
-    server = ThreadingHTTPServer((host, app.config.port if port is None else port), handler)
+    server = _Server((host, app.config.port if port is None else port), handler)
     server.daemon_threads = True
     return server
 
 
 def main():
     config = Config()
+    log.setup(config.log_level)
+    # A thread that dies says why in the log, not only on a console nobody reads.
+    threading.excepthook = lambda a: _log.error("The thread %s stopped", a.thread.name if a.thread else "?",
+                                                exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
+    _log.info("Siansa Beats %s starting: model %s, device %s, data in %s", __version__, config.model, config.device,
+              config.data_dir)
     app = App(config)
+    chosen = app.store.setting("log_level")  # the page's switch wins over LOG_LEVEL
+    if chosen:
+        log.set_level(chosen)
+    _log.info("Log level %s (%s)", log.level(), "chosen on the page" if chosen else "LOG_LEVEL")
+    if config.unused:
+        _log.info("%s set but no longer used (the plugin comparison went in 0.14.0): it can be removed",
+                  " and ".join(config.unused))
     app.worker.start()
     app.store.event(f"Started: model {config.model}, device {config.device}"
                     f"{' (half precision on a GPU)' if config.float16 else ''}")
@@ -536,14 +634,15 @@ def main():
             app.store.event(f"Navidrome answers ({info.get('type') or 'server'} {info.get('version') or ''})".strip())
         except SubsonicError as e:
             app.store.event(f"Navidrome doesn't answer: {e}", "error")
-    def background():  # after the page is up: a big library takes minutes, and a slow AudioMuse-AI can't hold it up
-        app.worker.regrid()
-        if app.worker.check_plugin()["state"] == "ok" and app.store.song_ids():
-            app.worker.refresh_plugin(app.store.song_ids())
+    def background():  # after the page is up: a big library takes minutes
+        try:
+            app.worker.regrid()
+        except Exception:
+            _log.exception("Working out older results again went wrong")
 
     threading.Thread(target=background, name="start", daemon=True).start()
     server = make_server(app)
-    print(f"Siansa Beats {__version__} on port {config.port}", flush=True)
+    _log.info("Siansa Beats %s on port %s", __version__, config.port)
     try:
         server.serve_forever()
     finally:

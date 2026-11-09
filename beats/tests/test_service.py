@@ -14,8 +14,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
-from beats import grid  # noqa: E402
-from beats.audiomuse import AudioMuse, AudioMuseError  # noqa: E402
+from beats import __version__, grid  # noqa: E402
 from beats.server import App, Config, make_server  # noqa: E402
 from beats.store import Store  # noqa: E402
 from beats.subsonic import Subsonic, SubsonicError  # noqa: E402
@@ -129,44 +128,15 @@ class SubsonicTest(Base):
                          ["Pop", "Rock"])
 
 
-class AudioMuseTest(Base):
-    def test_reads_the_plugins_profiles_with_a_token(self):
-        am = AudioMuse(self.fake.url, TOKEN)
-        found = am.profiles(["t140", "t122"])
-        self.assertEqual(found["t140"]["intro_bpm"], 187.1)
-        self.assertNotIn("t122", found)
-        self.assertEqual(am.health()["plugin_version"], "0.5.7-fake")
+class LogTest(unittest.TestCase):
+    def test_secrets_are_taken_out(self):
+        from beats.log import redact
 
-    def test_many_songs_are_asked_in_requests_short_enough_for_audiomuse(self):
-        # Navidrome's ids are 22 characters: 200 of them made a request line AudioMuse-AI turned away (HTTP 400).
-        ids = ["t140"] + [f"{n:022d}" for n in range(600)]
-        found = AudioMuse(self.fake.url, TOKEN).profiles(ids)
-        self.assertEqual(found["t140"]["intro_bpm"], 187.1)
-        asked = [q["ids"].split(",") for path, q in self.fake.requests if path.endswith("/api/profiles")]
-        self.assertGreater(len(asked), 3)
-        self.assertEqual(sum(len(a) for a in asked), len(ids))
-
-    def test_batches_keep_to_the_address_budget_and_the_id_limit(self):
-        from beats.audiomuse import PROFILES, batches
-        for chunk in batches([f"{n:022d}" for n in range(1000)]):
-            self.assertLessEqual(len(PROFILES + "?ids=" + ",".join(chunk)), 3500)
-        self.assertEqual([len(c) for c in batches([str(n) for n in range(1200)], budget=10 ** 6)], [500, 500, 200])
-        self.assertEqual(batches(["a", "", "a", "b"]), [["a", "b"]])
-
-    def test_problems_say_what_to_check(self):
-        with self.assertRaisesRegex(AudioMuseError, "http://"):
-            AudioMuse("audiomuse:8000").health()
-        with self.assertRaisesRegex(AudioMuseError, "Nothing answers.*container itself"):
-            AudioMuse("http://127.0.0.1:9", timeout=3).health()
-        with self.assertRaisesRegex(AudioMuseError, "set AUDIOMUSE_TOKEN"):
-            AudioMuse(self.fake.url).health()
-        with self.assertRaisesRegex(AudioMuseError, "HTTP 404: No Siansa plugin there"):
-            AudioMuse(self.fake.url + "/audiomuse", TOKEN).health()
-
-    def test_a_wrong_token_says_so(self):
-        with self.assertRaisesRegex(AudioMuseError, "AUDIOMUSE_TOKEN"):
-            AudioMuse(self.fake.url, "wrong").profiles(["t140"])
-        self.assertFalse(AudioMuse("").configured)
+        self.assertEqual(redact("http://nd:4533/rest/stream?u=max&t=abc123&s=x9&v=1.16.1&id=5"),
+                         "http://nd:4533/rest/stream?u=max&t=***&s=***&v=1.16.1&id=5")
+        self.assertEqual(redact("Authorization: Bearer eyJhbGciOi.x.y"), "Authorization: Bearer ***")
+        self.assertEqual(redact("password=hunter2 token: abc"), "password=*** token: ***")
+        self.assertEqual(redact("/api/songs?find=password&show=done"), "/api/songs?find=password&show=done")
 
 
 class StoreTest(unittest.TestCase):
@@ -262,9 +232,7 @@ class StoreTest(unittest.TestCase):
         self.assertIsNone(db.result("a", "small0"))
         row = db.overview("final0")[0]
         self.assertEqual(row["result"]["bpm"], 128.01)
-        self.assertIsNone(row["plugin"])
-        db.save_plugin("a", {"intro_bpm": 128.0})
-        self.assertEqual(db.overview("final0")[0]["plugin"]["intro_bpm"], 128.0)
+        self.assertNotIn("plugin", row)
         db.remove("a")
         self.assertEqual(db.overview("final0"), [])
         self.assertEqual(db.genres("a"), [])
@@ -334,9 +302,9 @@ class ServiceTest(Base):
         control = songs["t140"]
         self.assertAlmostEqual(control["result"]["bpm"], 140.0, delta=0.1)
         self.assertEqual(control["result"]["beats_per_bar"], 4)
-        self.assertEqual(control["plugin"]["intro_bpm"], 187.1)
+        self.assertNotIn("plugin", control)
         texts = [t for _, t in control["verdict"]]
-        self.assertIn("Plugin's intro 187.1 is 4/3 of this", texts)
+        self.assertFalse([t for t in texts if "Plugin" in t])
         self.assertIn("Matches the BPM tag", texts)
         self.assertNotIn("genre_range", control)
 
@@ -366,8 +334,9 @@ class ServiceTest(Base):
         self.wait_done()
 
         status = self.call("/api/status")
-        self.assertEqual(status["plugin"]["state"], "ok")
-        self.assertEqual((status["plugin"]["found"], status["plugin"]["asked"]), (1, 4))
+        self.assertNotIn("plugin", status)
+        # Nothing is asked of AudioMuse-AI any more.
+        self.assertFalse([path for path, _ in self.fake.requests if path.startswith("/plugins/")])
         self.assertTrue(any("Library Music: 4 songs, 4 new" in e["message"] for e in status["events"]))
         self.assertTrue(any("Broken failed" in e["message"] for e in status["events"]))
         self.assertTrue(status["model_loaded"])
@@ -376,7 +345,8 @@ class ServiceTest(Base):
         lines = csv.decode().splitlines()
         self.assertTrue(lines[0].startswith("artist,title"))
         self.assertEqual(len(lines), 5)
-        self.assertIn("4/3", csv.decode())
+        self.assertIn("BPM tag 61 is half of this", csv.decode())
+        self.assertNotIn("plugin", csv.decode().splitlines()[0])
 
         self.assertEqual(self.call("/api/songs/bad", "DELETE"), {"removed": True})
         self.assertEqual(len(self.call("/api/songs")), 3)
@@ -459,15 +429,54 @@ class ServiceTest(Base):
             self.call("/api/grids?ids=" + ",".join(str(n) for n in range(2001)))
         self.assertEqual(caught.exception.code, 400)
 
-    def test_the_plugin_line_says_what_went_wrong(self):
+    def test_the_log_shows_every_step_with_debug_details_and_no_secrets(self):
+        from beats import log
+
         self.start()
-        self.app.audiomuse.token = "wrong"
-        self.call("/api/plugin/refresh", "POST")
-        plugin = self.call("/api/status")["plugin"]
-        self.assertEqual(plugin["state"], "error")
-        self.assertIn("AUDIOMUSE_TOKEN", plugin["text"])
-        self.app.audiomuse.url = ""
-        self.assertEqual(self.app.worker.check_plugin()["state"], "off")
+        log.setup("info")
+        self.assertEqual(self.call("/api/log/level", "POST", {"level": "debug"}), {"level": "debug"})
+        self.assertEqual(self.app.store.setting("log_level"), "debug")
+        self.assertEqual(self.call("/api/status")["log_level"], "debug")
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        lines = self.call("/api/log?limit=5000")["lines"]
+        text = "\n".join(l["message"] for l in lines)
+        self.assertIn("downloaded", text)
+        self.assertIn("the model found", text)
+        self.assertIn("getMusicFolders", text)  # the requests to Navidrome, with their times
+        self.assertTrue(any(l["level"] == "error" and "Broken failed" in l["message"] for l in lines))
+        self.assertNotRegex(text, r"[?&]t=[0-9a-f]{6}")  # Subsonic's login token never reaches the log
+        newer = self.call(f"/api/log?after={lines[-1]['n']}")["lines"]
+        self.assertTrue(all(l["n"] > lines[-1]["n"] for l in newer))
+        self.assertEqual(self.call("/api/log?level=warn&limit=5000")["lines"],
+                         [l for l in self.call("/api/log?limit=5000")["lines"] if l["level"] in ("warn", "error")])
+        r, body = self.call("/api/log/download", raw=True)
+        self.assertIn("attachment", r.headers["Content-Disposition"])
+        self.assertIn(b"ERROR", body)
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/log/level", "POST", {"level": "loud"})
+        self.assertEqual(e.exception.code, 400)
+        self.call("/api/log/level", "POST", {"level": "info"})
+        before = self.call("/api/log?limit=1")["lines"][-1]["n"]
+        self.call("/api/songs/t140/analyse", "POST")
+        self.wait_done()
+        self.assertFalse([l for l in self.call(f"/api/log?after={before}&limit=5000")["lines"] if l["level"] == "debug"])
+
+    def test_the_debug_report_says_where_everything_is_without_secrets(self):
+        self.start(password="pagepass")
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        r, body = self.call("/api/debug", raw=True)
+        self.assertIn("attachment", r.headers["Content-Disposition"])
+        report = json.loads(body)
+        self.assertEqual(report["versions"]["siansa_beats"], __version__)
+        self.assertEqual(report["setup"]["navidrome_password"], "set")
+        self.assertEqual(report["setup"]["page_password"], "set")
+        self.assertEqual(report["setup"]["unused"], ["AUDIOMUSE_URL", "AUDIOMUSE_TOKEN"])
+        self.assertIn("beats-model", report["threads"])
+        self.assertEqual(report["status"]["counts"]["failed"], 1)
+        self.assertNotIn("pagepass", body.decode())
+        self.assertNotRegex(body.decode(), r"[?&]t=[0-9a-f]{6}")
 
     def test_the_audio_is_passed_through_with_seeking(self):
         self.start()

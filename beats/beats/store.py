@@ -8,7 +8,6 @@ Tables:
   uses them;
 - ``jobs``: each song's place in the queue and what's happening to it;
 - ``results``: Beat This!'s readings, one row per song and model, with every beat and downbeat;
-- ``plugin``: the Siansa plugin's current readings, for comparison;
 - ``events``: what the service did, for the page's activity list;
 - ``bad_blends``: song changes the owner marked as bad in Siansa Dev, with how the app blended them;
 - ``settings``: what the page chose (the libraries to analyse), kept across restarts.
@@ -20,6 +19,11 @@ import json
 import sqlite3
 import threading
 import time
+
+from . import log
+
+_activity = log.get("activity")
+_LOG_LEVEL = {"info": 20, "warn": 30, "error": 40}
 
 SCHEMA_VERSION = 4  # 2: bpm_fit, main_share (0.3.0); 3: the steady grid (0.4.0); 4: levels, phrases (0.5.0)
 EVENTS_KEPT = 500
@@ -41,10 +45,7 @@ CREATE TABLE IF NOT EXISTS results (
     first_downbeat_ms REAL, beat_count INTEGER, downbeat_count INTEGER, download_seconds REAL, decode_seconds REAL,
     model_seconds REAL, analysed_at REAL, beats TEXT, downbeats TEXT, PRIMARY KEY (song_id, model)
 );
-CREATE TABLE IF NOT EXISTS plugin (
-    song_id TEXT PRIMARY KEY, intro_bpm REAL, outro_bpm REAL, intro_steady REAL, outro_steady REAL,
-    intro_bar_ms REAL, outro_bar_ms REAL, fetched_at REAL
-);
+DROP TABLE IF EXISTS plugin;  -- the Siansa plugin's readings, compared with up to 0.13: no longer asked for
 CREATE TABLE IF NOT EXISTS events (at REAL, level TEXT, message TEXT);
 CREATE TABLE IF NOT EXISTS marks (
     id INTEGER PRIMARY KEY AUTOINCREMENT, song_id TEXT, seconds REAL, created_at REAL
@@ -60,7 +61,6 @@ RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "grid_bpm", "on_grid", "analysi
                  "changes_share", "phrase_first_ms", "phrase_count", "phrase_bars", "phrase_big", "phrase_big_on", "phrase_source", "from_mix", "ends", "bpm_median", "steady", "grid_ms", "grid_share", "intro_bpm", "intro_steady", "outro_bpm",
                  "outro_steady", "beats_per_bar", "bar_share", "first_downbeat_ms", "beat_count", "downbeat_count",
                  "download_seconds", "decode_seconds", "model_seconds")
-PLUGIN_FIELDS = ("intro_bpm", "outro_bpm", "intro_steady", "outro_steady", "intro_bar_ms", "outro_bar_ms")
 BUSY = ("downloading", "decoding", "ready", "analysing")  # ready: downloaded and decoded, waiting for the model
 
 
@@ -156,7 +156,7 @@ class Store:
     def remove(self, song_id):
         with self.lock, self.db:
             for table, key in (("songs", "id"), ("genres", "song_id"), ("jobs", "song_id"), ("results", "song_id"),
-                               ("plugin", "song_id"), ("marks", "song_id")):
+                               ("marks", "song_id")):
                 self.db.execute(f"DELETE FROM {table} WHERE {key}=?", (song_id,))
 
     def remove_folder(self, folder):
@@ -164,7 +164,7 @@ class Store:
         (nothing changes on Navidrome)."""
         with self.lock, self.db:
             ids = [r[0] for r in self.db.execute("SELECT id FROM songs WHERE folder=?", (folder,))]
-            for table, key in (("genres", "song_id"), ("jobs", "song_id"), ("results", "song_id"), ("plugin", "song_id"),
+            for table, key in (("genres", "song_id"), ("jobs", "song_id"), ("results", "song_id"),
                                ("marks", "song_id")):
                 self.db.execute(f"DELETE FROM {table} WHERE {key} IN (SELECT id FROM songs WHERE folder=?)", (folder,))
             self.db.execute("DELETE FROM songs WHERE folder=?", (folder,))
@@ -295,18 +295,8 @@ class Store:
                 out[r["song_id"]] = json.loads(r["ends"])
         return out
 
-    def save_plugin(self, song_id, values):
-        with self.lock, self.db:
-            self.db.execute(f"INSERT OR REPLACE INTO plugin (song_id, {', '.join(PLUGIN_FIELDS)}, fetched_at) "
-                            f"VALUES (?, {', '.join('?' for _ in PLUGIN_FIELDS)}, ?)",
-                            (song_id, *[values.get(f) for f in PLUGIN_FIELDS], time.time()))
-
-    def plugin(self, song_id):
-        rows = self._rows("SELECT * FROM plugin WHERE song_id=?", (song_id,))
-        return rows[0] if rows else None
-
     def overview(self, model, find=None, state=None, limit=None, song_id=None):
-        """The songs with their job, result (no beats) and plugin readings, for the table: those whose name, artist,
+        """The songs with their job and result (no beats), for the table: those whose name, artist,
         album or genre has ``find`` in it, only those in ``state`` ("done", "failed"), at most ``limit`` of them, or just ``song_id``."""
         where, args = [], [model]
         if song_id is not None:
@@ -322,10 +312,9 @@ class Store:
             args += [like] * 4
         rows = self._rows(
             "SELECT s.*, j.state, j.step, j.error, j.finished_at, "
-            + ", ".join(f"r.{f} AS r_{f}" for f in RESULT_FIELDS) + ", r.analysed_at AS r_analysed_at, "
-            + ", ".join(f"p.{f} AS p_{f}" for f in PLUGIN_FIELDS)
-            + " FROM songs s LEFT JOIN jobs j ON j.song_id=s.id LEFT JOIN results r ON r.song_id=s.id AND r.model=? "
-            "LEFT JOIN plugin p ON p.song_id=s.id" + (" WHERE " + " AND ".join(where) if where else "")
+            + ", ".join(f"r.{f} AS r_{f}" for f in RESULT_FIELDS) + ", r.analysed_at AS r_analysed_at"
+            + " FROM songs s LEFT JOIN jobs j ON j.song_id=s.id LEFT JOIN results r ON r.song_id=s.id AND r.model=?"
+            + (" WHERE " + " AND ".join(where) if where else "")
             + " ORDER BY s.artist COLLATE NOCASE, s.title COLLATE NOCASE" + (" LIMIT ?" if limit else ""),
             (*args, *([int(limit)] if limit else [])))
         genres = self._genres_of([r["id"] for r in rows])
@@ -335,9 +324,6 @@ class Store:
             row["result"]["analysed_at"] = row.pop("r_analysed_at")
             if row["result"]["analysed_at"] is None:
                 row["result"] = None
-            row["plugin"] = {f: row.pop(f"p_{f}") for f in PLUGIN_FIELDS}
-            if all(v is None for v in row["plugin"].values()):
-                row["plugin"] = None
             row["genres"] = genres.get(row["id"], [])
         counts = self.mark_counts()
         for row in rows:
@@ -375,6 +361,7 @@ class Store:
     # ---- events ----
 
     def event(self, message, level="info"):
+        _activity.log(_LOG_LEVEL.get(level, 20), message)
         with self.lock, self.db:
             self.db.execute("INSERT INTO events VALUES (?,?,?)", (time.time(), level, message))
             self.db.execute("DELETE FROM events WHERE rowid NOT IN (SELECT rowid FROM events ORDER BY at DESC LIMIT ?)",
