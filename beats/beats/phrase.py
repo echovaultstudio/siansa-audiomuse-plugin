@@ -129,8 +129,8 @@ def phrases(bar_levels, phrase_bars=PHRASE_BARS):
     """Which bar starts the phrases: ``(start, details)``, ``start`` counted from the first bar (0 ..
     ``phrase_bars``-1), or ``None`` when the song has no clear sections. ``details``: ``share`` of the changes on
     phrase starts, ``big`` (bars with a big change) and ``big_on`` (how many of them are on a phrase start)."""
-    if len(bar_levels) < 2 * phrase_bars:
-        return None, {"share": 0.0, "big": 0, "big_on": 0}
+    if len(bar_levels) < 2 * phrase_bars:  # too short a song (a short track off a mixed CD) to tell
+        return None, {"share": 0.0, "big": 0, "big_on": 0, "bars": phrase_bars}
     start, share, found = pick(changes(bar_levels, SIDE_BARS), phrase_bars)
     big = [i for i, _ in found]
     on = [i for i in big if start is not None and i % phrase_bars == start]

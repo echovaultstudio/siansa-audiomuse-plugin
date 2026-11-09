@@ -37,6 +37,29 @@ class LockTest(unittest.TestCase):
         self.assertEqual(ends.lock_points(beats, [i % 2 == 0 for i in range(len(beats))], beats[::4]), (None, None))
 
 
+class OddSongsTest(unittest.TestCase):
+    """Songs that failed in 0.14.0 (issue: 33 failed, 34 kept their old results)."""
+
+    def test_sound_measured_shorter_than_the_beats(self):
+        # The levels stop 20 s before the model's last beat: those bars have no sound to compare.
+        beats = grid_beats(128, 180)
+        found = grid.analyse(beats, beats[::4], 180.0, song_levels(128, 160, SECTIONS))["ends"]
+        self.assertIsNotNone(found["intro_lock_ms"])
+        self.assertIsNotNone(found["intro_bass_bars"])
+
+    def test_a_beat_a_moment_before_the_start(self):
+        beats = [b - 0.007 for b in grid_beats(140.4, 74)]
+        found = grid.analyse(beats, beats[::4], 74.0, song_levels(140.4, 74, SECTIONS))["ends"]
+        self.assertIsNotNone(found["intro_energy"])
+
+    def test_a_short_track_off_a_mixed_cd(self):
+        # Too short to tell its phrases, and at full volume at both ends (a mix track): it used to fail on "bars".
+        beats = grid_beats(174, 13)
+        result = grid.analyse(beats, beats[::4], 13.0, song_levels(174, 13, SECTIONS))
+        self.assertTrue(result["from_mix"])
+        self.assertEqual(result["phrase_source"], "mix: none")
+
+
 class EndsTest(unittest.TestCase):
     def analyse(self, model_beats, levels, bpm=128.0, seconds=180):
         return grid.analyse(model_beats, model_beats[::4], seconds, levels)["ends"]
