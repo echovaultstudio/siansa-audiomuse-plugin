@@ -10,6 +10,7 @@ Tables:
 - ``results``: Beat This!'s readings, one row per song and model, with every beat and downbeat;
 - ``plugin``: the Siansa plugin's current readings, for comparison;
 - ``events``: what the service did, for the page's activity list;
+- ``bad_blends``: song changes the owner marked as bad in Siansa Dev, with how the app blended them;
 - ``settings``: what the page chose (the libraries to analyse), kept across restarts.
 
 Nothing here is written back to Navidrome, AudioMuse-AI or the music files.
@@ -50,6 +51,9 @@ CREATE TABLE IF NOT EXISTS marks (
 );
 CREATE INDEX IF NOT EXISTS marks_song ON marks (song_id);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS bad_blends (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL, from_id TEXT, to_id TEXT, technique TEXT, details TEXT
+);
 """
 
 RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "grid_bpm", "on_grid", "analysis_version", "downbeat_source", "grid_counted",
@@ -375,6 +379,30 @@ class Store:
             self.db.execute("INSERT INTO events VALUES (?,?,?)", (time.time(), level, message))
             self.db.execute("DELETE FROM events WHERE rowid NOT IN (SELECT rowid FROM events ORDER BY at DESC LIMIT ?)",
                             (EVENTS_KEPT,))
+
+    # ---- bad blends: song changes marked as bad in the app ----
+
+    def add_bad_blend(self, from_id, to_id, technique, details):
+        with self.lock, self.db:
+            return self.db.execute("INSERT INTO bad_blends (at, from_id, to_id, technique, details) VALUES (?,?,?,?,?)",
+                                   (time.time(), from_id, to_id, technique, json.dumps(details or {}))).lastrowid
+
+    def bad_blends(self, limit=200):
+        """The latest marks, each with both songs' names (when they're here)."""
+        rows = self._rows(
+            "SELECT b.*, f.title AS from_title, f.artist AS from_artist, t.title AS to_title, t.artist AS to_artist "
+            "FROM bad_blends b LEFT JOIN songs f ON f.id=b.from_id LEFT JOIN songs t ON t.id=b.to_id "
+            "ORDER BY b.at DESC, b.id DESC LIMIT ?", (limit,))
+        for r in rows:
+            r["details"] = json.loads(r["details"] or "{}")
+        return rows
+
+    def remove_bad_blend(self, blend_id):
+        with self.lock, self.db:
+            return self.db.execute("DELETE FROM bad_blends WHERE id=?", (blend_id,)).rowcount > 0
+
+    def bad_blend_count(self):
+        return self._rows("SELECT COUNT(*) AS n FROM bad_blends")[0]["n"]
 
     def events(self, limit=60):
         return self._rows("SELECT at, level, message FROM events ORDER BY at DESC, rowid DESC LIMIT ?", (limit,))

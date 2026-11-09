@@ -30,6 +30,10 @@ API (JSON):
     POST /api/libraries/read          read the chosen libraries now, for new songs
     DELETE /api/libraries/<id>/songs  forget the songs of a library that's left out, with what was found in them
     POST /api/analyse-all             analyse every song again
+    GET  /api/bad-blends              the song changes marked as bad in Siansa Dev, newest first
+    POST /api/bad-blends              {"from_id", "to_id", "technique", "details"}: one more (from the app, through
+                                      the Siansa Beats (dev) plugin)
+    DELETE /api/bad-blends/<n>        takes one away
     POST /api/plugin/refresh          read the plugin's readings again
     POST /api/pause, /api/resume
     DELETE /api/songs/<id>            forget it (nothing changes on Navidrome)
@@ -185,6 +189,7 @@ class App:
             "counts": counts,
             "current": current,
             "next": preparing,
+            "bad_blends": self.store.bad_blend_count(),
             "regridding": dict(worker.regridding) if worker.regridding else None,
             "libraries": {"chosen": self.store.setting("folders") or [], "read_at": self.store.setting("library_read_at")},
             "paused": worker.paused,
@@ -315,6 +320,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(app.status())
             if path == "/api/libraries":
                 return self._json(app.worker.libraries())
+            if path == "/api/bad-blends":
+                return self._json(app.store.bad_blends())
             find, show = (query.get("find") or [""])[0], (query.get("show") or ["all"])[0]
             if path == "/api/songs":
                 try:
@@ -365,6 +372,17 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(app.worker.choose(ids))
                 except ValueError as e:
                     return self._error(HTTPStatus.BAD_REQUEST, str(e))
+            if path == "/api/bad-blends":
+                from_id, to_id = str(body.get("from_id") or "").strip(), str(body.get("to_id") or "").strip()
+                if not from_id or not to_id:
+                    return self._error(HTTPStatus.BAD_REQUEST, "from_id and to_id needed: the two songs")
+                details = body.get("details") if isinstance(body.get("details"), dict) else {}
+                technique = str(body.get("technique") or "")[:80]
+                blend_id = app.store.add_bad_blend(from_id, to_id, technique, details)
+                names = {s: (app.store.song(s) or {}).get("title", s) for s in (from_id, to_id)}
+                app.store.event(f"Bad blend marked in the app: {names[from_id]} into {names[to_id]}"
+                                + (f" ({technique})" if technique else ""), "warn")
+                return self._json({"id": blend_id})
             if path == "/api/libraries/read":
                 return self._json(app.worker.read_libraries())
             if path == "/api/analyse-all":
@@ -406,6 +424,11 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guard():
             return
         path = self.path.split("?", 1)[0]
+        m = re.fullmatch(r"/api/bad-blends/(\d+)", path)
+        if m:
+            if not self.app.store.remove_bad_blend(int(m[1])):
+                return self._error(HTTPStatus.NOT_FOUND, "no such bad blend")
+            return self._json({"removed": True})
         m = re.fullmatch(r"/api/libraries/([^/]+)/songs", path)
         if m:
             try:

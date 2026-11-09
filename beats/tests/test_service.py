@@ -606,6 +606,34 @@ class ServiceTest(Base):
         self.assertTrue(seen, "never a song in the model and the next one being prepared at once")
         self.wait_done()
 
+    def test_bad_blends_from_the_app(self):
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.assertEqual(self.call("/api/status")["bad_blends"], 0)
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/bad-blends", "POST", {"from_id": "t140"})
+        self.assertEqual(e.exception.code, 400)
+        made = self.call("/api/bad-blends", "POST", {"from_id": "t140", "to_id": "t122", "technique": "bass swap",
+                                                    "details": {"bars": 16, "from_rhythm": 0.56}})
+        self.call("/api/bad-blends", "POST", {"from_id": "gone", "to_id": "t140", "details": "not a dict"})
+        rows = self.call("/api/bad-blends")
+        self.assertEqual(len(rows), 2)
+        first = rows[1]
+        self.assertEqual((first["id"], first["technique"], first["details"]["bars"]), (made["id"], "bass swap", 16))
+        self.assertTrue(first["from_title"])
+        self.assertIsNone(rows[0]["from_title"])  # a song that isn't here
+        self.assertEqual(rows[0]["details"], {})
+        self.assertEqual(self.call("/api/status")["bad_blends"], 2)
+        self.assertTrue(any("Bad blend marked" in e["message"] for e in self.call("/api/status")["events"]))
+        self.assertEqual(self.call(f"/api/bad-blends/{made['id']}", "DELETE"), {"removed": True})
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call(f"/api/bad-blends/{made['id']}", "DELETE")
+        self.assertEqual(e.exception.code, 404)
+        grids = self.call("/api/grids?ids=t140")["grids"][0]
+        for key in ("intro_lock_ms", "outro_lock_ms", "mix_track", "intro_bass_bars", "drops_ms", "intro_energy"):
+            self.assertIn(key, grids)
+
     def test_unknown_routes_and_songs(self):
         self.start()
         for path in ("/api/nothing", "/api/songs/none", "/api/beats/none"):

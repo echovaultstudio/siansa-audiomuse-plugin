@@ -30,6 +30,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Tempo, bars and the comparison
         run: cd beats && python3 -I tests/test_grid.py
+      - name: Bars, phrases, where the beat locks in, and each end's sound
+        run: cd beats && python3 -I tests/test_phrase.py && python3 -I tests/test_ends.py
       - name: CPU or GPU
         run: cd beats && python3 -I tests/test_analyser.py
       - name: The service against a fake Navidrome and AudioMuse-AI

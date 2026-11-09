@@ -197,6 +197,11 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
         <a class="btn" id="export-json" href="api/export.json" download title="Every song's beats and sound levels (a few MB): for tuning the grid and phrases">Download data</a>
       </div>
     </section>
+    <section class="card" aria-label="Bad blends" id="bad-card" hidden>
+      <h2>Bad blends</h2>
+      <p class="sub">Song changes marked as bad in Siansa Dev, with how the app blended them. Tap a song to check its beats.</p>
+      <ul class="events" id="bad"></ul>
+    </section>
     <section class="card" aria-label="Activity">
       <h2>Activity</h2>
       <ul class="events" id="events"></ul>
@@ -235,12 +240,34 @@ function pluginPill(s) {
   if (p.asked) return `Plugin: ${p.found} of ${p.asked}`;
   return p.state === "ok" ? "Plugin answers" : "Plugin: checking…";
 }
+let badCount = -1;
+async function refreshBad() {
+  let rows;
+  try { rows = await api("api/bad-blends"); } catch (e) { return; }
+  $("bad-card").hidden = !rows.length;
+  $("bad").innerHTML = rows.map((b) => {
+    const d = b.details || {};
+    const facts = [b.technique, d.bars ? `${d.bars} bars` : "", d.from_bpm && d.to_bpm ? `${d.from_bpm} → ${d.to_bpm} BPM` : "",
+      d.from_rhythm != null && d.to_rhythm != null ? `confidence ${Math.round(d.from_rhythm * 100)} % / ${Math.round(d.to_rhythm * 100)} %` : "",
+      d.at_ms != null ? `at ${Math.floor(d.at_ms / 60000)}:${String(Math.floor(d.at_ms / 1000) % 60).padStart(2, "0")} of the old song` : ""].filter(Boolean).join(" · ");
+    const song = (id, title, artist) => title ? `<a href="#" data-open="${esc(id)}">${esc(artist || "")} – ${esc(title)}</a>` : `<span>${esc(id)} (not here)</span>`;
+    return `<li><time>${new Date(b.at * 1000).toLocaleString()}</time>${song(b.from_id, b.from_title, b.from_artist)} → ${song(b.to_id, b.to_title, b.to_artist)}<br>${esc(facts)} <button data-unbad="${b.id}">Remove</button></li>`;
+  }).join("");
+}
+$("bad").addEventListener("click", async (e) => {
+  const open = e.target.closest("[data-open]");
+  if (open) { e.preventDefault(); openSong(open.dataset.open); return; }
+  const un = e.target.closest("[data-unbad]");
+  if (un) { await api(`api/bad-blends/${un.dataset.unbad}`, {method: "DELETE"}); badCount = -1; refreshStatus(); }
+});
+
 async function refreshStatus() {
   try {
     status = await api("api/status");
     offline(null);
   } catch (e) { offline("The service doesn't answer: " + e.message); return; }
   const s = status, c = s.counts, total = c.songs || 0;
+  if (s.bad_blends !== badCount) { badCount = s.bad_blends; refreshBad(); }
   const done = c.done || 0, failed = c.failed || 0, queued = c.queued || 0;
   const busy = BUSY.reduce((n, k) => n + (c[k] || 0), 0);
   $("pills").innerHTML = [
