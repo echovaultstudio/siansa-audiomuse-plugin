@@ -45,9 +45,28 @@ RUN mkdir -p /models && for name in $CHECKPOINTS; do \
         "/models/${name}.ckpt"; \
     done
 
+# The style model (each song's genre from its sound): Essentia's Discogs-EffNet (MTG, UPF; CC BY-NC-ND 4.0), as ONNX
+# with any batch size, and its metadata (the 400 Discogs styles in its order). It runs on the CPU with ONNX Runtime.
+RUN pip install onnxruntime==1.19.2
+ARG ESSENTIA_MODELS=https://essentia.upf.edu/models/feature-extractors/discogs-effnet
+RUN for file in discogs-effnet-bsdynamic-1.onnx discogs-effnet-bs64-1.json; do \
+      for try in 1 2 3 4 5; do \
+        python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+          "${ESSENTIA_MODELS}/${file}" "/models/${file}" && break || { echo "download $try failed, trying again"; sleep 15; }; \
+      done; \
+    done \
+ && python -c "import json, numpy, onnxruntime; \
+s = onnxruntime.InferenceSession('/models/discogs-effnet-bsdynamic-1.onnx', providers=['CPUExecutionProvider']); \
+print('inputs', [(i.name, i.shape) for i in s.get_inputs()], 'outputs', [(o.name, o.shape) for o in s.get_outputs()]); \
+out = s.run(None, {s.get_inputs()[0].name: numpy.zeros((2, 128, 96), numpy.float32)}); \
+labels = json.load(open('/models/discogs-effnet-bs64-1.json'))['classes']; \
+assert any(o.shape == (2, len(labels)) for o in out), [o.shape for o in out]; print(len(labels), 'styles')"
+
 WORKDIR /app
 COPY beats/ /app/beats/
-RUN python -c "import torch, beat_this.inference, beats.server; print('imports ok, torch', torch.__version__, 'cuda', torch.version.cuda)"
+RUN python -c "import torch, beat_this.inference, beats.server; print('imports ok, torch', torch.__version__, 'cuda', torch.version.cuda)" \
+ && python -c "import numpy, beats.style as s; m = s.StyleModel('/models'); assert m.available; \
+r = m(numpy.zeros(16000 * 5, numpy.float32)); assert len(r) == 400 and 0 <= r[0][1] <= 1, r[:3]; print('style model ok:', r[0])"
 
 RUN useradd --uid 1000 --create-home beats && mkdir -p /data && chown beats /data
 USER beats

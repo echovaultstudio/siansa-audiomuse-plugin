@@ -90,6 +90,7 @@ tbody tr[aria-selected=true] { background: color-mix(in srgb, var(--amber) 12%, 
 .state { font-size: 0.8rem; white-space: nowrap; }
 .state.failed { color: var(--bad); } .state.done { color: var(--ok); } .state.busy { color: var(--amber-text); }
 .events { list-style: none; margin: 0; padding: 0; max-height: 520px; overflow-y: auto; font-size: 0.84rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .log { margin: 12px 0 0; max-height: 420px; overflow: auto; font: 0.74rem/1.45 var(--mono); color: var(--muted);
   background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px; white-space: pre-wrap; word-break: break-word; }
 .log .warn { color: var(--warn); } .log .error { color: var(--bad); } .log .debug { color: var(--faint); }
@@ -198,6 +199,14 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
         <a class="btn" id="export-json" href="api/export.json" download title="Every song's beats and sound levels (a few MB): for tuning the grid and phrases">Download data</a>
         <a class="btn" id="export-failed" href="api/failed/export" download hidden title="The songs that couldn't be analysed, with why: the one file to send">Download failed songs</a>
       </div>
+    </section>
+    <section class="card" aria-label="Genres" id="genre-card" hidden>
+      <h2>Genres</h2>
+      <p class="sub">Each song's genres by vote: what its sound says (Essentia's Discogs-EffNet, 400 Discogs styles)
+        first, its own tags second. Siansa's genre radios play by this vote, and by the tags without Siansa Beats.</p>
+      <div id="genre-progress" class="sub"></div>
+      <div id="genre-agree"></div>
+      <div id="genre-top" class="chips"></div>
     </section>
     <section class="card" aria-label="Bad blends" id="bad-card" hidden>
       <h2>Bad blends</h2>
@@ -356,7 +365,7 @@ function drawRows() {
     const state = BUSY.includes(s.state) ? "busy" : s.state;
     return `<tr data-id="${esc(s.id)}" aria-selected="${s.id === selected}">
       <td><div class="big">${esc(s.title)}${s.marks ? ` <span class="sub" style="color:var(--mark)" title="Your section marks">◆ ${s.marks}</span>` : ""}</div><div class="sub">${esc(s.artist)}</div></td>
-      <td>${s.genres.map((g) => `<span class="chip" title="from ${esc(g.source)}">${esc(g.label)}</span>`).join("") || '<span class="sub">–</span>'}</td>
+      <td>${genreChips(s.genres)}</td>
       <td class="num">${s.tag_bpm ? fmt(s.tag_bpm, 0) : "–"}</td>
       <td class="num"><span class="big">${fmt(r.bpm, 2)}</span><div class="sub">${fmt(r.intro_bpm)} / ${fmt(r.outro_bpm)}</div></td>
       <td class="num">${r.beats_per_bar ? r.beats_per_bar + " beats" : "–"}<div class="sub">${r.phrase_source === "sound" || r.phrase_source === "mix: sound" ? "phrases: sound" : r.phrase_source === "bar 1" ? "phrases: bar 1" : r.from_mix ? "mix: no phrases" : r.beats_per_bar ? pct(r.bar_share) : ""}</div></td>
@@ -465,7 +474,9 @@ async function openSong(id, newSong, fromHistory) {
     ["Steady", pct(r.steady)], ["On a straight grid", `${pct(r.grid_share)} (worst ${fmt(r.grid_ms, 0)} ms)`],
     ["Beats / downbeats", r.beat_count != null ? `${r.beat_count} / ${r.downbeat_count}` : "–"],
     ["Time", r.model_seconds ? `model ${fmt(r.model_seconds)} s · decode ${fmt(r.decode_seconds)} s · download ${fmt(r.download_seconds)} s` : "–"],
-    ["Genre", detail.genres.map((g) => `${g.label} (${g.source})`).join(", ") || "–"],
+    ["Genre (vote)", byGenreSource(detail.genres, "vote").map((g) => `${styleOf(g.label)} ${g.weight.toFixed(2)}`).join(", ") || "–"],
+    ["Its sound", byGenreSource(detail.genres, "sound").slice(0, 5).map((g) => `${styleOf(g.label)} ${g.weight.toFixed(2)}`).join(", ") || "–"],
+    ["Its tags", byGenreSource(detail.genres, "tag").map((g) => g.label).join(", ") || "–"],
   ];
   $("d-facts").innerHTML = facts.map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
   drawCurve(); drawMarks();
@@ -675,6 +686,38 @@ $("all-again").addEventListener("click", async () => {
 refreshLibraries();
 refreshStatus();
 setInterval(refreshStatus, 2000);
+
+// ---- genres ----
+function styleOf(label) { return (label || "").split("---").pop(); }
+function byGenreSource(list, source) { return (list || []).filter((g) => g.source === source); }
+function genreChips(list) {
+  const vote = byGenreSource(list, "vote"), tags = byGenreSource(list, "tag");
+  const tip = (g) => `${g.label} · vote ${g.weight.toFixed(2)}`;
+  if (vote.length) return vote.slice(0, 2).map((g) => `<span class="chip" title="${esc(tip(g))}">${esc(styleOf(g.label))}</span>`).join("");
+  return tags.map((g) => `<span class="chip" title="from its tags">${esc(g.label)}</span>`).join("") || '<span class="sub">–</span>';
+}
+let genresShownAt = 0;
+async function refreshGenres(force) {
+  if (!force && Date.now() - genresShownAt < 30000) return;
+  genresShownAt = Date.now();
+  let answer;
+  try { answer = await api("api/genres"); } catch (e) { return; }
+  const st = answer.styles || {};
+  $("genre-card").hidden = !st.available;
+  if (!st.available) return;
+  const left = (st.total || 0) - (st.done || 0) - (st.failed || 0);
+  $("genre-progress").textContent = `${st.done || 0} of ${st.total || 0} songs heard` +
+    (st.failed ? ` · ${st.failed} couldn't be` : "") +
+    (st.current ? ` · now ${st.current.artist} – ${st.current.title}` : left > 0 ? " · the rest while the queue is empty" : "");
+  const a = st.agreement;
+  $("genre-agree").innerHTML = a && a.songs ? `<p>Over ${a.songs} songs with tags: the sound's genre matches the tags' on
+    <strong>${Math.round((a.family || 0) * 100)} %</strong>; the tagged style is in the sound's top 3 on
+    <strong>${a.style == null ? "–" : Math.round(a.style * 100) + " %"}</strong>.</p>` : "";
+  $("genre-top").innerHTML = (answer.genres || []).slice(0, 24)
+    .map((g) => `<span class="chip" title="${esc(g.label)}">${esc(g.style)} <span class="sub">${g.songs}</span></span>`).join("");
+}
+refreshGenres(true);
+setInterval(refreshGenres, 10000);
 
 // ---- the log ----
 let logLines = [], logAfter = 0, logShow = "debug";

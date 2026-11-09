@@ -7,6 +7,7 @@ Run with ``python -m beats.server``. Set up with environment variables (see the 
     BEATS_MODEL (final0 | small0), BEATS_DEVICE (auto | cpu | cuda | cuda:N), BEATS_FLOAT16, BEATS_THREADS
     BEATS_PASSWORD                                       optional: the page and API ask for it (user "siansa")
     DATA_DIR (/data), MODELS_DIR (/models), PORT (8090)
+    STYLE_THREADS (2)                                   the style model's CPU threads
     LOG_LEVEL (info | debug)                             how much the log says at start (the page can change it)
 
 API (JSON):
@@ -33,6 +34,8 @@ API (JSON):
     GET  /api/bad-blends              the song changes marked as bad in Siansa Dev, newest first
     GET  /api/bad-blends/export       all of them with both songs' beats, sound levels and results, as a file
     GET  /api/failed/export           the songs that couldn't be analysed, with why, as a file
+    GET  /api/genres                  the style model's progress and agreement with the tags, and every style voted
+    GET  /api/genre?name=&limit=      the songs a radio for a genre plays (by vote): {"ids", "styles", "genres"}
     POST /api/bad-blends              {"from_id", "to_id", "technique", "details"}: one more (from the app, through
                                       the Siansa Beats (dev) plugin)
     DELETE /api/bad-blends/<n>        takes one away
@@ -64,6 +67,7 @@ from . import __version__, grid
 from .store import Store
 from .subsonic import Subsonic, SubsonicError
 from .worker import Worker
+from . import genres as genres_module
 from . import log
 
 _log = log.get("server")
@@ -82,6 +86,7 @@ class Config:
         self.device = env.get("BEATS_DEVICE", "auto")
         self.float16 = env.get("BEATS_FLOAT16", "").strip().lower() in ("1", "true", "yes", "on")
         self.threads = int(env.get("BEATS_THREADS", "0") or 0)
+        self.style_threads = int(env.get("STYLE_THREADS", "2") or 2)
         self.password = env.get("BEATS_PASSWORD", "")
         self.data_dir = env.get("DATA_DIR", "/data")
         self.models_dir = env.get("MODELS_DIR", "/models")
@@ -94,8 +99,9 @@ class Config:
 class App:
     """Everything the handler needs, so the tests can make one with stand-ins."""
 
-    def __init__(self, config, tracker=None, decode=None, measure=None):
+    def __init__(self, config, tracker=None, decode=None, measure=None, style=None):
         from . import analyser
+        from . import style as style_module
 
         self.config = config
         os.makedirs(config.data_dir, exist_ok=True)
@@ -103,8 +109,9 @@ class App:
         self.navidrome = Subsonic(config.navidrome_url, config.navidrome_user, config.navidrome_password)
         self.tracker = tracker or analyser.BeatThis(config.model, config.device, config.models_dir, config.threads,
                                                     config.float16)
+        self.style = style if style is not None else style_module.StyleModel(config.models_dir, config.style_threads)
         self.worker = Worker(self.store, self.navidrome, self.tracker, decode or analyser.decode,
-                             config.data_dir, config.model, measure)
+                             config.data_dir, config.model, measure, self.style)
         self.started = time.time()
 
     # ---- what the API returns ----
@@ -218,6 +225,7 @@ class App:
             "current": current,
             "next": preparing,
             "bad_blends": self.store.bad_blend_count(),
+            "styles": self.styles_status(),
             "regridding": dict(worker.regridding) if worker.regridding else None,
             "libraries": {"chosen": self.store.setting("folders") or [], "read_at": self.store.setting("library_read_at")},
             "paused": worker.paused,
@@ -234,6 +242,41 @@ class App:
             "uptime_seconds": round(time.time() - self.started),
             "events": self.store.events(),
         }
+
+    def styles_status(self):
+        """The style model: whether the image has it, how far the songs are, and how often it agrees with the tags."""
+        worker, style = self.worker, self.style
+        available = bool(style is not None and style.available)
+        out = {"available": available, "loaded": bool(available and style.loaded)}
+        if available:
+            out.update(self.store.style_counts())
+            out["agreement"] = worker.genre_report
+            styling = dict(worker.styling) if worker.styling else None
+            if styling:
+                styling["for_seconds"] = round(time.time() - styling.pop("since"), 1)
+            out["current"] = styling
+        return out
+
+    def genre_list(self):
+        """Every style with songs voted into it, most first: ``[{"label", "genre", "style", "songs"}]``."""
+        counts = self.store.vote_counts(genres_module.RADIO_MIN)
+        return [{"label": l, "genre": l.partition("---")[0], "style": l.partition("---")[2] or l, "songs": n}
+                for l, n in sorted(counts.items(), key=lambda p: -p[1])]
+
+    def genre_songs(self, name, limit=300):
+        """The songs a radio for the genre ``name`` plays (a tag as the app shows it: "Trance", "Electronic /
+        Trance"), by vote: ``{"name", "styles", "genres", "ids"}``. Nothing when the style model isn't there or the
+        name matches none of its styles, so the app falls back to the tags."""
+        taxonomy = self.worker.taxonomy()
+        if taxonomy is None:
+            return {"name": name, "styles": [], "genres": [], "ids": [], "why": "no style model in this image"}
+        styles, families = genres_module.target(taxonomy, name)
+        labels = set(styles)
+        for f in families:
+            labels |= set(taxonomy.by_genre.get(genres_module.key(f), []))
+        ids = self.store.songs_voted(labels, genres_module.RADIO_MIN, limit)
+        return {"name": name, "styles": sorted(styles), "genres": sorted(families), "ids": ids,
+                "why": None if labels else "no style of that name"}
 
     def debug_report(self):
         """Everything that helps find out why something's wrong, in one file: versions, the setup (addresses, never
@@ -282,7 +325,7 @@ class App:
 
     def csv(self, find=None, show="all"):
         out = io.StringIO()
-        columns = ["artist", "title", "album", "genres", "tag_bpm", "bpm",
+        columns = ["artist", "title", "album", "genres", "voted_genres", "sound_top", "tag_bpm", "bpm",
                    "main_share", "bpm_fit", "grid_bpm", "on_grid", "grid_drift", "downbeat_source", "phrase_first_ms", "phrase_bars", "phrase_count",
                    "phrase_big", "phrase_big_on",
                    "intro_bpm", "outro_bpm", "steady", "grid_share", "beats_per_bar", "bar_share", "first_downbeat_ms",
@@ -291,7 +334,12 @@ class App:
         w.writerow(columns)
         for row in self.songs(find, show, 0):
             r = row["result"] or {}
-            w.writerow([row["artist"], row["title"], row["album"], " / ".join(g["label"] for g in row["genres"]),
+            by = {}
+            for g in row["genres"]:
+                by.setdefault(g["source"], []).append(g)
+            w.writerow([row["artist"], row["title"], row["album"], " / ".join(g["label"] for g in by.get("tag", [])),
+                        " / ".join(f"{g['label'].partition('---')[2]} {g['weight']:.2f}" for g in by.get("vote", [])),
+                        " / ".join(f"{g['label'].partition('---')[2]} {g['weight']:.2f}" for g in by.get("sound", [])[:3]),
                         row["tag_bpm"], _round(r.get("bpm")),
                         _round(r.get("main_share"), 3), _round(r.get("bpm_fit")), _round(r.get("grid_bpm")),
                         _round(r.get("on_grid"), 3), _round(r.get("grid_drift"), 4), r.get("downbeat_source"), r.get("phrase_first_ms"), r.get("phrase_bars"),
@@ -398,6 +446,17 @@ class Handler(BaseHTTPRequestHandler):
             if path in ("/", "/index.html"):
                 with open(PAGE, "rb") as f:
                     return self._send(HTTPStatus.OK, f.read(), "text/html; charset=utf-8")
+            if path == "/api/genres":
+                return self._json({"styles": app.styles_status(), "genres": app.genre_list()})
+            if path == "/api/genre":
+                name = (query.get("name") or [""])[0].strip()
+                if not name:
+                    return self._error(HTTPStatus.BAD_REQUEST, "name needed: the genre, as a tag (Trance)")
+                try:
+                    limit = max(1, min(2000, int((query.get("limit") or ["300"])[0])))
+                except ValueError:
+                    return self._error(HTTPStatus.BAD_REQUEST, "limit is a number")
+                return self._json(app.genre_songs(name, limit))
             if path == "/api/status":
                 return self._json(app.status())
             if path == "/api/log":
@@ -646,6 +705,15 @@ def main():
             app.worker.regrid()
         except Exception:
             _log.exception("Working out older results again went wrong")
+        try:  # every song's genres voted again: the vote's rules or the tags may have changed
+            voted = app.worker.revote()
+            if voted:
+                report = app.worker.genre_report or {}
+                app.store.event(f"Voted the genres of {voted} songs" + (
+                    f" · the sound agrees with the tags' genre on {report['family'] * 100:.0f} % of {report['songs']}"
+                    if report.get("family") is not None else ""))
+        except Exception:
+            _log.exception("Voting the genres went wrong")
 
     threading.Thread(target=background, name="start", daemon=True).start()
     server = make_server(app)

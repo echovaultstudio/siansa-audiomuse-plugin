@@ -5,6 +5,10 @@ and its beats turned into the readings :mod:`grid` works out. The temporary file
 threads share the work: one downloads, decodes and measures the next song while the other runs the model on this
 one, so the model (the GPU) rarely waits for the network.
 
+Each song's style comes from its sound too (:mod:`beats.style`, when the image has the model): for a new song from
+the samples already decoded, for songs analysed before from a third thread that downloads them again while the queue
+is empty. Their genres are then voted (:mod:`beats.genres`) from the sound and their tags.
+
 The songs come from the Navidrome libraries chosen on the page (all, or some: leaving out compilations, say). They're
 read again every few hours for new songs.
 """
@@ -16,6 +20,7 @@ import threading
 import time
 
 from . import features
+from . import genres
 from . import grid
 from . import log
 from .subsonic import SubsonicError
@@ -27,15 +32,29 @@ FIXED_ERRORS = ("'bars'", "not supported between instances of 'NoneType'")
 
 
 LIBRARY_RESCAN_SECONDS = 6 * 3600  # how often the chosen libraries are read again for new songs
+STYLE_KEEP = 15  # the top styles kept for each song (beats.style.KEEP)
+STYLE_RATE = 16_000  # the style model's sample rate: songs analysed before are decoded again at it
+STYLE_REPORT_EVERY = 500  # the agreement with the tags is worked out again after this many more songs
 
 
 class Worker:
-    def __init__(self, store, navidrome, tracker, decode, data_dir, model_name, measure=None):
+    def __init__(self, store, navidrome, tracker, decode, data_dir, model_name, measure=None, style=None):
         self.store = store
+        self.style = style  # beats.style.StyleModel, or None
+        self.styling = None  # {"id", "title", "artist", "since"}: a song analysed before, getting its styles
+        self.genre_report = None  # beats.genres.agreement of the last vote
+        self._taxonomy = None
         self.navidrome = navidrome
         self.measure = measure or features.measure
         self.tracker = tracker  # (samples) -> (beats, downbeats)
         self.decode = decode  # (path) -> samples
+        self.decode_rate = 22_050  # the rate decode gives (Beat This!'s)
+        try:  # analyser.decode takes a rate; a test's stand-in may not
+            import inspect
+
+            self.decode_takes_rate = len(inspect.signature(decode).parameters) >= 2
+        except (TypeError, ValueError):
+            self.decode_takes_rate = False
         self.data_dir = data_dir
         self.model_name = model_name
         self.paused = False
@@ -54,7 +73,7 @@ class Worker:
     def start(self):
         if not self._threads:
             for target, name in ((self._prepare_loop, "beats-prepare"), (self._run, "beats-model"),
-                                 (self._library_loop, "beats-library")):
+                                 (self._library_loop, "beats-library"), (self._style_loop, "beats-style")):
                 thread = threading.Thread(target=target, name=name, daemon=True)
                 thread.start()
                 self._threads.append(thread)
@@ -130,6 +149,7 @@ class Worker:
                 self.store.event(f"Library {names.get(folder, folder)}: {len(songs)} songs, {len(added)} new in the queue")
             self.store.set_setting("library_read_at", time.time())
             self.store.event(f"Read the libraries in {time.monotonic() - started:.0f}s")
+            self.revote()  # their tags may have changed
             self.wake()
             return {"songs": total, "queued": len(queued)}
 
@@ -192,6 +212,102 @@ class Worker:
             self.store.event(f"Analysing {len(unheard)} songs again to measure their sound, for their phrases")
             self.wake()
         return len(stale)
+
+    # ---- genres: styles from the sound, and the vote ----
+
+    def taxonomy(self):
+        """The style model's 400 styles to vote on, or ``None`` without the model."""
+        if self._taxonomy is None and self.style is not None and self.style.available:
+            from . import style as style_module
+
+            self._taxonomy = genres.Taxonomy(style_module.labels(self.style.models_dir))
+        return self._taxonomy
+
+    def _style(self, song, samples, rate):
+        """Gives a song its styles from ``samples``, and votes its genres. Never fails the song: a song without styles
+        is voted on its tags."""
+        if self.style is None or not self.style.available:
+            return
+        first = not self.style.loaded
+        try:
+            started = time.monotonic()
+            ranked = self.style(samples, rate)
+            seconds = time.monotonic() - started
+            if first:
+                self.store.event(f"Style model (Discogs-EffNet) loaded in {self.style.load_seconds or 0:.1f}s")
+            top = ranked[:STYLE_KEEP]
+            self.store.set_genres(song["id"], "sound", [l for l, _ in top], [round(v, 4) for _, v in top])
+            _log.debug("%s – %s: sounds like %s (%.2fs)", song.get("artist"), song.get("title"),
+                       ", ".join(f"{l.partition('---')[2]} {v:.2f}" for l, v in top[:3]), seconds)
+        except Exception as e:
+            _log.warning("%s – %s: couldn't hear its style: %s", song.get("artist"), song.get("title"), e,
+                         exc_info=not isinstance(e, RuntimeError))
+            self.store.set_genres(song["id"], "sound-failed", [str(e)[:200] or e.__class__.__name__])
+        self.revote([song["id"]])
+
+    def revote(self, song_ids=None):
+        """Votes the genres of ``song_ids`` (every song when ``None``) from their sound and tags; works out how often
+        the sound agrees with the tags when voting them all. The number voted."""
+        taxonomy = self.taxonomy()
+        if taxonomy is None:
+            return 0
+        rows = self.store.genre_rows(song_ids)
+        ids = list(rows) if song_ids is None else [i for i in song_ids if i in rows]
+        votes, report = {}, []
+        for song_id in ids:
+            by = rows.get(song_id, {})
+            sound = dict(by.get("sound", []))
+            tags = [label for label, _ in by.get("tag", [])]
+            votes[song_id] = genres.vote(taxonomy, sound, tags)
+            if song_ids is None and sound:
+                report.append((sorted(sound.items(), key=lambda p: -p[1]),
+                               _merge(taxonomy.match(t) for t in tags)))
+        self.store.replace_votes(votes)
+        if song_ids is None:
+            self.genre_report = genres.agreement(report)
+        return len(votes)
+
+    def _style_loop(self):
+        """Gives the songs analysed before the style model their styles, one at a time, while the queue is empty."""
+        done_since_report = 0
+        while not self._stop.wait(2.0):
+            if self.style is None or not self.style.available or self.paused:
+                continue
+            if self.current or self.preparing or self.store.counts().get("queued"):
+                continue  # new songs first: they get their styles on the way
+            waiting = self.store.songs_without_style(limit=20)
+            if not waiting:
+                if done_since_report:
+                    self.revote()
+                    done_since_report = 0
+                self._stop.wait(60.0)
+                continue
+            for song_id in waiting:
+                if self._stop.is_set() or self.paused or self.store.counts().get("queued"):
+                    break
+                self._style_again(song_id)
+                done_since_report += 1
+                if done_since_report >= STYLE_REPORT_EVERY:
+                    self.revote()
+                    done_since_report = 0
+
+    def _style_again(self, song_id):
+        song = self.store.song(song_id) or {"id": song_id, "title": song_id, "artist": ""}
+        self.styling = {"id": song_id, "title": song.get("title"), "artist": song.get("artist"), "since": time.time()}
+        path = None
+        try:
+            fd, path = tempfile.mkstemp(prefix="style-", dir=self.data_dir)
+            os.close(fd)
+            self.navidrome.download(song_id, path)
+            samples = self.decode(path, STYLE_RATE) if self.decode_takes_rate else self.decode(path)
+            self._style(song, samples, STYLE_RATE if self.decode_takes_rate else self.decode_rate)
+        except Exception as e:  # Navidrome away, a file ffmpeg can't read: marked, so it isn't tried again and again
+            _log.warning("%s – %s: couldn't get its sound for its style: %s", song.get("artist"), song.get("title"), e)
+            self.store.set_genres(song_id, "sound-failed", [str(e)[:200] or e.__class__.__name__])
+        finally:
+            self.styling = None
+            if path and os.path.exists(path):
+                os.remove(path)
 
     # ---- the work ----
 
@@ -259,6 +375,7 @@ class Worker:
             decode_seconds = time.monotonic() - started
             _log.debug("%s: decoded %d samples (%.1fs of sound) in %.2fs", label, len(samples), len(samples) / 22_050.0,
                        decode_seconds)
+            self._style(song, samples, self.decode_rate)
             try:
                 levels = self.measure(samples)
                 _log.debug("%s: measured the sound", label)
@@ -330,3 +447,11 @@ class Worker:
             self._failed(song, e)
         finally:
             self.current = None
+
+
+def _merge(matches):
+    styles, found = set(), set()
+    for s, g in matches:
+        styles |= s
+        found |= g
+    return styles, found
