@@ -530,6 +530,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(HTTPStatus.OK, f.read(), "text/html; charset=utf-8")
             if path == "/api/genres":
                 return self._json({"styles": app.styles_status(), "genres": app.genre_list()})
+            if path == "/api/genre/about":
+                name = (query.get("name") or [""])[0].strip()
+                if not name:
+                    return self._error(HTTPStatus.BAD_REQUEST, "name needed: the genre, as a tag (Trance)")
+                from . import about
+
+                return self._json({"name": name, "about": about.about(app.store, name)})
             if path == "/api/genre":
                 name = (query.get("name") or [""])[0].strip()
                 if not name:
