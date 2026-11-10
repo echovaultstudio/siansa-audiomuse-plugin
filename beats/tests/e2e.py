@@ -152,7 +152,7 @@ def checks(base, catalog, problems):
     end = time.time() + 60
     while time.time() < end and call(base, "/api/v1/capabilities")["features"]["loudness"]["songs"] < len(catalog) - 1:
         time.sleep(1)
-    profiles = call(base, "/api/v1/profiles?ids=" + ",".join(s["id"] for s in catalog))["profiles"]
+    profiles = call(base, "/api/v1/profiles?ids=" + ",".join(catalog))["profiles"]
     measured = [p for p in profiles if p.get("ref_lufs") is not None and p.get("start_ramp")]
     if len(measured) < len(catalog) - 1:
         problems.append(f"only {len(measured)} of {len(catalog)} songs have their loudness: {profiles[:2]}")
