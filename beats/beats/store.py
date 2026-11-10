@@ -76,6 +76,7 @@ class Store:
     def __init__(self, path):
         self.path = path
         self.lock = threading.RLock()
+        self.genre_changes = 0  # counts every change to the genres table, so kept answers know when they're old
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         with self.lock, self.db:
@@ -137,6 +138,7 @@ class Store:
             self.db.execute("INSERT OR REPLACE INTO genres VALUES (?,?,?,?)", (song["id"], source, label, 1.0))
 
     def set_genres(self, song_id, source, labels, weights=None):
+        self.genre_changes += 1
         with self.lock, self.db:
             self.db.execute("DELETE FROM genres WHERE song_id=? AND source=?", (song_id, source))
             for i, label in enumerate(labels):
@@ -178,6 +180,7 @@ class Store:
 
     def replace_votes(self, votes):
         """Writes each song's ``vote`` rows (``{song_id: [(label, score)]}``) in one go."""
+        self.genre_changes += 1
         with self.lock, self.db:
             for song_id, voted in votes.items():
                 self.db.execute("DELETE FROM genres WHERE song_id=? AND source='vote'", (song_id,))
@@ -211,6 +214,7 @@ class Store:
         return [r["id"] for r in self._rows("SELECT id FROM songs")]
 
     def remove(self, song_id):
+        self.genre_changes += 1
         with self.lock, self.db:
             for table, key in (("songs", "id"), ("genres", "song_id"), ("jobs", "song_id"), ("results", "song_id"),
                                ("marks", "song_id")):

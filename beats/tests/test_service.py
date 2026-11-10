@@ -755,3 +755,44 @@ class ServiceTest(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KeptTest(unittest.TestCase):
+    """Answers kept ready: fresh when the data changed and the database is quiet, the last one at once when it's busy."""
+
+    def test_a_change_is_seen_when_the_database_answers_in_time(self):
+        from beats.server import Kept
+
+        state = {"changes": 0, "value": 1}
+        kept = Kept(lambda: state["value"], seconds=300, changes=lambda: state["changes"])
+        self.assertEqual(kept.get(), 1)
+        state["value"] = 2
+        self.assertEqual(kept.get(), 1)  # nothing changed: the kept one, without asking
+        state["changes"] += 1
+        self.assertEqual(kept.get(), 2)
+
+    def test_a_busy_database_doesnt_hold_the_answer_up(self):
+        import threading
+
+        from beats.server import Kept
+
+        gate = threading.Event()
+        state = {"changes": 0, "calls": 0}
+
+        def work():
+            state["calls"] += 1
+            if state["calls"] > 1:
+                gate.wait(5)  # a database busy with analysis
+            return state["calls"]
+
+        kept = Kept(work, seconds=300, changes=lambda: state["changes"])
+        self.assertEqual(kept.get(), 1)
+        state["changes"] += 1
+        started = time.monotonic()
+        self.assertEqual(kept.get(), 1)  # the last one, after at most Kept.WAIT
+        self.assertLess(time.monotonic() - started, Kept.WAIT + 0.4)
+        gate.set()
+        end = time.monotonic() + 5
+        while kept.value != 2 and time.monotonic() < end:
+            time.sleep(0.01)
+        self.assertEqual(kept.value, 2)
