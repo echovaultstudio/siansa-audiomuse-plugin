@@ -261,8 +261,18 @@ class App:
     def genre_list(self):
         """Every style with songs voted into it, most first: ``[{"label", "genre", "style", "songs"}]``."""
         counts = self.store.vote_counts(genres_module.RADIO_MIN)
-        return [{"label": l, "genre": l.partition("---")[0], "style": l.partition("---")[2] or l, "songs": n}
-                for l, n in sorted(counts.items(), key=lambda p: -p[1])]
+        ranked = sorted(counts.items(), key=lambda p: -p[1])
+        named = {}
+        for label, _ in ranked:
+            named.setdefault(label.partition("---")[2] or label, set()).add(label.partition("---")[0])
+        out = []
+        for label, n in ranked:
+            genre, _, style = label.partition("---")
+            style = style or label
+            # "name": what a radio asks for: the style, or "Genre / Style" when two genres share its name.
+            out.append({"label": label, "genre": genre, "style": style, "songs": n,
+                        "name": f"{genre} / {style}" if len(named[style]) > 1 else style})
+        return out
 
     def genre_songs(self, name, limit=300):
         """The songs a radio for the genre ``name`` plays (a tag as the app shows it: "Trance", "Electronic /

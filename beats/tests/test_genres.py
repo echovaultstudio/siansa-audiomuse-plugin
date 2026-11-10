@@ -69,6 +69,8 @@ class VoteTest(unittest.TestCase):
     def test_a_radio_plays_the_most_precise_genre_named(self):
         self.assertEqual(genres.target(self.t, "Electronic / Trance"), ({"Electronic---Trance"}, set()))
         self.assertEqual(genres.target(self.t, "Electronic"), (set(), {"Electronic"}))
+        self.assertEqual(genres.target(self.t, "Hip Hop / Electro"), ({"Hip Hop---Electro"}, set()))
+        self.assertEqual(genres.target(self.t, "Electro"), ({"Electronic---Electro", "Hip Hop---Electro"}, set()))
 
     def test_agreement_with_the_tags(self):
         rows = [
