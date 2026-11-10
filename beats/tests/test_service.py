@@ -546,6 +546,29 @@ class ServiceTest(Base):
                 self.call(path)
             self.assertEqual(caught.exception.code, code, path)
 
+    def test_loudness_already_measured_by_the_plugin_is_taken_not_measured_again(self):
+        Worker.MEASURE_IDLE_SECONDS = 0.5
+        self.addCleanup(setattr, Worker, "MEASURE_IDLE_SECONDS", 60.0)
+        self.start()
+        for song in self.fake.songs:  # the plugin measured t122 (the fake AudioMuse-AI hands its "plugin" profile on)
+            if song["id"] == "t122":
+                song["plugin"] = {"ref_lufs": -7.5, "start_ramp": "xAAA", "end_ramp": "xAAA", "duration_ms": 50000,
+                                  "key": "F#", "scale": "major"}
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        with self.app.store.lock, self.app.store.db:  # as 0.19 left them: beats, no loudness
+            self.app.store.db.execute("DELETE FROM measures")
+        measured = []
+        self.app.worker.sound = lambda path, samples, rate: measured.append(samples.song_id) or fake_sound(path, samples, rate)
+        end = time.time() + 20
+        while time.time() < end and self.app.store.measure_counts(1)["waiting"]:
+            time.sleep(0.2)
+        p = self.call("/api/v1/profiles?ids=t122")["profiles"][0]
+        self.assertEqual((p["ref_lufs"], p["key"], p["scale"]), (-7.5, "F#", "major"))
+        self.assertNotIn("t122", measured)  # taken from the plugin, not downloaded again
+        self.assertIn("t140", measured)  # the plugin's t140 has no loudness: measured here
+        self.assertIn("taken from AudioMuse-AI", " ".join(e["message"] for e in self.app.store.events()))
+
     def test_an_api_key_for_the_app(self):
         self.start(password="s3cret", api_key="k3y")
         self.assertEqual(self.call("/api/v1/capabilities", password="", headers={"Authorization": "Bearer k3y"})["api"], 1)

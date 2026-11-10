@@ -123,6 +123,8 @@ class FakeServer:
                     return self.reply(401, {"error": "login needed"})
                 if path.endswith("/api/health"):
                     return self.reply(200, {"plugin": "siansa_analysis", "plugin_version": "0.5.7-fake", "status": "ok"})
+                if path.endswith("/api/profiles") and "/siansa_beats/" in path:
+                    return self.reply(404, {"error": "not installed"})
                 if path.endswith("/api/profiles"):
                     ids = [i for i in q.get("ids", "").split(",") if i]
                     profiles = [{"track_id": s["id"], **s["plugin"]} for s in fake.songs

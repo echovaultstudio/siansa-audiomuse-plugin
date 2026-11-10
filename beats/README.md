@@ -278,8 +278,9 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 | `GET /api/v1/similar/artists?track_id=` or `?artist=` | Artists that sound like that one, the same way. |
 | `POST /api/v1/bad-blends` | A song change marked as bad in the app. |
 
-Songs analysed before 0.20 are measured for loudness, fades and key while the queue is empty (each is downloaded once
-more); new songs get them on the way.
+Songs analysed before 0.20 get their loudness, fades and key while the queue is empty: with `AUDIOMUSE_URL` and
+`AUDIOMUSE_TOKEN` set, whatever AudioMuse-AI's Siansa plugin already measured is taken from it (nothing to download),
+and the rest are downloaded once more and measured here. New songs are measured on the way.
 
 ## The page's API
 

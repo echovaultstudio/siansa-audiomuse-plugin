@@ -4,6 +4,9 @@ analysis; Siansa Beats passes the app's question on (``AUDIOMUSE_URL``, ``AUDIOM
 as it is: ``{"similar": [{"album"|"artist", "artist", "track_id", "score"}, …]}``.
 
 It asks the Siansa Beats (dev) plugin first, then the Siansa Analysis plugin (both answer the same way).
+
+:meth:`AudioMuse.profiles` takes the loudness, fades and key the plugin already measured, so songs Siansa Beats analysed
+before 0.20 needn't be downloaded again for them.
 """
 
 import json
@@ -53,6 +56,29 @@ class AudioMuse:
             raise AudioMuseError("AudioMuse-AI's answer isn't JSON: is AUDIOMUSE_URL its API port?") from None
         _log.debug("AudioMuse-AI %s (%.2fs)", path.split("?")[0], time.monotonic() - started)
         return answer
+
+    PROFILE_FIELDS = ("ref_lufs", "start_ramp", "end_ramp", "duration_ms", "key", "scale")
+
+    def profiles(self, ids):
+        """``{song_id: {"ref_lufs", "start_ramp", "end_ramp", "duration_ms", "key", "scale"}}`` of the songs among ``ids``
+        the plugin has measured (loudness found); ``{}`` when there's no AudioMuse-AI or no plugin answers."""
+        if not self.configured or not ids:
+            return {}
+        out = {}
+        for prefix in PLUGINS:
+            for start in range(0, len(ids), 100):  # AudioMuse-AI turns away long addresses
+                chunk = [i for i in ids[start:start + 100] if i not in out]
+                if not chunk:
+                    continue
+                try:
+                    answer = self._get(f"{prefix}api/profiles?" + urllib.parse.urlencode({"ids": ",".join(chunk)}))
+                except (urllib.error.HTTPError, AudioMuseError) as e:
+                    _log.debug("No profiles from %s: %s", prefix, e)
+                    break
+                for p in (answer or {}).get("profiles") or []:
+                    if p.get("track_id") in chunk and p.get("ref_lufs") is not None and p.get("start_ramp"):
+                        out[p["track_id"]] = {k: p.get(k) for k in self.PROFILE_FIELDS}
+        return out
 
     def similar(self, kind, query):
         """AudioMuse-AI's ``kind`` ("albums" or "artists") like ``query``'s ``track_id`` or ``artist``."""

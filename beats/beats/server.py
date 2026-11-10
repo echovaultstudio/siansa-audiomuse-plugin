@@ -176,6 +176,8 @@ class App:
         self.kept_genres = Kept(self._genre_list, 60, changes)
         self.kept_style_counts = Kept(self.store.style_counts, 30, changes)  # its total follows songs added, too
         self.worker.on_voted = lambda: self.kept_genres.refresh()
+        if self.audiomuse.configured:  # what the Siansa plugin already measured needn't be downloaded again
+            self.worker.importer = self.audiomuse.profiles
 
     # ---- what the API returns ----
 
