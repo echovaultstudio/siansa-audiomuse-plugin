@@ -12,17 +12,26 @@ Tables:
 - ``measures``: each song's loudness, fade ramps and key (:mod:`beats.loudness`, :mod:`beats.key`), for the app's
   volume levelling, fades and blends in key (``error`` when it couldn't be measured);
 - ``bad_blends``: song changes the owner marked as bad in Siansa Dev, with how the app blended them;
-- ``settings``: what the page chose (the libraries to analyse), kept across restarts.
+- ``settings``: what the page chose (the libraries to analyse, the music servers added there), kept across restarts;
+- ``links``: each music server's own id for a song (``server``, ``item_id``) and the library it's in there. A song two
+  servers have is one row of ``songs``, analysed once, with a link from each (:mod:`beats.match`, 0.23.0).
 
-Nothing here is written back to Navidrome, AudioMuse-AI or the music files.
+Nothing here is written back to the music servers, AudioMuse-AI or the music files.
+
+Reading doesn't wait for writing (0.23.0): the database is in WAL mode, changes go through one connection behind a
+lock, and what the page and the app ask for is read through a few connections of their own. Until then every request
+waited for whatever was being read or written, for seconds on a big library.
 """
 
+import contextlib
 import json
+import queue
 import sqlite3
 import threading
 import time
 
 from . import log
+from . import match
 
 _activity = log.get("activity")
 _LOG_LEVEL = {"info": 20, "warn": 30, "error": 40}
@@ -62,7 +71,19 @@ CREATE TABLE IF NOT EXISTS measures (
 CREATE TABLE IF NOT EXISTS bad_blends (
     id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL, from_id TEXT, to_id TEXT, technique TEXT, details TEXT
 );
+CREATE TABLE IF NOT EXISTS links (
+    server TEXT, item_id TEXT, song_id TEXT, folder TEXT, PRIMARY KEY (server, item_id)
+);
+CREATE INDEX IF NOT EXISTS links_by_song ON links (song_id, server);
+CREATE INDEX IF NOT EXISTS links_by_server ON links (server, song_id);
+CREATE INDEX IF NOT EXISTS links_by_item ON links (item_id);
+CREATE INDEX IF NOT EXISTS genres_by_source_song ON genres (source, song_id);  -- the styles' counts, in the index
+CREATE INDEX IF NOT EXISTS jobs_by_state ON jobs (state, queued_at, song_id);  -- the queue's next song and its counts
+CREATE INDEX IF NOT EXISTS songs_by_name ON songs (artist COLLATE NOCASE, title COLLATE NOCASE);  -- the table's order
 """
+
+MAIN = "main"  # the container's own server (beats.servers.MAIN): every song before 0.23 is its
+READERS = 4  # connections for reading: the page asks for a few things at once
 
 RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "grid_bpm", "on_grid", "grid_drift", "analysis_version", "downbeat_source", "grid_counted",
                  "changes_share", "phrase_first_ms", "phrase_count", "phrase_bars", "phrase_big", "phrase_big_on", "phrase_source", "from_mix", "ends", "bpm_median", "steady", "grid_ms", "grid_share", "intro_bpm", "intro_steady", "outro_bpm",
@@ -83,10 +104,14 @@ class Store:
         self.path = path
         self.lock = threading.RLock()
         self.genre_changes = 0  # counts every change to the genres table, so kept answers know when they're old
+        self.measure_changes = 0  # the same for the loudness measures
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
-        with self.lock, self.db:
-            self.db.execute("PRAGMA journal_mode=WAL")
+        self._writing = threading.local()  # how deep this thread is in a change: it reads its own change, not a reader's
+        self._readers = None
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=NORMAL")  # safe with WAL, and each change no longer waits for the disk twice
+        with self._write():
             self.db.executescript(SCHEMA)
             if "source" not in {r[1] for r in self.db.execute("PRAGMA table_info(measures)")}:
                 self.db.execute("ALTER TABLE measures ADD COLUMN source TEXT")  # 0.20.0's first builds had none
@@ -104,50 +129,197 @@ class Store:
                 self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             # Songs that were being worked on when the service stopped go back in the queue.
             self.db.execute(f"UPDATE jobs SET state='queued', step=NULL WHERE state IN {BUSY}")
+            self._to_links()
+        if path != ":memory:":
+            self._readers = queue.LifoQueue()
+            for _ in range(READERS):
+                reader = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
+                reader.row_factory = sqlite3.Row
+                reader.execute("PRAGMA query_only=ON")
+                reader.execute("PRAGMA busy_timeout=10000")
+                self._readers.put(reader)
+
+    def _to_links(self):
+        """0.23.0: what the songs' files and tags are compared by, and each song's link to the container's own server
+        (whose id for it is the song's own, as it always was). Done once, in the change that opens the database."""
+        columns = {r[1] for r in self.db.execute("PRAGMA table_info(songs)")}
+        for column in ("path", "tail", "meta", "loose", "server"):
+            if column not in columns:
+                self.db.execute(f"ALTER TABLE songs ADD COLUMN {column} TEXT")
+        for name in ("tail", "meta", "loose"):
+            self.db.execute(f"CREATE INDEX IF NOT EXISTS songs_by_{name} ON songs ({name})")
+        rows = self.db.execute("SELECT id, title, artist, album FROM songs WHERE meta IS NULL AND title <> ''").fetchall()
+        self.db.executemany("UPDATE songs SET meta=?, loose=? WHERE id=?",
+                            [(match.meta(dict(r)), match.loose(dict(r)), r["id"]) for r in rows])
+        if not self.db.execute("SELECT 1 FROM settings WHERE key='links_made'").fetchone():
+            self.db.execute("INSERT OR IGNORE INTO links (server, item_id, song_id, folder) "
+                            "SELECT ?, id, id, folder FROM songs", (MAIN,))
+            self.db.execute("INSERT OR REPLACE INTO settings VALUES ('links_made', 'true')")
 
     def close(self):
         with self.lock:
+            while self._readers is not None and not self._readers.empty():
+                self._readers.get().close()
             self.db.close()
 
-    def _rows(self, sql, args=()):
+    @contextlib.contextmanager
+    def _write(self):
+        """One change, written whole or not at all, one at a time. What this thread reads meanwhile is its own change."""
         with self.lock:
-            return [dict(r) for r in self.db.execute(sql, args).fetchall()]
+            depth = getattr(self._writing, "depth", 0)
+            self._writing.depth = depth + 1
+            try:
+                with self.db:
+                    yield self.db
+            finally:
+                self._writing.depth = depth
+
+    def _rows(self, sql, args=()):
+        if self._readers is None or getattr(self._writing, "depth", 0):
+            with self.lock:
+                return [dict(r) for r in self.db.execute(sql, args).fetchall()]
+        reader = self._readers.get()
+        try:
+            return [dict(r) for r in reader.execute(sql, args).fetchall()]
+        finally:
+            self._readers.put(reader)
 
     # ---- songs and genres ----
 
-    def add_song(self, song, folder=None, source="tag"):
-        """Adds or updates ``song`` (from :func:`subsonic.song_from`) of library ``folder``; its genres replace that
-        source's."""
-        with self.lock, self.db:
-            self._add_song(song, folder, source)
+    def add_song(self, song, folder=None, source="tag", server=MAIN):
+        """Adds or updates ``song`` (from a server's ``song_from``) of ``server``'s library ``folder``, without
+        queueing it; its genres replace that source's. The song's id here."""
+        with self._write():
+            return self._link(server, folder, song, source, (), None)[0]
 
-    def add_songs(self, songs, folder=None, source="tag"):
+    def add_songs(self, songs, folder=None, source="tag", server=MAIN):
         """Adds or updates many songs at once (a whole library) and queues the ones never analysed: their ids."""
-        queued = []
-        now = time.time()
-        with self.lock, self.db:
-            for song in songs:
-                self._add_song(song, folder, source)
-                if self.db.execute("INSERT OR IGNORE INTO jobs (song_id, state, queued_at) VALUES (?, 'queued', ?)",
-                                   (song["id"], now)).rowcount:
-                    queued.append(song["id"])
-        return queued
+        return self.link_songs(server, folder, songs, source=source)["queued"]
 
-    def _add_song(self, song, folder, source):
+    def link_songs(self, server, folder, songs, twins=(), source="tag"):
+        """A library of ``server`` as just read: each song is one already here (it keeps its link, or is found by its
+        file or tags, :mod:`beats.match`; for another user of the same server, ``twins``, by its id) or a new one,
+        queued. ``{"songs", "queued": [ids], "matched": {"path", "tags", "title", "user"}}``: how many were found
+        here for the first time, by what."""
+        queued, matched = [], {}
+        with self._write():
+            for song in songs:
+                song_id, how = self._link(server, folder, song, source, twins, queued)
+                if how:
+                    matched[how] = matched.get(how, 0) + 1
+        return {"songs": len(songs), "queued": queued, "matched": matched}
+
+    def _link(self, server, folder, song, source, twins, queued):
+        """One song of a server's library, inside a change: ``(its id here, how it was found here or None)``."""
+        item_id = song["id"]
+        row = self.db.execute("SELECT song_id FROM links WHERE server=? AND item_id=?", (server, item_id)).fetchone()
+        how = None
+        if row is not None:
+            song_id = row["song_id"]
+            self.db.execute("UPDATE links SET folder=COALESCE(?, folder) WHERE server=? AND item_id=?",
+                            (folder, server, item_id))
+        else:
+            song_id, how = self._find(server, song, twins)
+            if song_id is None:
+                # Its id here is the server's own, as always; with the server's name before it when another has that id.
+                taken = self.db.execute("SELECT 1 FROM songs WHERE id=?", (item_id,)).fetchone()
+                song_id = f"{server}:{item_id}" if taken else item_id
+                self._save_song(song_id, song, folder, server)
+            self.db.execute("INSERT OR REPLACE INTO links (server, item_id, song_id, folder) VALUES (?,?,?,?)",
+                            (server, item_id, song_id, folder))
+        home = self.db.execute("SELECT COALESCE(server, ?) FROM songs WHERE id=?", (MAIN, song_id)).fetchone()
+        if home is None:  # a link whose song was removed: the song again
+            self._save_song(song_id, song, folder, server)
+        elif home[0] == server and how is None:
+            self._save_song(song_id, song, folder, server)  # its home's tags are the song's
+        elif song.get("path"):
+            # A song found on another server keeps its own tags; a path it lacked (read before 0.23) is taken.
+            self.db.execute("UPDATE songs SET path=?, tail=? WHERE id=? AND path IS NULL",
+                            (song["path"], match.tail(song["path"]), song_id))
+        if home is None or home[0] == server and how is None:
+            self.db.execute("DELETE FROM genres WHERE song_id=? AND source=?", (song_id, source))
+            for label in song.get("genres") or []:
+                self.db.execute("INSERT OR REPLACE INTO genres VALUES (?,?,?,?)", (song_id, source, label, 1.0))
+        if queued is not None and self.db.execute(
+                "INSERT OR IGNORE INTO jobs (song_id, state, queued_at) VALUES (?, 'queued', ?)",
+                (song_id, time.time())).rowcount:
+            queued.append(song_id)
+        return song_id, how
+
+    def _find(self, server, song, twins):
+        """The song here that a server's new item is: ``(id, how)``, or ``(None, None)`` for a song of its own. Never
+        a song the server already has under another id: two items of one server are two songs."""
+        def free(song_id):
+            return not self.db.execute("SELECT 1 FROM links WHERE server=? AND song_id=?", (server, song_id)).fetchone()
+
+        for twin in twins:  # another user of the same server: the same id is the same song
+            row = self.db.execute("SELECT song_id FROM links WHERE server=? AND item_id=?", (twin, song["id"])).fetchone()
+            if row is not None and free(row["song_id"]):
+                return row["song_id"], "user"
+
+        def by(column):
+            return lambda key: [dict(r) for r in self.db.execute(
+                f"SELECT id, path, duration FROM songs WHERE {column}=?", (key,)) if free(r["id"])] if key else []
+
+        return match.choose(song, by("tail"), by("meta"), by("loose"))
+
+    def _save_song(self, song_id, song, folder, server):
         self.db.execute(
-            "INSERT INTO songs (id, title, artist, album, duration, suffix, tag_bpm, folder, added_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, artist=excluded.artist, "
-            "album=excluded.album, duration=excluded.duration, suffix=excluded.suffix, tag_bpm=excluded.tag_bpm, "
-            "folder=COALESCE(excluded.folder, songs.folder)",
-            (song["id"], song["title"], song["artist"], song["album"], song["duration"], song["suffix"],
-             song["tag_bpm"], folder, time.time()))
-        self.db.execute("DELETE FROM genres WHERE song_id=? AND source=?", (song["id"], source))
-        for label in song.get("genres") or []:
-            self.db.execute("INSERT OR REPLACE INTO genres VALUES (?,?,?,?)", (song["id"], source, label, 1.0))
+            "INSERT INTO songs (id, title, artist, album, duration, suffix, tag_bpm, folder, added_at, path, tail, meta, "
+            "loose, server) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, "
+            "artist=excluded.artist, album=excluded.album, duration=excluded.duration, suffix=excluded.suffix, "
+            "tag_bpm=excluded.tag_bpm, folder=COALESCE(excluded.folder, songs.folder), "
+            "path=COALESCE(excluded.path, songs.path), tail=COALESCE(excluded.tail, songs.tail), meta=excluded.meta, "
+            "loose=excluded.loose",
+            (song_id, song["title"], song["artist"], song["album"], song["duration"], song["suffix"],
+             song["tag_bpm"], folder, time.time(), song.get("path"), match.tail(song.get("path")), match.meta(song),
+             match.loose(song), None if server == MAIN else server))
+
+    # ---- a server's ids for the songs, and the songs of a server's ids ----
+
+    def resolve(self, ids, server=None):
+        """``{given id: song id here}`` of the ids a caller has (a server's own; ``server``'s first when two servers
+        use the same id), leaving out those nothing here goes by."""
+        out, ids = {}, list(dict.fromkeys(ids))
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            marks = ", ".join("?" for _ in chunk)
+            for r in self._rows(f"SELECT item_id, server, song_id FROM links WHERE item_id IN ({marks})", chunk):
+                if r["item_id"] not in out or r["server"] == server:
+                    out[r["item_id"]] = r["song_id"]
+            for r in self._rows(f"SELECT id FROM songs WHERE id IN ({marks})", chunk):
+                out.setdefault(r["id"], r["id"])
+        return out
+
+    def item_ids(self, song_ids, server):
+        """``{song id here: server's id for it}`` of the songs ``server`` has."""
+        out, ids = {}, list(dict.fromkeys(song_ids))
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            for r in self._rows("SELECT song_id, item_id FROM links WHERE server=? AND song_id IN "
+                                f"({', '.join('?' for _ in chunk)})", (server, *chunk)):
+                out.setdefault(r["song_id"], r["item_id"])
+        return out
+
+    def where(self, song_id):
+        """Where a song can be had: ``[(server, its id there)]``, the server it came from first."""
+        rows = self._rows("SELECT l.server, l.item_id, COALESCE(s.server, ?) AS home FROM links l "
+                          "LEFT JOIN songs s ON s.id=l.song_id WHERE l.song_id=?", (MAIN, song_id))
+        rows.sort(key=lambda r: (r["server"] != r["home"], r["server"] != MAIN, r["server"]))
+        return [(r["server"], r["item_id"]) for r in rows]
+
+    def server_counts(self):
+        """``{server: songs}``: how many songs each server has here."""
+        return {r["server"]: r["n"] for r in self._rows("SELECT server, COUNT(*) AS n FROM links GROUP BY server")}
+
+    @staticmethod
+    def _of(server, column="s.id"):
+        """SQL (and its value) that keeps only ``server``'s songs; nothing for every server's."""
+        return ("", ()) if server is None else (f" AND {column} IN (SELECT song_id FROM links WHERE server=?)", (server,))
 
     def set_genres(self, song_id, source, labels, weights=None):
         self.genre_changes += 1
-        with self.lock, self.db:
+        with self._write():
             self.db.execute("DELETE FROM genres WHERE song_id=? AND source=?", (song_id, source))
             for i, label in enumerate(labels):
                 weight = weights[i] if weights else 1.0
@@ -163,13 +335,16 @@ class Store:
             "WHERE g.song_id=s.id AND g.source IN ('sound', 'sound-failed')) AND COALESCE(j.state, '') != 'failed' "
             "ORDER BY CASE j.state WHEN 'done' THEN 0 ELSE 1 END, s.id LIMIT ?", (limit,))]
 
-    def style_counts(self):
-        """``{"done", "failed", "total"}``: songs with styles from their sound, songs whose sound couldn't be, of all."""
+    def style_counts(self, server=None):
+        """``{"done", "failed", "total"}``: songs with styles from their sound, songs whose sound couldn't be, of all
+        (``server``'s songs only, when given)."""
+        of, value = self._of(server, "song_id")
         rows = self._rows("SELECT source, COUNT(DISTINCT song_id) AS n FROM genres WHERE source IN ('sound', "
-                          "'sound-failed') GROUP BY source")
+                          f"'sound-failed'){of} GROUP BY source", value)
         by = {r["source"]: r["n"] for r in rows}
+        of, value = self._of(server)
         total = self._rows("SELECT COUNT(*) AS n FROM songs s LEFT JOIN jobs j ON j.song_id=s.id "
-                           "WHERE COALESCE(j.state, '') != 'failed'")[0]["n"]  # a song that failed has no sound to hear
+                           f"WHERE COALESCE(j.state, '') != 'failed'{of}", value)[0]["n"]  # a failed song has no sound to hear
         return {"done": by.get("sound", 0), "failed": by.get("sound-failed", 0), "total": total}
 
     def tag_genres(self, limit=300):
@@ -194,36 +369,50 @@ class Store:
     def replace_votes(self, votes):
         """Writes each song's ``vote`` rows (``{song_id: [(label, score)]}``) in one go."""
         self.genre_changes += 1
-        with self.lock, self.db:
+        with self._write():
             for song_id, voted in votes.items():
                 self.db.execute("DELETE FROM genres WHERE song_id=? AND source='vote'", (song_id,))
                 self.db.executemany("INSERT OR REPLACE INTO genres VALUES (?, 'vote', ?, ?)",
                                     [(song_id, label, score) for label, score in voted])
 
-    def vote_counts(self, minimum):
-        """``{label: songs}``: how many songs have each style in their vote at ``minimum`` or more."""
+    def vote_counts(self, minimum, server=None):
+        """``{label: songs}``: how many songs (``server``'s only, when given) have each style in their vote at
+        ``minimum`` or more."""
+        if server is None:
+            return {r["label"]: r["n"] for r in self._rows(
+                "SELECT label, COUNT(*) AS n FROM genres WHERE source='vote' AND weight >= ? GROUP BY label", (minimum,))}
+        # The server's songs first, then each one's votes (CROSS JOIN keeps that order: five times quicker than the
+        # votes first on a big library).
         return {r["label"]: r["n"] for r in self._rows(
-            "SELECT label, COUNT(*) AS n FROM genres WHERE source='vote' AND weight >= ? GROUP BY label", (minimum,))}
+            "SELECT g.label, COUNT(*) AS n FROM links l CROSS JOIN genres g ON g.song_id = l.song_id AND g.source='vote' "
+            "WHERE l.server = ? AND g.weight >= ? GROUP BY g.label", (server, minimum))}
 
-    def vote_counts_by_library(self, minimum):
-        """``{label: {library: songs}}``: :meth:`vote_counts` split by the Navidrome library the songs are in, so the
-        app can leave out a genre whose songs are all in libraries it hides."""
+    def vote_counts_by_library(self, minimum, server=MAIN):
+        """``{label: {library: songs}}``: :meth:`vote_counts` split by the library the songs are in on ``server``, so
+        the app can leave out a genre whose songs are all in libraries it hides."""
         out = {}
         for r in self._rows(
-                "SELECT g.label, COALESCE(s.folder, '') AS folder, COUNT(*) AS n FROM genres g JOIN songs s ON s.id = g.song_id "
-                "WHERE g.source='vote' AND g.weight >= ? GROUP BY g.label, s.folder", (minimum,)):
+                "SELECT g.label, COALESCE(l.folder, '') AS folder, COUNT(*) AS n FROM links l CROSS JOIN genres g "
+                "ON g.song_id = l.song_id AND g.source='vote' WHERE l.server = ? AND g.weight >= ? "
+                "GROUP BY g.label, l.folder", (server, minimum)):
             out.setdefault(r["label"], {})[str(r["folder"])] = r["n"]
         return out
 
-    def songs_voted(self, labels, minimum, limit):
-        """Song ids (random order) with any of ``labels`` in their vote at ``minimum`` or more, at most ``limit``."""
+    def songs_voted(self, labels, minimum, limit, server=None):
+        """Song ids (random order) with any of ``labels`` in their vote at ``minimum`` or more, at most ``limit``: the
+        ids here, or ``server``'s own for the songs it has."""
         labels = list(labels)
         if not labels:
             return []
         marks = ", ".join("?" for _ in labels)
-        return [r["song_id"] for r in self._rows(
-            f"SELECT DISTINCT song_id FROM genres WHERE source='vote' AND weight >= ? AND label IN ({marks}) "
-            "ORDER BY RANDOM() LIMIT ?", (minimum, *labels, limit))]
+        if server is None:
+            return [r["song_id"] for r in self._rows(
+                f"SELECT DISTINCT song_id FROM genres WHERE source='vote' AND weight >= ? AND label IN ({marks}) "
+                "ORDER BY RANDOM() LIMIT ?", (minimum, *labels, limit))]
+        return [r["item_id"] for r in self._rows(
+            "SELECT DISTINCT l.item_id FROM genres g JOIN links l ON l.song_id = g.song_id AND l.server = ? "
+            f"WHERE g.source='vote' AND g.weight >= ? AND g.label IN ({marks}) ORDER BY RANDOM() LIMIT ?",
+            (server, minimum, *labels, limit))]
 
     def genres(self, song_id):
         return self._rows("SELECT source, label, weight FROM genres WHERE song_id=? ORDER BY source, weight DESC, label",
@@ -236,29 +425,46 @@ class Store:
     def song_ids(self):
         return [r["id"] for r in self._rows("SELECT id FROM songs")]
 
+    GONE_WITH_A_SONG = (("songs", "id"), ("genres", "song_id"), ("jobs", "song_id"), ("results", "song_id"),
+                        ("marks", "song_id"), ("measures", "song_id"), ("links", "song_id"))
+
     def remove(self, song_id):
         self.genre_changes += 1
-        with self.lock, self.db:
-            for table, key in (("songs", "id"), ("genres", "song_id"), ("jobs", "song_id"), ("results", "song_id"),
-                               ("marks", "song_id")):
+        with self._write():
+            for table, key in self.GONE_WITH_A_SONG:
                 self.db.execute(f"DELETE FROM {table} WHERE {key}=?", (song_id,))
 
-    def remove_folder(self, folder):
-        """Forgets every song of library ``folder``: its results, marks and place in the queue. The number removed
-        (nothing changes on Navidrome)."""
-        with self.lock, self.db:
-            ids = [r[0] for r in self.db.execute("SELECT id FROM songs WHERE folder=?", (folder,))]
-            for table, key in (("genres", "song_id"), ("jobs", "song_id"), ("results", "song_id"),
-                               ("marks", "song_id")):
-                self.db.execute(f"DELETE FROM {table} WHERE {key} IN (SELECT id FROM songs WHERE folder=?)", (folder,))
-            self.db.execute("DELETE FROM songs WHERE folder=?", (folder,))
+    def remove_folder(self, folder, server=MAIN):
+        """Forgets library ``folder`` of ``server``: the songs only it had go, with their results, marks and place in
+        the queue; a song another server (or library) has too stays, analysed. The number of songs it had (nothing
+        changes on the server)."""
+        return self._unlink("server=? AND folder=?", (server, folder))
+
+    def remove_server(self, server):
+        """Forgets ``server``: as :meth:`remove_folder`, for all of its libraries."""
+        return self._unlink("server=?", (server,))
+
+    def _unlink(self, where, args):
+        self.genre_changes += 1
+        with self._write():
+            ids = [r[0] for r in self.db.execute(f"SELECT DISTINCT song_id FROM links WHERE {where}", args)]
+            self.db.execute(f"DELETE FROM links WHERE {where}", args)
+            for song_id in ids:
+                left = self.db.execute("SELECT server, folder FROM links WHERE song_id=? ORDER BY server=? DESC, server "
+                                       "LIMIT 1", (song_id, MAIN)).fetchone()
+                if left is None:
+                    for table, key in self.GONE_WITH_A_SONG:
+                        self.db.execute(f"DELETE FROM {table} WHERE {key}=?", (song_id,))
+                else:  # it lives on where it still is
+                    self.db.execute("UPDATE songs SET server=?, folder=? WHERE id=?",
+                                    (None if left["server"] == MAIN else left["server"], left["folder"], song_id))
             return len(ids)
 
     # ---- the queue ----
 
     def queue(self, song_id, force=False):
         """Puts the song in the queue; with ``force`` also when it's done or failed. True when it was queued."""
-        with self.lock, self.db:
+        with self._write():
             row = self.db.execute("SELECT state FROM jobs WHERE song_id=?", (song_id,)).fetchone()
             if row and (row["state"] == "queued" or row["state"] in BUSY):
                 return False
@@ -276,7 +482,7 @@ class Store:
 
     def claim_next(self):
         """The next song in the queue, marked as being downloaded in the same step, so no two workers take it."""
-        with self.lock, self.db:
+        with self._write():
             row = self.db.execute(self.NEXT).fetchone()
             if not row:
                 return None
@@ -284,19 +490,22 @@ class Store:
                             (time.time(), row["song_id"]))
             return row["song_id"]
 
-    def unqueue_except(self, folders):
-        """Takes the songs of every library but ``folders`` out of the queue (those done stay): the number taken."""
+    def unqueue_except(self, folders, server=MAIN):
+        """Takes ``server``'s songs of every library but ``folders`` out of the queue (those done stay, and those
+        another server has in a chosen library of its own): the number taken."""
         folders = list(folders)
-        with self.lock, self.db:
+        with self._write():
             return self.db.execute(
-                "DELETE FROM jobs WHERE state='queued' AND song_id IN (SELECT id FROM songs WHERE folder IS NOT NULL"
-                + (f" AND folder NOT IN ({', '.join('?' for _ in folders)})" if folders else "") + ")",
-                folders).rowcount
+                "DELETE FROM jobs WHERE state='queued' AND song_id IN (SELECT song_id FROM links WHERE server=? "
+                "AND folder IS NOT NULL" + (f" AND folder NOT IN ({', '.join('?' for _ in folders)})" if folders else "")
+                + ") AND song_id NOT IN (SELECT song_id FROM links WHERE server<>?"
+                + (f" OR folder IN ({', '.join('?' for _ in folders)})" if folders else "") + ")",
+                (server, *folders, server, *folders)).rowcount
 
-    def folder_counts(self):
-        """``{folder: {"songs", "done"}}``: each library's songs here, and how many are analysed."""
-        rows = self._rows("SELECT s.folder, COUNT(*) AS songs, SUM(j.state='done') AS done FROM songs s "
-                          "LEFT JOIN jobs j ON j.song_id=s.id GROUP BY s.folder")
+    def folder_counts(self, server=MAIN):
+        """``{folder: {"songs", "done"}}``: each of ``server``'s libraries' songs here, and how many are analysed."""
+        rows = self._rows("SELECT l.folder, COUNT(*) AS songs, SUM(j.state='done') AS done FROM links l "
+                          "LEFT JOIN jobs j ON j.song_id=l.song_id WHERE l.server=? GROUP BY l.folder", (server,))
         return {r["folder"]: {"songs": r["songs"], "done": r["done"] or 0} for r in rows if r["folder"] is not None}
 
     # ---- settings ----
@@ -306,12 +515,12 @@ class Store:
         return json.loads(rows[0]["value"]) if rows else default
 
     def set_setting(self, key, value):
-        with self.lock, self.db:
+        with self._write():
             self.db.execute("INSERT OR REPLACE INTO settings VALUES (?, ?)", (key, json.dumps(value)))
 
     def set_state(self, song_id, state, error=None):
         now = time.time()
-        with self.lock, self.db:
+        with self._write():
             if state in BUSY:
                 self.db.execute("UPDATE jobs SET state=?, step=?, started_at=COALESCE(started_at, ?) WHERE song_id=?",
                                 (state, state, now, song_id))
@@ -319,10 +528,13 @@ class Store:
                 self.db.execute("UPDATE jobs SET state=?, step=NULL, finished_at=?, error=? WHERE song_id=?",
                                 (state, now, error, song_id))
 
-    def counts(self):
-        rows = self._rows("SELECT state, COUNT(*) AS n FROM jobs GROUP BY state")
+    def counts(self, server=None):
+        """``{state: songs, "songs": all}`` of the queue (``server``'s songs only, when given)."""
+        of, value = self._of(server, "song_id")
+        rows = self._rows(f"SELECT state, COUNT(*) AS n FROM jobs WHERE 1{of} GROUP BY state", value)
         counts = {r["state"]: r["n"] for r in rows}
-        counts["songs"] = self._rows("SELECT COUNT(*) AS n FROM songs")[0]["n"]
+        of, value = self._of(server, "id")
+        counts["songs"] = self._rows(f"SELECT COUNT(*) AS n FROM songs WHERE 1{of}", value)[0]["n"]
         return counts
 
     # ---- results ----
@@ -330,7 +542,7 @@ class Store:
     def save_result(self, song_id, model, values, beats, downbeats, levels=None):
         """``levels``: the sound's levels (:func:`beats.features.measure`); ``None`` saves an empty ``""``, so a
         song whose sound couldn't be measured isn't asked for again."""
-        with self.lock, self.db:
+        with self._write():
             self.db.execute(
                 f"INSERT OR REPLACE INTO results (song_id, model, {', '.join(RESULT_FIELDS)}, analysed_at, beats, downbeats,"
                 f" levels) VALUES (?, ?, {', '.join('?' for _ in RESULT_FIELDS)}, ?, ?, ?, ?)",
@@ -350,6 +562,10 @@ class Store:
             row["levels"] = json.loads(levels) if levels else None
         return row
 
+    def failed(self):
+        """``[{"id", "error"}]`` of the songs that couldn't be analysed."""
+        return self._rows("SELECT song_id AS id, error FROM jobs WHERE state='failed'")
+
     def stale_results(self, version):
         """``(song_id, model)`` of results worked out by an older Siansa Beats (``analysis_version`` below
         ``version``), to be worked out again from their beats."""
@@ -364,7 +580,7 @@ class Store:
     def update_result(self, song_id, model, values):
         """Rewrites the readings worked out from the beats, keeping the beats and the times."""
         keys = [k for k in RESULT_FIELDS if k in values and not k.endswith("_seconds")]
-        with self.lock, self.db:
+        with self._write():
             self.db.execute(f"UPDATE results SET {', '.join(f'{k}=?' for k in keys)} WHERE song_id=? AND model=?",
                             (*[_column(k, values[k]) for k in keys], song_id, model))
 
@@ -385,7 +601,8 @@ class Store:
         """``values``: :func:`beats.loudness.profile` with :func:`beats.key.find`'s fields (either may be missing);
         ``error`` when the song couldn't be measured, so it isn't tried again and again. ``source``: "beats" (measured
         here) or "plugin" (taken from AudioMuse-AI's Siansa plugin)."""
-        with self.lock, self.db:
+        self.measure_changes += 1
+        with self._write():
             self.db.execute(
                 "INSERT OR REPLACE INTO measures (song_id, ref_lufs, start_ramp, end_ramp, duration_ms, key, scale, "
                 "key_strength, version, measured_at, error, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -398,13 +615,17 @@ class Store:
         rows = self._rows("SELECT * FROM measures WHERE song_id=?", (song_id,))
         return rows[0] if rows else None
 
-    def measure_summary(self):
+    def measure_summary(self, server=None):
         """For the page's loudness dashboard: every measured song's loudness, key and where it came from, and the
         songs that couldn't be measured with why: ``{"rows": [{"ref_lufs", "key", "scale", "source", "start_ramp",
         "end_ramp"}], "failed": [{"id", "title", "artist", "error"}]}``."""
-        rows = self._rows("SELECT ref_lufs, key, scale, source, start_ramp, end_ramp FROM measures WHERE error IS NULL")
+        of, value = self._of(server, "song_id")
+        rows = self._rows("SELECT ref_lufs, key, scale, source, start_ramp, end_ramp FROM measures "
+                          f"WHERE error IS NULL{of}", value)
+        of, value = self._of(server, "m.song_id")
         failed = self._rows("SELECT m.song_id AS id, s.title, s.artist, m.error, m.measured_at FROM measures m "
-                            "LEFT JOIN songs s ON s.id = m.song_id WHERE m.error IS NOT NULL ORDER BY m.measured_at DESC LIMIT 200")
+                            f"LEFT JOIN songs s ON s.id = m.song_id WHERE m.error IS NOT NULL{of} "
+                            "ORDER BY m.measured_at DESC LIMIT 200", value)
         return {"rows": rows, "failed": failed}
 
     def measures(self, song_ids):
@@ -427,19 +648,24 @@ class Store:
             "(m.song_id IS NULL OR (m.version < ? AND m.error IS NULL)) ORDER BY j.finished_at DESC LIMIT ?",
             (version, limit))]
 
-    def measure_counts(self, version):
-        """``{"measured", "failed", "waiting"}`` for the page and the capabilities."""
+    def measure_counts(self, version, server=None):
+        """``{"measured", "failed", "waiting"}`` for the page and the capabilities (``server``'s songs, when given)."""
+        of, value = self._of(server, "j.song_id")
         row = self._rows(
             "SELECT SUM(CASE WHEN m.error IS NULL AND m.version >= ? THEN 1 ELSE 0 END) AS measured, "
             "SUM(CASE WHEN m.error IS NOT NULL THEN 1 ELSE 0 END) AS failed, "
             "SUM(CASE WHEN m.song_id IS NULL OR (m.version < ? AND m.error IS NULL) THEN 1 ELSE 0 END) AS waiting "
-            "FROM jobs j LEFT JOIN measures m ON m.song_id = j.song_id WHERE j.state = 'done'", (version, version))[0]
+            f"FROM jobs j LEFT JOIN measures m ON m.song_id = j.song_id WHERE j.state = 'done'{of}",
+            (version, version, *value))[0]
         return {k: row[k] or 0 for k in ("measured", "failed", "waiting")}
 
-    def overview(self, model, find=None, state=None, limit=None, song_id=None):
+    def overview(self, model, find=None, state=None, limit=None, song_id=None, server=None):
         """The songs with their job and result (no beats), for the table: those whose name, artist,
         album or genre has ``find`` in it, only those in ``state`` ("done", "failed"), at most ``limit`` of them, or just ``song_id``."""
         where, args = [], [model]
+        if server is not None:
+            where.append("s.id IN (SELECT song_id FROM links WHERE server=?)")
+            args.append(server)
         if song_id is not None:
             where.append("s.id=?")
             args.append(song_id)
@@ -489,7 +715,7 @@ class Store:
     # ---- marks: where the owner heard a section start, to check the phrases against ----
 
     def add_mark(self, song_id, seconds):
-        with self.lock, self.db:
+        with self._write():
             cursor = self.db.execute("INSERT INTO marks (song_id, seconds, created_at) VALUES (?, ?, ?)",
                                      (song_id, round(float(seconds), 3), time.time()))
             return cursor.lastrowid
@@ -498,7 +724,7 @@ class Store:
         return self._rows("SELECT id, seconds FROM marks WHERE song_id=? ORDER BY seconds", (song_id,))
 
     def remove_mark(self, song_id, mark_id):
-        with self.lock, self.db:
+        with self._write():
             return self.db.execute("DELETE FROM marks WHERE song_id=? AND id=?", (song_id, mark_id)).rowcount > 0
 
     def mark_counts(self):
@@ -508,7 +734,7 @@ class Store:
 
     def event(self, message, level="info"):
         _activity.log(_LOG_LEVEL.get(level, 20), message)
-        with self.lock, self.db:
+        with self._write():
             self.db.execute("INSERT INTO events VALUES (?,?,?)", (time.time(), level, message))
             self.db.execute("DELETE FROM events WHERE rowid NOT IN (SELECT rowid FROM events ORDER BY at DESC LIMIT ?)",
                             (EVENTS_KEPT,))
@@ -516,7 +742,7 @@ class Store:
     # ---- bad blends: song changes marked as bad in the app ----
 
     def add_bad_blend(self, from_id, to_id, technique, details):
-        with self.lock, self.db:
+        with self._write():
             return self.db.execute("INSERT INTO bad_blends (at, from_id, to_id, technique, details) VALUES (?,?,?,?,?)",
                                    (time.time(), from_id, to_id, technique, json.dumps(details or {}))).lastrowid
 
@@ -531,7 +757,7 @@ class Store:
         return rows
 
     def remove_bad_blend(self, blend_id):
-        with self.lock, self.db:
+        with self._write():
             return self.db.execute("DELETE FROM bad_blends WHERE id=?", (blend_id,)).rowcount > 0
 
     def bad_blend_count(self):

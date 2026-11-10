@@ -141,7 +141,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .marks .chip { display: inline-flex; gap: 6px; align-items: center; border-color: var(--mark); }
 .marks .chip button { border: 0; background: none; padding: 0 2px; color: inherit; cursor: pointer; }
 .marks .hint { color: var(--muted); font-size: 0.9em; }
-input[type=text], input[type=search], select { font: inherit; font-size: 0.9rem; border-radius: 999px; padding: 7px 12px;
+input[type=text], input[type=search], input[type=url], input[type=password], select { font: inherit; font-size: 0.9rem; border-radius: 999px; padding: 7px 12px;
   border: 1px solid var(--line-strong); background: var(--raised-2); color: var(--text); min-width: 0; }
 :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
@@ -209,6 +209,25 @@ dl.kv dt { color: var(--faint); } dl.kv dd { margin: 0; overflow-wrap: anywhere;
 .yes { color: var(--ok); } .no { color: var(--faint); }
 .steps { margin: 0 0 10px; padding-left: 20px; } .steps li { margin: 4px 0; }
 code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2); padding: 1px 6px; border-radius: 6px; }
+/* Which music server's songs the pages show (0.23.0): at the top of the menu, only when there's more than one. */
+.server-switch { padding: 0 2px 16px; }
+.server-switch[hidden] { display: none; }
+.server-switch label { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); padding: 0 10px 6px; }
+.server-switch select { width: 100%; border-radius: 10px; padding: 9px 12px; }
+/* The music servers under Setup: one row each, its buttons wrapping under it on a phone. */
+.servers { list-style: none; margin: 0 0 4px; padding: 0; }
+.servers li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.servers .who { flex: 1 1 220px; min-width: 0; }
+.servers .who b { font-weight: 600; }
+.servers .who .sub { overflow-wrap: anywhere; }
+.servers .acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.tag { font-size: 0.72rem; border-radius: 999px; padding: 1px 8px; margin-left: 6px; background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--text); white-space: nowrap; }
+.tag.plain { background: var(--raised-2); color: var(--muted); }
+.form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
+.form label { display: grid; gap: 4px; font-size: 0.82rem; color: var(--muted); min-width: 0; }
+.form label.wide { grid-column: 1 / -1; }
+.form input, .form select { width: 100%; border-radius: 10px; padding: 9px 12px; }
+@media (max-width: 600px) { .form { grid-template-columns: minmax(0, 1fr); } }
 .picks { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 4px; }
 .picks button { width: 100%; justify-content: flex-start; border-radius: 10px; text-align: left; }
 .list { margin: 0; padding-left: 22px; font-size: 0.9rem; } .list li { margin: 4px 0; }
@@ -236,6 +255,10 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
   <div class="scrim" id="scrim"></div>
   <nav class="nav" id="nav" aria-label="Pages">
     <div class="nav-close"><h1><b>Siansa</b> Beats</h1><button id="menu-close" aria-label="Close the menu">✕</button></div>
+    <div class="server-switch" id="server-switch" hidden>
+      <label for="server">Music server</label>
+      <select id="server" title="The pages show this server's songs"></select>
+    </div>
     <div class="group">
       <div class="group-name">Analysis</div>
       <a href="#overview" data-view="overview">Overview</a>
@@ -282,14 +305,14 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 
     <!-- Libraries: what to analyse -->
     <section data-view="libraries">
-      <div class="page-head"><h2>Libraries</h2><p class="sub">Which Navidrome libraries Siansa Beats analyses. They're read again every 6 hours for new songs; nothing is ever written to Navidrome.</p></div>
+      <div class="page-head"><h2>Libraries</h2><p class="sub">Which libraries of <span data-server-name>your music server</span> Siansa Beats analyses. They're read again every 6 hours for new songs; nothing is ever written to the server. A song another of your servers has too is analysed once.</p></div>
       <div class="card">
         <h3>Libraries to analyse</h3>
-        <div class="libs" role="group" aria-label="Libraries to analyse"><span id="libs" class="controls"><span class="sub">Asking Navidrome…</span></span></div>
+        <div class="libs" role="group" aria-label="Libraries to analyse"><span id="libs" class="controls"><span class="sub">Asking the server…</span></span></div>
         <div class="sub" id="libs-note" role="status"></div>
         <div class="controls row-gap">
-          <button class="primary" id="start" title="Analyse the ticked libraries: their songs are read from Navidrome and queued">Start analysis</button>
-          <button id="read" title="Read the chosen libraries from Navidrome now (it's done every 6 hours anyway)">Look for new songs</button>
+          <button class="primary" id="start" title="Analyse the ticked libraries: their songs are read from the server and queued">Start analysis</button>
+          <button id="read" title="Read the chosen libraries now (it's done every 6 hours anyway)">Look for new songs</button>
         </div>
         <div class="libs" id="left-out" hidden></div>
       </div>
@@ -336,6 +359,8 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         <div class="facts" id="d-sound"></div>
         <h4>Genres</h4>
         <div class="facts" id="d-genres"></div>
+        <h4>On your servers <span class="sub">its id on each</span></h4>
+        <div class="facts" id="d-servers"></div>
       </div>
       <div class="card">
         <div class="tools">
@@ -478,6 +503,32 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
     <!-- Setup -->
     <section data-view="setup">
       <div class="page-head"><h2>Setup</h2><p class="sub">How this Siansa Beats is set up (the container's settings) and how the Siansa app connects to it.</p></div>
+      <div class="card" id="servers-card">
+        <h3>Music servers</h3>
+        <p class="sub">Navidrome, Emby and Jellyfin, as many as you have, and more than one user of the same server (each
+          sees the libraries that user may). A song two servers have is found by its file or its tags and analysed once.
+          The default server is the one the Siansa app is answered for when it doesn't say which it plays from.</p>
+        <ul class="servers" id="servers"></ul>
+        <details id="server-add">
+          <summary class="btn" role="button">Add a server or a user</summary>
+          <form id="server-form" autocomplete="off">
+            <div class="form">
+              <label>Kind<select id="sf-kind"><option value="navidrome">Navidrome</option><option value="emby">Emby</option><option value="jellyfin">Jellyfin</option></select></label>
+              <label>Name <input type="text" id="sf-name" placeholder="As you'd call it: Living room Emby" maxlength="60"></label>
+              <label class="wide">Address <input type="url" id="sf-url" placeholder="http://192.168.1.10:8096" required></label>
+              <label>User name <input type="text" id="sf-user" required autocapitalize="none" spellcheck="false"></label>
+              <label>Password <input type="password" id="sf-password" required autocomplete="new-password"></label>
+            </div>
+            <div class="controls">
+              <button type="submit" class="primary" id="sf-add">Add</button>
+              <button type="button" id="sf-test">Test</button>
+              <span class="sub" id="sf-note" role="status"></span>
+            </div>
+            <p class="sub">The password is kept in Siansa Beats' data folder and never shown, logged or put in a report.
+              Siansa Beats only reads from the server.</p>
+          </form>
+        </details>
+      </div>
       <div class="grid2">
         <div class="card"><h3>Connections</h3><dl class="kv" id="setup-connections"></dl></div>
         <div class="card"><h3>The model</h3><dl class="kv" id="setup-model"></dl></div>
@@ -514,8 +565,17 @@ let songs = [], filter = "all", selected = null, detail = null, lastCounts = "",
 let songsAsked = 0, songsTimer = null, libraries = [], picked = null;
 let genreList = [];  // the genres as the Genres page lists them (drawGenreBars)  // picked: the ticks not started yet
 
+// The music server whose songs the pages show: none chosen means the default one. Kept in this browser.
+let server = null;
+try { server = localStorage.getItem("beats-server") || null; } catch (e) { /* private window */ }
+// A request about a server's songs names it; the servers themselves, the log and similar music (whose ?server= is
+// AudioMuse-AI's own name for one) don't.
+function forServer(path) {
+  if (!server || !path.startsWith("api/") || /^api\/(servers|log|health|debug|v1\/similar)/.test(path)) return path;
+  return path + (path.includes("?") ? "&" : "?") + "server=" + encodeURIComponent(server);
+}
 async function api(path, options = {}) {
-  const r = await fetch(path, {headers: {"Content-Type": "application/json"}, ...options});
+  const r = await fetch(forServer(path), {headers: {"Content-Type": "application/json"}, ...options});
   const body = r.headers.get("Content-Type")?.includes("json") ? await r.json() : await r.text();
   if (!r.ok) throw new Error(body?.error || r.statusText);
   return body;
@@ -551,8 +611,13 @@ async function refreshStatus() {
   try {
     status = await api("api/status");
     offline(null);
-  } catch (e) { offline("The service doesn't answer: " + e.message); return; }
+  } catch (e) {
+    // The chosen server was taken away (on another device): back to the default one.
+    if (server && /No server/.test(e.message)) { chooseServer(null); return; }
+    offline("The service doesn't answer: " + e.message); return;
+  }
   const s = status, c = s.counts, total = c.songs || 0;
+  drawServers(s);
   if (s.bad_blends !== badCount) { badCount = s.bad_blends; refreshBad(); }
   const done = c.done || 0, failed = c.failed || 0, queued = c.queued || 0;
   const busy = BUSY.reduce((n, k) => n + (c[k] || 0), 0);
@@ -578,7 +643,7 @@ async function refreshStatus() {
   $("export-failed").hidden = !failedCount;
   $("export-failed").textContent = `Download failed songs (${failedCount})`;
   const read = (s.libraries || {}).read_at;
-  $("read").title = "Read the chosen libraries from Navidrome now (it's done every 6 hours anyway)" + (read ? `. Last read ${new Date(read * 1000).toLocaleString()}.` : "");
+  $("read").title = "Read the chosen libraries now (it's done every 6 hours anyway)" + (read ? `. Last read ${new Date(read * 1000).toLocaleString()}.` : "");
   $("device-note").hidden = !s.device_note; $("device-note").textContent = s.device_note || "";
   const w = (n) => total ? (100 * n / total) + "%" : "0";
   $("progress").innerHTML = `<span class="done" style="width:${w(done)}"></span><span class="failed" style="width:${w(failed)}"></span><span class="busy" style="width:${w(busy)}"></span>`;
@@ -653,21 +718,23 @@ document.querySelectorAll("[data-filter]").forEach((b) => b.addEventListener("cl
 function exportLinks() {
   const q = new URLSearchParams({show: filter});
   if ($("search").value.trim()) q.set("find", $("search").value.trim());
-  $("export-csv").href = "api/export.csv?" + q;
-  $("export-json").href = "api/export.json?" + q;
+  $("export-csv").href = forServer("api/export.csv?" + q);
+  $("export-json").href = forServer("api/export.json?" + q);
+  $("export-failed").href = forServer("api/failed/export");
 }
+exportLinks();
 $("search").addEventListener("input", exportLinks);
 document.querySelectorAll("[data-filter]").forEach((b) => b.addEventListener("click", exportLinks));
 
 // ---- the libraries ----
 async function refreshLibraries() {
-  try { libraries = await api("api/libraries"); } catch (e) { $("libs").innerHTML = `<span class="sub">Navidrome doesn't answer: ${esc(e.message)}</span>`; return; }
+  try { libraries = await api("api/libraries"); } catch (e) { libraries = []; $("libs").innerHTML = `<span class="sub">${esc(serverName())} doesn't answer: ${esc(e.message)}</span>`; return; }
   drawLibraries();
 }
 const savedIds = () => libraries.filter((l) => l.on).map((l) => l.id);
 function drawLibraries() {
   const ticked = new Set(picked || savedIds());
-  $("libs").innerHTML = libraries.map((l) => `<button data-lib="${esc(l.id)}" aria-pressed="${ticked.has(l.id)}" title="${ticked.has(l.id) ? "Ticked: tap to leave it out" : "Left out: tap to tick it"}">${esc(l.name)}<span class="n">${l.songs ? `${l.done} of ${l.songs}` : ""}</span></button>`).join("") || `<span class="sub">Navidrome has no libraries.</span>`;
+  $("libs").innerHTML = libraries.map((l) => `<button data-lib="${esc(l.id)}" aria-pressed="${ticked.has(l.id)}" title="${ticked.has(l.id) ? "Ticked: tap to leave it out" : "Left out: tap to tick it"}">${esc(l.name)}<span class="n">${l.songs ? `${l.done} of ${l.songs}` : ""}</span></button>`).join("") || `<span class="sub">${esc(serverName())} has no music libraries.</span>`;
   const changed = picked && [...ticked].sort().join() !== savedIds().sort().join();
   $("libs-note").textContent = changed ? "Not started yet: press Start analysis" : "";
   const left = libraries.filter((l) => !l.on && l.songs);
@@ -692,7 +759,7 @@ $("start").addEventListener("click", async () => {
 });
 $("left-out").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-remove]");
-  if (!b || !confirm(`Remove the ${b.dataset.songs} songs of ${b.dataset.name} from Siansa Beats, with their beats and marks? Nothing changes on Navidrome. Siansa Dev then gets their beats from the Siansa Beats (dev) plugin's own reading, or none (its page's choice).`)) return;
+  if (!b || !confirm(`Remove the ${b.dataset.songs} songs of ${b.dataset.name} from Siansa Beats, with their beats and marks (a song another server has too stays)? Nothing changes on the server. Siansa Dev then gets their beats from the Siansa Beats (dev) plugin's own reading, or none (its page's choice).`)) return;
   b.disabled = true;
   try { await api(`api/libraries/${encodeURIComponent(b.dataset.remove)}/songs`, {method: "DELETE"}); banner(null); }
   catch (err) { banner(err.message); }
@@ -749,6 +816,7 @@ async function openSong(id, newSong, fromHistory) {
   $("d-facts").innerHTML = factCards(facts);
   $("d-sound").innerHTML = factCards(soundFacts(detail.measure));
   $("d-genres").innerHTML = factCards(genreFacts);
+  $("d-servers").innerHTML = factCards((detail.servers || []).map((x) => [x.name, x.item_id]));
   drawCurve(); drawMarks();
 }
 function closeSong() { $("detail").hidden = true; selected = null; detail = null; $("player").pause(); drawRows(); }
@@ -950,17 +1018,101 @@ $("all-again").addEventListener("click", async () => {
     await api("api/analyse-all", {method: "POST"}); refreshStatus();
   }
 });
+// The status is asked every 2 s while songs are being analysed, every 6 s when nothing is, and not at all while the
+// page is in a tab nobody's looking at (0.23.0: it asked every 2 s whatever happened, with the log and the genres).
+let statusTimer = null;
+const working = () => { const c = (status || {}).counts || {}; return !!(status && (status.current || status.next || status.regridding || c.queued || BUSY.some((k) => c[k]))); };
+async function statusLoop() {
+  clearTimeout(statusTimer);
+  if (!document.hidden) await refreshStatus();
+  statusTimer = setTimeout(statusLoop, working() ? 2000 : 6000);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { statusLoop(); if (currentView === "log") refreshLog(); } });
 refreshLibraries();
-refreshStatus();
-setInterval(refreshStatus, 2000);
+statusLoop();
+
+// ---- the music servers ----
+const KIND = {navidrome: "Navidrome", emby: "Emby", jellyfin: "Jellyfin"};
+let serversDrawn = "";
+function serverName() { return (status && status.server_name) || "The server"; }
+function drawServers(s) {
+  const list = s.servers || [];
+  document.querySelectorAll("[data-server-name]").forEach((el) => { el.textContent = s.server_name || "your music server"; });
+  const key = JSON.stringify([list, s.server]);
+  if (key === serversDrawn) return;
+  serversDrawn = key;
+  $("server-switch").hidden = list.length < 2;
+  $("server").innerHTML = list.map((x) => `<option value="${esc(x.id)}"${x.id === s.server ? " selected" : ""}>${esc(x.name)}${x.default ? " (default)" : ""}</option>`).join("");
+  $("servers").innerHTML = list.map((x) => `<li>
+    <div class="who"><b>${esc(x.name)}</b>${x.default ? '<span class="tag">default</span>' : ""}${x.env ? '<span class="tag plain" title="NAVIDROME_URL, NAVIDROME_USER and NAVIDROME_PASSWORD on the container">set on the container</span>' : ""}
+      <div class="sub">${esc(KIND[x.kind] || x.kind)} · ${esc(x.url)} · user ${esc(x.user)}</div>
+      <div class="sub">${num(x.songs)} songs here · ${x.libraries.length ? `${x.libraries.length} ${x.libraries.length === 1 ? "library" : "libraries"} chosen` : "no library chosen yet"}</div></div>
+    <div class="acts">
+      <button data-libraries="${esc(x.id)}">Libraries</button>
+      ${x.default ? "" : `<button data-default="${esc(x.id)}" title="Read first, and the one the app is answered for when it names none">Make default</button>`}
+      <button data-rename="${esc(x.id)}" data-name="${esc(x.name)}">Rename</button>
+      ${x.env ? "" : `<button data-remove-server="${esc(x.id)}" data-name="${esc(x.name)}" data-songs="${x.songs}">Remove</button>`}
+    </div></li>`).join("") || '<li class="sub">None yet: set NAVIDROME_URL, NAVIDROME_USER and NAVIDROME_PASSWORD on the container, or add one here.</li>';
+}
+function chooseServer(id) {
+  server = id || null;
+  try { if (server) localStorage.setItem("beats-server", server); else localStorage.removeItem("beats-server"); } catch (e) { /* private window */ }
+  // Everything on show is this server's now.
+  songs = []; libraries = []; picked = null; lastCounts = ""; songsAsked = 0; genresShownAt = 0; serversDrawn = "";
+  $("genre-top").innerHTML = ""; $("libs").innerHTML = '<span class="sub">Asking the server…</span>';
+  drawRows(); exportLinks();
+  statusLoop(); refreshLibraries(); refreshSongs(); refreshGenres(true);
+  if (currentView === "loudness") refreshLoudness();
+}
+$("server").addEventListener("change", (e) => { chooseServer(e.target.value); menu(false); });
+$("servers").addEventListener("click", async (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  try {
+    if (b.dataset.libraries) { chooseServer(b.dataset.libraries); location.hash = "#libraries"; return; }
+    if (b.dataset.default) await api(`api/servers/${encodeURIComponent(b.dataset.default)}/default`, {method: "POST"});
+    if (b.dataset.rename) {
+      const name = prompt("Its name", b.dataset.name);
+      if (!name || name.trim() === b.dataset.name) return;
+      await api(`api/servers/${encodeURIComponent(b.dataset.rename)}`, {method: "POST", body: JSON.stringify({name})});
+    }
+    if (b.dataset.removeServer) {
+      if (!confirm(`Remove ${b.dataset.name} from Siansa Beats? Songs only it has (of its ${b.dataset.songs}) go with their beats; songs another server has too stay. Nothing changes on the server.`)) return;
+      await api(`api/servers/${encodeURIComponent(b.dataset.removeServer)}`, {method: "DELETE"});
+      if (server === b.dataset.removeServer) { chooseServer(null); return; }
+    }
+    banner(null);
+  } catch (err) { banner(err.message); }
+  serversDrawn = ""; statusLoop();
+});
+const serverFields = () => ({kind: $("sf-kind").value, name: $("sf-name").value.trim(), url: $("sf-url").value.trim(), user: $("sf-user").value.trim(), password: $("sf-password").value});
+$("sf-test").addEventListener("click", async () => {
+  $("sf-note").textContent = "Asking…";
+  try {
+    const r = await api("api/servers/test", {method: "POST", body: JSON.stringify(serverFields())});
+    $("sf-note").textContent = `${r.type || "It"} ${r.version || ""} answers and takes the login: ${r.libraries.length ? r.libraries.map((l) => l.name).join(", ") : "no music libraries"}.`;
+  } catch (err) { $("sf-note").textContent = err.message; }
+});
+$("server-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("sf-add").disabled = true; $("sf-note").textContent = "Asking the server…";
+  try {
+    const added = await api("api/servers", {method: "POST", body: JSON.stringify(serverFields())});
+    $("server-form").reset(); $("sf-note").textContent = ""; $("server-add").open = false; banner(null);
+    // Next: which of its libraries to analyse.
+    chooseServer(added.id); location.hash = "#libraries";
+  } catch (err) { $("sf-note").textContent = err.message; }
+  finally { $("sf-add").disabled = false; }
+});
 
 // ---- the connections, in one button and its menu ----
 // [state, name, detail]: "ok", "wait" (works, but worth a look) or "bad" (doesn't work).
 function statusRows(s) {
   const cn = s.connections || {};
   const where = s.model_loaded ? (s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") + (s.float16 && s.device !== "cpu" ? ", half precision" : "") : (s.device === "cpu" ? "CPU" : "the GPU if there is one");
+  const servers = (s.servers || []).map((x) => ["ok", x.name, `${x.url} · ${num(x.songs)} songs${x.default && s.servers.length > 1 ? " · default" : ""}`]);
   return [
-    [s.navidrome ? "ok" : "bad", "Navidrome", s.navidrome ? s.navidrome : "Not set: NAVIDROME_URL, NAVIDROME_USER and NAVIDROME_PASSWORD"],
+    ...(servers.length ? servers : [["bad", "Music server", "None set: NAVIDROME_URL, NAVIDROME_USER and NAVIDROME_PASSWORD, or add one under Setup"]]),
     [cn.audiomuse ? "ok" : "wait", "AudioMuse-AI", cn.audiomuse ? "Asked for similar music, and the loudness its plugin measured" : "Not set (AUDIOMUSE_URL, AUDIOMUSE_TOKEN): no similar music"],
     [s.model_loaded ? (s.device_note ? "wait" : "ok") : "wait", `Beat This! ${s.model}`, s.model_loaded ? `On the ${where}` + (s.model_load_seconds ? `, loaded in ${fmt(s.model_load_seconds)} s` : "") + (s.device_note ? `. ${s.device_note}` : "") : `Loads with the first song, on ${where}`],
     [(s.styles || {}).available ? "ok" : "wait", "Style model", (s.styles || {}).available ? "Votes each song's genres from its sound" : "Not in this image: genres are the songs' tags"],
@@ -1009,12 +1161,13 @@ function showView(view, keepHash) {
   currentView = view;
   document.querySelectorAll("main > section[data-view]").forEach((sec) => sec.classList.toggle("on", sec.dataset.view === view));
   document.querySelectorAll(".nav [data-view]").forEach((a) => {
-    if (a.dataset.view === view) { a.setAttribute("aria-current", "page"); $("page-name").textContent = a.textContent.trim(); }
+    if (a.dataset.view === view) { a.setAttribute("aria-current", "page"); $("page-name").textContent = a.firstChild.textContent.trim(); }
     else a.removeAttribute("aria-current");
   });
   if (!keepHash && location.hash !== "#" + view) history.replaceState(null, "", "#" + view);
   document.title = `${document.querySelector(`.nav [data-view="${view}"]`)?.textContent.trim() || "Overview"} · Siansa Beats`;
   if (view === "genres") refreshGenres(true);
+  if (view === "log") refreshLog(true);
   if (view === "loudness") refreshLoudness();
   if (view === "similar") drawSimilarStatus();
 }
@@ -1037,9 +1190,11 @@ function genreChips(list) {
 let genresShownAt = 0;
 // The last answer, kept in this browser: the card shows it at once and is updated when the new one comes, so it's
 // never blank while Siansa Beats is busy (the owner's phone waited ~10 s, 10 Nov).
-function keptGenres() { try { return JSON.parse(localStorage.getItem("beats-genres") || "null"); } catch (e) { return null; } }
+const genresKey = () => "beats-genres" + (server ? "-" + server : "");
+function keptGenres() { try { return JSON.parse(localStorage.getItem(genresKey()) || "null"); } catch (e) { return null; } }
 async function refreshGenres(force) {
-  if (!force && Date.now() - genresShownAt < 30000) return;
+  // Asked when the Genres page (or the overview's tile) is on show, and at most every 30 s.
+  if (!force && (document.hidden || !["genres", "overview"].includes(currentView) || Date.now() - genresShownAt < 30000)) return;
   genresShownAt = Date.now();
   const kept = keptGenres();
   if (kept && !$("genre-top").innerHTML) drawGenres(kept, true);
@@ -1048,7 +1203,7 @@ async function refreshGenres(force) {
     if (!kept) $("genre-progress").textContent = "Siansa Beats isn't answering yet; trying again shortly.";
     return;
   }
-  try { localStorage.setItem("beats-genres", JSON.stringify(answer)); } catch (e) { /* private window: not kept */ }
+  try { localStorage.setItem(genresKey(), JSON.stringify(answer)); } catch (e) { /* private window: not kept */ }
   drawGenres(answer, false);
 }
 function drawGenres(answer, old) {
@@ -1097,7 +1252,8 @@ function drawLog() {
   box.innerHTML = shown.map((l) => `<span class="${esc(l.level)}">${new Date(l.at * 1000).toLocaleTimeString()} ${esc(l.level.toUpperCase().padEnd(5))} ${esc(l.where)}: ${esc(l.message)}</span>`).join("\n") || "Nothing yet.";
   if (atEnd) box.scrollTop = box.scrollHeight;
 }
-async function refreshLog() {
+async function refreshLog(force) {
+  if (!force && (document.hidden || currentView !== "log")) return;  // the lines since are asked for when it's opened
   let answer;
   try { answer = await api(`api/log?after=${logAfter}&limit=1000`); } catch (e) { return; }
   $("log-debug").checked = answer.level === "debug";
@@ -1110,14 +1266,13 @@ async function refreshLog() {
 $("log-debug").addEventListener("change", async (e) => {
   try { await api("api/log/level", {method: "POST", body: JSON.stringify({level: e.target.checked ? "debug" : "info"}),
     headers: {"Content-Type": "application/json"}}); } catch (err) { banner(err.message); }
-  refreshStatus(); refreshLog();
+  refreshStatus(); refreshLog(true);
 });
 document.querySelectorAll("[data-log]").forEach((b) => b.addEventListener("click", () => {
   logShow = b.dataset.log;
   document.querySelectorAll("[data-log]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
   drawLog();
 }));
-refreshLog();
 setInterval(refreshLog, 3000);
 
 
@@ -1142,7 +1297,6 @@ function drawTiles(s) {
 function drawSetup(s) {
   const yes = (v, on, off) => `<span class="${v ? "yes" : "no"}">${v ? on : off}</span>`, cn = s.connections || {};
   $("setup-connections").innerHTML = [
-    ["Navidrome", s.navidrome ? esc(s.navidrome) : yes(false, "", "not set: NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASSWORD")],
     ["AudioMuse-AI", yes(cn.audiomuse, "set: similar music, and the plugin's loudness", "not set (AUDIOMUSE_URL, AUDIOMUSE_TOKEN): no similar music")],
     ["Page password", yes(cn.password, "set", "none (BEATS_PASSWORD): anyone on the network sees this page")],
     ["Key for the app", yes(cn.api_key, "set (BEATS_API_KEY)", "none: the app uses the page password, or nothing")],
@@ -1206,7 +1360,7 @@ async function refreshLoudness() {
   $("l-keys").innerHTML = keys.map(([k, n]) => `<div class="hbar"><span class="name">${esc(k)}</span><span class="track"><span style="width:${100 * n / most}%"></span></span><span class="n">${num(n)}</span></div>`).join("") || '<p class="sub">No keys yet.</p>';
   $("l-failed").innerHTML = (r.failed_songs || []).map((f) => `<li><a href="#song=${encodeURIComponent(f.id)}">${esc(f.artist || "")} – ${esc(f.title || f.id)}</a><br><span class="sub">${esc(f.error)}</span></li>`).join("") || '<li class="sub">None.</li>';
 }
-setInterval(() => { if (currentView === "loudness") refreshLoudness(); }, 10000);
+setInterval(() => { if (currentView === "loudness" && !document.hidden) refreshLoudness(); }, 10000);
 
 // ---- genres as bars ----
 function drawGenreBars() {

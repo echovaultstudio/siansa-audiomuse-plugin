@@ -1,6 +1,10 @@
 """Navidrome (or any OpenSubsonic server), read only: its libraries, their songs and their audio.
 
 Logs in with a salted token (``t``/``s``), never sending the password itself. Nothing on the server is changed.
+
+Each song comes with its file's path, to find the same file on another server (:mod:`beats.match`): Navidrome's own
+API says where the file really is (Subsonic's ``path`` is made up from the tags unless the player is set to report
+real paths), so it's asked first, with the same user and password; Subsonic's path is the fallback.
 """
 
 import hashlib
@@ -20,16 +24,22 @@ CLIENT = "siansa-beats"
 API = "1.16.1"
 
 
-class SubsonicError(Exception):
-    """The server answered with an error, or couldn't be reached."""
+class ServerError(Exception):
+    """A music server answered with an error, or couldn't be reached."""
+
+
+SubsonicError = ServerError  # its name until 0.23, when Emby and Jellyfin came
 
 
 class Subsonic:
+    kind, label = "navidrome", "Navidrome"
+
     def __init__(self, url, user, password, timeout=30.0):
         self.url = (url or "").rstrip("/")
         self.user = user or ""
         self.password = password or ""
         self.timeout = timeout
+        self._native_token = None
 
     @property
     def configured(self):
@@ -89,7 +99,60 @@ class Subsonic:
             if len(found) < page:
                 break
             offset += page
-        return songs or self._songs_by_album(library)
+        songs = songs or self._songs_by_album(library)
+        try:  # where each file really is, for finding it on another server
+            real = self.real_paths(library)
+        except ServerError as e:
+            real = {}
+            _log.debug("Navidrome's own API didn't give the files' paths (Subsonic's are used): %s", e)
+        for song in songs:
+            if real.get(song["id"]):
+                song["path"] = real[song["id"]]
+        return songs
+
+    def _native(self, path, token=None, body=None):
+        """One call of Navidrome's own API (the one its web page uses), as JSON."""
+        request = urllib.request.Request(self.url + path, data=json.dumps(body).encode() if body is not None else None,
+                                         headers={"Content-Type": "application/json"})
+        if token:
+            request.add_header("X-ND-Authorization", "Bearer " + token)
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as e:
+            raise ServerError(f"{path.split('?')[0]}: HTTP {e.code}") from None
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            raise ServerError(f"{path.split('?')[0]}: {getattr(e, 'reason', e)}") from None
+
+    def real_paths(self, library=None, page=1000):
+        """``{song id: path}`` of ``library``'s songs (every library's with ``None``), as Navidrome's own API has them:
+        the file's real place, under its library's folder."""
+        if not self.configured:
+            raise ServerError("Navidrome isn't set up")
+        if not self._native_token:
+            answer = self._native("/auth/login", body={"username": self.user, "password": self.password})
+            self._native_token = (answer or {}).get("token")
+            if not self._native_token:
+                raise ServerError("/auth/login: no token")
+        out, start = {}, 0
+        while True:
+            query = {"_start": start, "_end": start + page, "_sort": "id", "_order": "ASC"}
+            if library is not None:
+                query["library_id"] = library
+            try:
+                rows = self._native("/api/song?" + urllib.parse.urlencode(query), self._native_token)
+            except ServerError:
+                self._native_token = None  # an old token: a new login next time
+                raise
+            if not isinstance(rows, list):
+                raise ServerError("/api/song: not a list")
+            for row in rows:
+                if row.get("id") and row.get("path"):
+                    root, path = str(row.get("libraryPath") or ""), str(row["path"])
+                    out[row["id"]] = path if path.startswith("/") or not root else root.rstrip("/") + "/" + path
+            if len(rows) < page:
+                return out
+            start += page
 
     def _songs_by_album(self, library, page=500):
         songs, offset = [], 0
@@ -105,6 +168,13 @@ class Subsonic:
 
     def song(self, song_id):
         return song_from(self._get("getSong", id=song_id).get("song") or {})
+
+    def audio(self, song_id, byte_range=None):
+        """The song as MP3 for the page's player (every browser plays it), opened: the caller reads and closes it."""
+        request = urllib.request.Request(self.address("stream", id=song_id, format="mp3", maxBitRate=320))
+        if byte_range:
+            request.add_header("Range", byte_range)
+        return urllib.request.urlopen(request, timeout=60)
 
     def download(self, song_id, path):
         """The song's original file, saved at ``path``. Returns its size in bytes."""
@@ -144,4 +214,5 @@ def song_from(e):
         "suffix": e.get("suffix") or "",
         "tag_bpm": float(e.get("bpm") or 0) or None,
         "genres": genres,
+        "path": e.get("path") or None,
     }

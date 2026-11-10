@@ -3,7 +3,7 @@
  "info": {
   "title": "Siansa Beats",
   "version": "1",
-  "description": "What the Siansa app asks Siansa Beats for. Within v1 fields are only added, never renamed or removed. Song ids are the music server's (Navidrome's). When BEATS_PASSWORD or BEATS_API_KEY is set, every path but /api/health needs Authorization: Bearer <key or password> (or Basic with user siansa and the password)."
+  "description": "What the Siansa app asks Siansa Beats for. Within v1 fields are only added, never renamed or removed. Song ids are the music server's own (Navidrome's, Emby's or Jellyfin's). With several servers (0.23.0), a request may name the one it means with ?server= (its id or name, from the capabilities' servers); without it the default server is meant. Ids asked about are understood from any server; ids answered are the named server's, and songs it doesn't have are left out. When BEATS_PASSWORD or BEATS_API_KEY is set, every path but /api/health needs Authorization: Bearer <key or password> (or Basic with user siansa and the password)."
  },
  "servers": [
   {
@@ -54,7 +54,12 @@
      "401": {
       "description": "The password or API key is needed"
      }
-    }
+    },
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/Server"
+     }
+    ]
    }
   },
   "/api/v1/profiles": {
@@ -69,6 +74,9 @@
       "schema": {
        "type": "string"
       }
+     },
+     {
+      "$ref": "#/components/parameters/Server"
      }
     ],
     "responses": {
@@ -115,7 +123,12 @@
      "401": {
       "description": "The password or API key is needed"
      }
-    }
+    },
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/Server"
+     }
+    ]
    }
   },
   "/api/v1/genre": {
@@ -140,6 +153,9 @@
        "maximum": 2000,
        "default": 300
       }
+     },
+     {
+      "$ref": "#/components/parameters/Server"
      }
     ],
     "responses": {
@@ -252,7 +268,12 @@
      "401": {
       "description": "The password or API key is needed"
      }
-    }
+    },
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/Server"
+     }
+    ]
    }
   },
   "/api/v1/openapi.json": {
@@ -532,6 +553,13 @@
         "type": "integer"
        }
       }
+     },
+     "servers": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/MusicServer"
+      },
+      "description": "Every music server here (0.23.0): the app names the one it plays from with ?server=<id>"
      }
     }
    },
@@ -568,7 +596,7 @@
      },
      "key": {
       "type": "string",
-      "description": "C, C#, D \u2026 B"
+      "description": "C, C#, D … B"
      },
      "scale": {
       "type": "string",
@@ -867,6 +895,51 @@
        }
       }
      }
+    }
+   },
+   "MusicServer": {
+    "type": "object",
+    "description": "A music server Siansa Beats reads (never its password)",
+    "properties": {
+     "id": {
+      "type": "string",
+      "description": "What ?server= takes"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "navidrome",
+       "emby",
+       "jellyfin"
+      ]
+     },
+     "name": {
+      "type": "string"
+     },
+     "url": {
+      "type": "string"
+     },
+     "user": {
+      "type": "string"
+     },
+     "default": {
+      "type": "boolean"
+     },
+     "songs": {
+      "type": "integer",
+      "description": "Its songs in Siansa Beats"
+     }
+    }
+   }
+  },
+  "parameters": {
+   "Server": {
+    "name": "server",
+    "in": "query",
+    "required": false,
+    "description": "The music server meant: its id or name from the capabilities' servers. The default server without it. An unknown one answers 400.",
+    "schema": {
+     "type": "string"
     }
    }
   }

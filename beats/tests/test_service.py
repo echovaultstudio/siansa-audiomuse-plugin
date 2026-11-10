@@ -284,7 +284,10 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(db.events(limit=1)[0]["message"], f"e{store.EVENTS_KEPT + 19}")
 
 
-class ServiceTest(Base):
+class Service(Base):
+    """A running service with the stand-ins, and how to ask it; the tests are :class:`ServiceTest`'s (and
+    test_servers.py's)."""
+
     def start(self, password="", style=None, api_key=""):
         env = {"NAVIDROME_URL": self.fake.url, "NAVIDROME_USER": USER, "NAVIDROME_PASSWORD": PASSWORD,
                "AUDIOMUSE_URL": self.fake.url, "AUDIOMUSE_TOKEN": TOKEN, "DATA_DIR": os.path.join(self.tmp, "data"),
@@ -330,6 +333,8 @@ class ServiceTest(Base):
             time.sleep(0.1)
         self.fail(f"not done: {self.call('/api/status')}")
 
+
+class ServiceTest(Service):
     def test_a_library_analysed_and_compared(self):
         self.start()
         self.assertEqual(self.call("/api/libraries", "POST", {"ids": ["1"]}), {"songs": 4, "queued": 4})

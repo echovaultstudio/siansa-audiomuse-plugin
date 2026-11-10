@@ -12,8 +12,10 @@ is empty. Their genres are then voted (:mod:`beats.genres`) from the sound and t
 Each song's loudness, fades (:mod:`beats.loudness`) and key (:mod:`beats.key`) are measured on the way too, from the
 file already downloaded; songs analysed before 0.20 get them from a fourth thread while the queue is empty.
 
-The songs come from the Navidrome libraries chosen on the page (all, or some: leaving out compilations, say). They're
-read again every few hours for new songs.
+The songs come from the libraries chosen on the page (all, or some: leaving out compilations, say) of each music
+server (:mod:`beats.servers`: Navidrome, Emby, Jellyfin, several users of one). They're read again every few hours for
+new songs, the default server first: a song another server has too is found by its file or tags and not analysed
+again (:mod:`beats.match`). A song is downloaded from the server it was first found on, or any other that has it.
 """
 
 import os
@@ -28,7 +30,8 @@ from . import grid
 from . import key as key_finder
 from . import log
 from . import loudness
-from .subsonic import SubsonicError
+from .servers import MAIN, folders_key
+from .subsonic import ServerError, SubsonicError
 
 _log = log.get("worker")
 
@@ -68,7 +71,8 @@ class Worker:
         self.genre_report = None  # beats.genres.agreement of the last vote
         self.on_voted = None  # called after every song is voted again (the server keeps its genre list ready)
         self._taxonomy = None
-        self.navidrome = navidrome
+        # The music servers (beats.servers.Servers), or one client for the container's own (the tests' way).
+        self.servers = navidrome if hasattr(navidrome, "client") else _OneServer(navidrome)
         self.measure = measure or features.measure
         self.tracker = tracker  # (samples) -> (beats, downbeats)
         self.decode = decode  # (path) -> samples
@@ -115,85 +119,145 @@ class Worker:
         self.store.event("Paused" if paused else "Carrying on")
         self.wake()
 
-    def chosen(self):
-        """The ids of the Navidrome libraries to analyse (kept across restarts): none until some are chosen."""
-        folders = self.store.setting("folders")
-        if folders is None and self.store.setting("library"):  # 0.9.0's "whole library": every library
-            folders = [f["id"] for f in self.navidrome.libraries()]
+    @property
+    def navidrome(self):
+        """The default server's client (its name from when Navidrome was the only one)."""
+        return self.servers.client()
+
+    def download(self, song_id, path):
+        """The song's original file from the server it came from, or another that has it: its size in bytes."""
+        problem = None
+        for server, item_id in self.store.where(song_id) or [(MAIN, song_id)]:
+            try:
+                return self.servers.client(server).download(item_id, path)
+            except ServerError as e:
+                problem = problem or e
+        raise problem
+
+    def chosen(self, server=None):
+        """The ids of ``server``'s libraries to analyse (kept across restarts): none until some are chosen."""
+        server = server or self.servers.default_id
+        folders = self.store.setting(folders_key(server))
+        if folders is None and server == MAIN and self.store.setting("library"):  # 0.9.0's "whole library": every library
+            folders = [f["id"] for f in self.servers.client(MAIN).libraries()]
             self.store.set_setting("folders", folders)
         return [str(f) for f in folders or []]
 
-    def libraries(self):
-        """Navidrome's libraries, each with whether it's chosen and how many of its songs are here and analysed."""
-        chosen, counts = set(self.chosen()), self.store.folder_counts()
+    def libraries(self, server=None):
+        """A server's libraries, each with whether it's chosen and how many of its songs are here and analysed."""
+        server = server or self.servers.default_id
+        chosen, counts = set(self.chosen(server)), self.store.folder_counts(server)
         return [{**f, "on": f["id"] in chosen, **counts.get(f["id"], {"songs": 0, "done": 0})}
-                for f in self.navidrome.libraries()]
+                for f in self.servers.client(server).libraries()]
 
-    def choose(self, ids):
-        """Analyses the libraries ``ids`` (and no others): reads them now; the others' songs not yet analysed leave
-        the queue (those done stay). Returns ``{"songs", "queued"}``."""
-        known = {f["id"]: f["name"] for f in self.navidrome.libraries()}
+    def _label(self, server):
+        """The server's name in the activity list, when there are several: " on Emby"."""
+        found = self.servers.get(server)
+        return f" on {found['name']}" if found and self.servers.several() else ""
+
+    def choose(self, ids, server=None):
+        """Analyses ``server``'s libraries ``ids`` (and none of its others): reads them now; the others' songs not yet
+        analysed leave the queue (those done stay). Returns ``{"songs", "queued"}``."""
+        server = server or self.servers.default_id
+        client = self.servers.client(server)
+        known = {f["id"]: f["name"] for f in client.libraries()}
         ids = [str(i) for i in dict.fromkeys(ids)]
         unknown = [i for i in ids if i not in known]
         if unknown:
-            raise ValueError(f"No library {', '.join(unknown)} on Navidrome (its libraries: "
+            raise ValueError(f"No library {', '.join(unknown)} on {client.label} (its libraries: "
                              f"{', '.join(f'{k} {v}' for k, v in known.items()) or 'none'})")
-        self.store.set_setting("folders", ids)
-        taken = self.store.unqueue_except(ids)
+        self.store.set_setting(folders_key(server), ids)
+        taken = self.store.unqueue_except(ids, server)
         names = ", ".join(known[i] for i in ids) or "none"
-        self.store.event(f"Libraries to analyse: {names}" + (f" ({taken} songs of the others left the queue)" if taken else ""))
-        return self.read_libraries() if ids else {"songs": 0, "queued": 0}
+        self.store.event(f"Libraries to analyse{self._label(server)}: {names}"
+                         + (f" ({taken} songs of the others left the queue)" if taken else ""))
+        if not ids:
+            return {"songs": 0, "queued": 0}
+        # Another server's songs are looked for among the default's, which were read before their files' paths were
+        # kept (0.23): the default is read again first, then this one.
+        return self.read_libraries(report=server) if server != self.servers.default_id else self.read_libraries(server)
 
-    def remove_library(self, folder):
-        """Forgets the songs of a library that's left out (its results too): the number removed."""
+    def remove_library(self, folder, server=None):
+        """Forgets the songs of a library that's left out (its results too, unless another server has the song): the
+        number removed."""
+        server = server or self.servers.default_id
         folder = str(folder)
-        if folder in self.chosen():
+        if folder in self.chosen(server):
             raise ValueError("That library is being analysed: leave it out (and start the analysis) first")
-        names = {f["id"]: f["name"] for f in self.navidrome.libraries()}
-        removed = self.store.remove_folder(folder)
-        self.store.event(f"Removed the {removed} songs of the library {names.get(folder, folder)} (and what was found "
-                         "in them)")
+        names = {f["id"]: f["name"] for f in self.servers.client(server).libraries()}
+        removed = self.store.remove_folder(folder, server)
+        self.store.event(f"Removed the {removed} songs of the library {names.get(folder, folder)}{self._label(server)} "
+                         "(and what was found in them)")
         return removed
 
-    def read_libraries(self):
-        """Reads every song of the chosen libraries from Navidrome, adds them and queues the new ones. Returns
-        ``{"songs", "queued"}``."""
+    def read_libraries(self, only=None, report=None):
+        """Reads every song of the chosen libraries (of every server, the default first; of server ``only`` when
+        given), adds them and queues the new ones. Returns ``{"songs", "queued"}``: of all that was read, or of server
+        ``report`` alone."""
         with self.scan_lock:
             started = time.monotonic()
-            names = {f["id"]: f["name"] for f in self.navidrome.libraries()}
             total, queued = 0, []
-            for folder in self.chosen():
+            default = self.servers.default_id
+            order = sorted((s["id"] for s in self.servers.all()), key=lambda i: i != default)
+            for server in order:
+                if only is not None and server != only:
+                    continue
+                client = self.servers.client(server)
+                chosen = self.chosen(server)
+                if not chosen:
+                    continue
                 try:
-                    songs = [s for s in self.navidrome.all_songs(folder) if s.get("id")]
-                except SubsonicError as e:
-                    self.store.event(f"Couldn't read the library {names.get(folder, folder)}: {e}", "error")
-                    raise
-                added = self.store.add_songs(songs, folder)
-                total += len(songs)
-                queued += added
-                self.store.event(f"Library {names.get(folder, folder)}: {len(songs)} songs, {len(added)} new in the queue")
+                    names = {f["id"]: f["name"] for f in client.libraries()}
+                except ServerError as e:
+                    self.store.event(f"Couldn't read the libraries{self._label(server)}: {e}", "error")
+                    if only is not None or len(order) == 1:
+                        raise
+                    continue
+                for folder in chosen:
+                    try:
+                        songs = [s for s in client.all_songs(folder) if s.get("id")]
+                    except ServerError as e:
+                        self.store.event(f"Couldn't read the library {names.get(folder, folder)}{self._label(server)}: {e}", "error")
+                        if only is not None or len(order) == 1:
+                            raise
+                        continue
+                    result = self.store.link_songs(server, folder, songs, self.servers.twins(server))
+                    if report is None or report == server:
+                        total += len(songs)
+                        queued += result["queued"]
+                    found = result["matched"]
+                    here = sum(found.values())
+                    self.store.event(
+                        f"Library {names.get(folder, folder)}{self._label(server)}: {len(songs)} songs, "
+                        f"{len(result['queued'])} new in the queue"
+                        + (f", {here} already analysed from another server ("
+                           + ", ".join(f"{n} by {'their file' if how == 'path' else 'their tags' if how == 'tags' else 'title and album' if how == 'title' else 'the same id'}"
+                                       for how, n in sorted(found.items())) + ")" if here else ""))
             self.store.set_setting("library_read_at", time.time())
             self.store.event(f"Read the libraries in {time.monotonic() - started:.0f}s")
             self.revote()  # their tags may have changed
             self.wake()
             return {"songs": total, "queued": len(queued)}
 
+    def _any_chosen(self):
+        return any(self.store.setting(folders_key(s["id"])) for s in self.servers.all()) or bool(self.chosen(MAIN))
+
     def _library_loop(self):
-        """Reads the chosen libraries again every few hours, for songs added to Navidrome since."""
+        """Reads the chosen libraries again every few hours, for songs added to the servers since."""
         while not self._stop.wait(60.0):
             try:
-                if not self.chosen():
+                if not self._any_chosen():
                     continue
-            except SubsonicError:
+            except ServerError:
                 continue
             last = self.store.setting("library_read_at", 0) or 0
             if time.time() - last < LIBRARY_RESCAN_SECONDS:
                 continue
             try:
                 self.read_libraries()
-            except Exception as e:  # Navidrome away: try again next time
+            except Exception as e:  # the server away: try again next time
                 self.store.set_setting("library_read_at", time.time())
-                if isinstance(e, SubsonicError):
+                if isinstance(e, ServerError):
                     _log.warning("Couldn't read the libraries (tried again in %d hours): %s", LIBRARY_RESCAN_SECONDS // 3600, e)
                 else:
                     _log.exception("Reading the libraries went wrong")
@@ -223,8 +287,7 @@ class Worker:
                              f"{time.monotonic() - started:.0f}s")
         # Songs that failed on a bug since fixed (0.15.0: short tracks off mixed CDs, bars past the measured sound)
         # are analysed again, once: a song that fails again keeps its new error.
-        retry = [r["id"] for r in self.store.overview(None, None, "failed", None)
-                 if any(sign in (r.get("error") or "") for sign in FIXED_ERRORS)]
+        retry = [r["id"] for r in self.store.failed() if any(sign in (r.get("error") or "") for sign in FIXED_ERRORS)]
         for song_id in retry:
             self.store.queue(song_id, force=True)
         if retry:
@@ -329,7 +392,7 @@ class Worker:
             fd, path = tempfile.mkstemp(prefix="style-", dir=self.data_dir)
             os.close(fd)
             started = time.monotonic()
-            self.navidrome.download(song_id, path)
+            self.download(song_id, path)
             downloaded = time.monotonic() - started
             samples = self.decode(path, STYLE_RATE) if self.decode_takes_rate else self.decode(path)
             decoded = time.monotonic() - started - downloaded
@@ -403,7 +466,7 @@ class Worker:
         try:
             fd, path = tempfile.mkstemp(prefix="loudness-", dir=self.data_dir)
             os.close(fd)
-            self.navidrome.download(song_id, path)
+            self.download(song_id, path)
             samples = self.decode(path)
             self._measure(song, path, samples, self.decode_rate)
         except Exception as e:  # Navidrome away, a file ffmpeg can't read: kept, so it isn't tried again and again
@@ -464,13 +527,13 @@ class Worker:
                                    "since": time.time()}
         path = None
         label = f"{song['artist']} – {song['title']} ({song_id})"
-        _log.debug("%s: preparing (%s, %.0fs on Navidrome)", label, song.get("suffix") or "?", song.get("duration") or 0)
+        _log.debug("%s: preparing (%s, %.0fs long)", label, song.get("suffix") or "?", song.get("duration") or 0)
         try:
             self._step(holder, song_id, "downloading")
             started = time.monotonic()
             fd, path = tempfile.mkstemp(prefix="song-", dir=self.data_dir)
             os.close(fd)
-            size = self.navidrome.download(song_id, path)
+            size = self.download(song_id, path)
             download_seconds = time.monotonic() - started
             _log.debug("%s: downloaded %.1f MB in %.2fs", label, size / 1e6, download_seconds)
 
@@ -561,3 +624,26 @@ def _merge(matches):
         styles |= s
         found |= g
     return styles, found
+
+
+class _OneServer:
+    """The music servers when there's only a client for one (the tests make a Worker with one): the container's own."""
+
+    def __init__(self, client):
+        self._client = client
+        self.default_id = MAIN
+
+    def client(self, server_id=None):
+        return self._client
+
+    def all(self):
+        return [{"id": MAIN, "kind": "navidrome", "name": "Navidrome"}]
+
+    def get(self, server_id):
+        return self.all()[0] if server_id == MAIN else None
+
+    def several(self):
+        return False
+
+    def twins(self, server_id):
+        return []
