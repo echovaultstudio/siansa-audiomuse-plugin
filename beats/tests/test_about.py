@@ -81,6 +81,11 @@ class AboutTest(unittest.TestCase):
         # One title out of reach and none of the others it: tried again, not "nothing".
         self.assertIs(about.lookup("Mercury", lambda t: about.FAILED if t == "Mercury (music)" else PAGES.get(t)), about.FAILED)
 
+    def test_nothing_found_before_022_is_looked_up_again(self):
+        store = Store(os.path.join(tempfile.mkdtemp(), "b.db"))
+        store.set_setting(about.key_of("House"), {"at": 1_000_000.0})  # 0.19–0.21: maybe a timeout
+        self.assertEqual("House music", about.about(store, "House", PAGES.get, lambda: 1_000_060.0)["title"])
+
     def test_the_keeper_fetches_every_genre_and_answers_at_once(self):
         store = Store(os.path.join(tempfile.mkdtemp(), "b.db"))
         asked = []

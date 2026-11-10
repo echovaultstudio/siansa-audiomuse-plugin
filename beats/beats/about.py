@@ -25,6 +25,7 @@ SUMMARY = "https://en.wikipedia.org/api/rest_v1/page/summary/{}?redirect=true"
 AGAIN_MISSING = 7 * 24 * 3600
 AGAIN_FOUND = 90 * 24 * 3600
 AGAIN_FAILED = 30 * 60
+RECORD = 2  # records before it kept a timeout as "nothing on it": those are looked up again
 FAILED = object()  # fetch's answer when Wikipedia couldn't be asked (not "no such article")
 MOST_CHARS = 700  # the page shows a few lines: the opening, cut at a sentence
 MUSIC = re.compile(r"\b(genre|music|musical|subgenre|style|sound|dance|song|bands?|rock|jazz|electronic)\b", re.I)
@@ -106,6 +107,8 @@ def fresh(kept, now):
     """Whether a kept record still stands, or it's time to look the genre up again."""
     if not kept:
         return False
+    if not kept.get("summary") and kept.get("v") != RECORD:
+        return False  # "nothing on it" from before 0.22 may have been Wikipedia not answering
     again = AGAIN_FOUND if kept.get("summary") else AGAIN_FAILED if kept.get("failed") else AGAIN_MISSING
     return now - kept.get("at", 0) < again
 
@@ -117,10 +120,10 @@ def about(store, name, get=fetch, now=time.time):
         return kept if kept.get("summary") else None
     found = lookup(name, get)
     if found is FAILED:
-        store.set_setting(key_of(name), {"failed": True, "at": now()})
+        store.set_setting(key_of(name), {"failed": True, "at": now(), "v": RECORD})
         _log.info("About %s: Wikipedia couldn't be asked; again in %d min", name, AGAIN_FAILED // 60)
         return None
-    record = dict(found or {}, at=now())
+    record = dict(found or {}, at=now(), v=RECORD)
     store.set_setting(key_of(name), record)
     if found:
         _log.info("About %s: %s (%s)", name, found["title"], found["source"])
