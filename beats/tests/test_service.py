@@ -282,8 +282,6 @@ class ServiceTest(Base):
         self.tracker = FakeTracker()
         self.app = App(Config(env), tracker=self.tracker, decode=fake_decode, style=style or FakeStyle(
             os.path.join(self.tmp, "models"), on=False))
-        for kept in (self.app.kept_genres, self.app.kept_style_counts):  # always fresh, so the tests see each change
-            kept.seconds, kept.background = -1, False
         self.server = make_server(self.app, host="127.0.0.1", port=0)
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
         import threading
@@ -760,27 +758,39 @@ if __name__ == "__main__":
 
 
 class KeptTest(unittest.TestCase):
-    """Answers kept ready: an old one is handed out at once while it's worked out again (the page never waits)."""
+    """Answers kept ready: fresh when the data changed and the database is quiet, the last one at once when it's busy."""
 
-    def test_an_old_answer_comes_at_once_and_is_worked_out_again(self):
+    def test_a_change_is_seen_when_the_database_answers_in_time(self):
+        from beats.server import Kept
+
+        state = {"changes": 0, "value": 1}
+        kept = Kept(lambda: state["value"], seconds=300, changes=lambda: state["changes"])
+        self.assertEqual(kept.get(), 1)
+        state["value"] = 2
+        self.assertEqual(kept.get(), 1)  # nothing changed: the kept one, without asking
+        state["changes"] += 1
+        self.assertEqual(kept.get(), 2)
+
+    def test_a_busy_database_doesnt_hold_the_answer_up(self):
         import threading
 
         from beats.server import Kept
 
-        calls, gate = [], threading.Event()
+        gate = threading.Event()
+        state = {"changes": 0, "calls": 0}
 
         def work():
-            calls.append(1)
-            if len(calls) > 1:
-                gate.wait(5)  # a busy database
-            return len(calls)
+            state["calls"] += 1
+            if state["calls"] > 1:
+                gate.wait(5)  # a database busy with analysis
+            return state["calls"]
 
-        kept = Kept(work, seconds=0)
+        kept = Kept(work, seconds=300, changes=lambda: state["changes"])
         self.assertEqual(kept.get(), 1)
-        time.sleep(0.01)
+        state["changes"] += 1
         started = time.monotonic()
-        self.assertEqual(kept.get(), 1)  # old, handed out at once while the new one is worked out
-        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertEqual(kept.get(), 1)  # the last one, after at most Kept.WAIT
+        self.assertLess(time.monotonic() - started, Kept.WAIT + 0.4)
         gate.set()
         end = time.monotonic() + 5
         while kept.value != 2 and time.monotonic() < end:

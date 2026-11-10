@@ -97,47 +97,52 @@ class Config:
 
 
 class Kept:
-    """A value worked out now and then and handed out at once: the first ask works it out; one older than ``seconds``
-    is handed out as it is while a thread works it out again, so a page or the app never waits on a busy database
-    (the owner's phone waited ~10 s for the genres while songs were being analysed, 10 Nov)."""
+    """A value worked out now and then and handed out at once (the owner's phone waited ~10 s for the genres while songs
+    were being analysed, 10 Nov). The first ask works it out. Once ``changes()`` says the data changed, or it's older
+    than ``seconds``, it's worked out again in a thread, waiting at most ``WAIT`` for it: a quiet database answers in
+    time, so the answer is fresh; a busy one doesn't hold the page up, and the last answer is handed out meanwhile."""
 
-    def __init__(self, work, seconds):
-        self.work, self.seconds = work, seconds
-        self.value, self.at = None, 0.0
-        self.background = True  # False (the tests): an old answer is worked out again before it's handed out
+    WAIT = 0.5
+
+    def __init__(self, work, seconds, changes=lambda: 0):
+        self.work, self.seconds, self.changes = work, seconds, changes
+        self.value, self.at, self.seen = None, 0.0, None
         self._lock = threading.Lock()
+        self._done = threading.Event()
         self._refreshing = False
 
     def get(self):
         if self.value is None:
             with self._lock:
                 if self.value is None:
-                    self.value, self.at = self.work(), time.monotonic()
+                    seen = self.changes()
+                    self.value, self.at, self.seen = self.work(), time.monotonic(), seen
             return self.value
-        if time.monotonic() - self.at > self.seconds:
-            self.refresh(wait=not self.background)
+        if self.changes() != self.seen or time.monotonic() - self.at > self.seconds:
+            self.refresh(wait=self.WAIT)
         return self.value
 
-    def refresh(self, wait=False):
-        """Works it out again, in a thread (or now, with ``wait``); one at a time."""
+    def refresh(self, wait=0.0):
+        """Works it out again in a thread (one at a time), waiting at most ``wait`` seconds for it."""
         with self._lock:
-            if self._refreshing:
-                return
-            self._refreshing = True
+            if not self._refreshing:
+                self._refreshing = True
+                self._done.clear()
 
-        def run():
-            try:
-                value = self.work()
-                self.value, self.at = value, time.monotonic()
-            except Exception:
-                _log.exception("Working out a kept answer went wrong; the last one stays")
-            finally:
-                self._refreshing = False
+                def run():
+                    try:
+                        seen = self.changes()
+                        value = self.work()
+                        self.value, self.at, self.seen = value, time.monotonic(), seen
+                    except Exception:
+                        _log.exception("Working out a kept answer went wrong; the last one stays")
+                    finally:
+                        self._refreshing = False
+                        self._done.set()
 
+                threading.Thread(target=run, name="beats-kept", daemon=True).start()
         if wait:
-            run()
-        else:
-            threading.Thread(target=run, name="beats-kept", daemon=True).start()
+            self._done.wait(wait)
 
 
 class App:
@@ -159,8 +164,9 @@ class App:
         self.started = time.time()
         # Answers the page and the app ask for often, kept ready: the genre list changes only when songs are voted,
         # the styles' counts with each song heard (the page asks every 2 s).
-        self.kept_genres = Kept(self._genre_list, 60)
-        self.kept_style_counts = Kept(self.store.style_counts, 30)
+        changes = lambda: self.store.genre_changes  # noqa: E731
+        self.kept_genres = Kept(self._genre_list, 60, changes)
+        self.kept_style_counts = Kept(self.store.style_counts, 30, changes)  # its total follows songs added, too
         self.worker.on_voted = lambda: self.kept_genres.refresh()
 
     # ---- what the API returns ----
