@@ -96,6 +96,50 @@ class Config:
         self.unused = [k for k in ("AUDIOMUSE_URL", "AUDIOMUSE_TOKEN") if env.get(k)]
 
 
+class Kept:
+    """A value worked out now and then and handed out at once: the first ask works it out; one older than ``seconds``
+    is handed out as it is while a thread works it out again, so a page or the app never waits on a busy database
+    (the owner's phone waited ~10 s for the genres while songs were being analysed, 10 Nov)."""
+
+    def __init__(self, work, seconds):
+        self.work, self.seconds = work, seconds
+        self.value, self.at = None, 0.0
+        self.background = True  # False (the tests): an old answer is worked out again before it's handed out
+        self._lock = threading.Lock()
+        self._refreshing = False
+
+    def get(self):
+        if self.value is None:
+            with self._lock:
+                if self.value is None:
+                    self.value, self.at = self.work(), time.monotonic()
+            return self.value
+        if time.monotonic() - self.at > self.seconds:
+            self.refresh(wait=not self.background)
+        return self.value
+
+    def refresh(self, wait=False):
+        """Works it out again, in a thread (or now, with ``wait``); one at a time."""
+        with self._lock:
+            if self._refreshing:
+                return
+            self._refreshing = True
+
+        def run():
+            try:
+                value = self.work()
+                self.value, self.at = value, time.monotonic()
+            except Exception:
+                _log.exception("Working out a kept answer went wrong; the last one stays")
+            finally:
+                self._refreshing = False
+
+        if wait:
+            run()
+        else:
+            threading.Thread(target=run, name="beats-kept", daemon=True).start()
+
+
 class App:
     """Everything the handler needs, so the tests can make one with stand-ins."""
 
@@ -113,6 +157,11 @@ class App:
         self.worker = Worker(self.store, self.navidrome, self.tracker, decode or analyser.decode,
                              config.data_dir, config.model, measure, self.style)
         self.started = time.time()
+        # Answers the page and the app ask for often, kept ready: the genre list changes only when songs are voted,
+        # the styles' counts with each song heard (the page asks every 2 s).
+        self.kept_genres = Kept(self._genre_list, 60)
+        self.kept_style_counts = Kept(self.store.style_counts, 30)
+        self.worker.on_voted = lambda: self.kept_genres.refresh()
 
     # ---- what the API returns ----
 
@@ -250,7 +299,7 @@ class App:
         out = {"available": available, "loaded": bool(available and style.loaded),
                "device": getattr(style, "backend", None), "problem": getattr(style, "problem", None)}
         if available:
-            out.update(self.store.style_counts())
+            out.update(self.kept_style_counts.get())
             out["agreement"] = worker.genre_report
             styling = dict(worker.styling) if worker.styling else None
             if styling:
@@ -259,7 +308,11 @@ class App:
         return out
 
     def genre_list(self):
-        """Every style with songs voted into it, most first: ``[{"label", "genre", "style", "songs"}]``."""
+        """Every style with songs voted into it, most first, kept ready (:class:`Kept`): ``[{"label", "genre", "style",
+        "songs", "name"}]``."""
+        return self.kept_genres.get()
+
+    def _genre_list(self):
         counts = self.store.vote_counts(genres_module.RADIO_MIN)
         ranked = sorted(counts.items(), key=lambda p: -p[1])
         named = {}
@@ -377,8 +430,20 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # http.server's own complaints (a malformed request); requests: log_request
         _log.debug("%s: %s", self.client_address[0], log.redact(fmt % args if args else fmt))
 
+    SLOW = 1.0  # seconds: a request slower than this is logged as a warning, with where the time went
+
+    def parse_request(self):
+        self._started = time.monotonic()
+        return super().parse_request()
+
     def log_request(self, code="-", size="-"):
         path = self.path.split("?", 1)[0]
+        took = time.monotonic() - getattr(self, "_started", time.monotonic())
+        if took > self.SLOW:
+            worker = self.app.worker if self.app else None
+            busy = (worker.current or {}).get("step") if worker else None
+            _log.warning("%s %s took %.1fs%s", self.command, log.redact(path), took,
+                         f" (busy {busy})" if busy else "")
         code = int(getattr(code, "value", code)) if str(getattr(code, "value", code)).isdigit() else 0
         if code >= 500:
             _log.warning("%s %s -> %s", self.command, log.redact(self.path), code)

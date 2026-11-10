@@ -282,6 +282,8 @@ class ServiceTest(Base):
         self.tracker = FakeTracker()
         self.app = App(Config(env), tracker=self.tracker, decode=fake_decode, style=style or FakeStyle(
             os.path.join(self.tmp, "models"), on=False))
+        for kept in (self.app.kept_genres, self.app.kept_style_counts):  # always fresh, so the tests see each change
+            kept.seconds, kept.background = -1, False
         self.server = make_server(self.app, host="127.0.0.1", port=0)
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
         import threading
@@ -755,3 +757,32 @@ class ServiceTest(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KeptTest(unittest.TestCase):
+    """Answers kept ready: an old one is handed out at once while it's worked out again (the page never waits)."""
+
+    def test_an_old_answer_comes_at_once_and_is_worked_out_again(self):
+        import threading
+
+        from beats.server import Kept
+
+        calls, gate = [], threading.Event()
+
+        def work():
+            calls.append(1)
+            if len(calls) > 1:
+                gate.wait(5)  # a busy database
+            return len(calls)
+
+        kept = Kept(work, seconds=0)
+        self.assertEqual(kept.get(), 1)
+        time.sleep(0.01)
+        started = time.monotonic()
+        self.assertEqual(kept.get(), 1)  # old, handed out at once while the new one is worked out
+        self.assertLess(time.monotonic() - started, 0.5)
+        gate.set()
+        end = time.monotonic() + 5
+        while kept.value != 2 and time.monotonic() < end:
+            time.sleep(0.01)
+        self.assertEqual(kept.value, 2)

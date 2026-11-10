@@ -43,6 +43,7 @@ class Worker:
         self.style = style  # beats.style.StyleModel, or None
         self.styling = None  # {"id", "title", "artist", "since"}: a song analysed before, getting its styles
         self.genre_report = None  # beats.genres.agreement of the last vote
+        self.on_voted = None  # called after every song is voted again (the server keeps its genre list ready)
         self._taxonomy = None
         self.navidrome = navidrome
         self.measure = measure or features.measure
@@ -268,6 +269,8 @@ class Worker:
         self.store.replace_votes(votes)
         if song_ids is None:
             self.genre_report = genres.agreement(report)
+            if self.on_voted:  # every song voted again: the kept genre list is worked out again now
+                self.on_voted()
         return len(votes)
 
     def _style_loop(self):

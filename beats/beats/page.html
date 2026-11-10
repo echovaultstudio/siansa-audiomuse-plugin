@@ -223,7 +223,7 @@ label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0
       <h2>Genres</h2>
       <p class="sub">Each song's genres by vote: what its sound says (Essentia's Discogs-EffNet, 400 Discogs styles)
         first, its own tags second. Siansa's genre radios play by this vote, and by the tags without Siansa Beats.</p>
-      <div id="genre-progress" class="sub"></div>
+      <div id="genre-progress" class="sub">Loading the genres…</div>
       <div id="genre-agree"></div>
       <div id="genre-top" class="chips"></div>
     </section>
@@ -728,11 +728,23 @@ function genreChips(list) {
   return tags.map((g) => `<span class="chip" title="from its tags">${esc(g.label)}</span>`).join("") || '<span class="sub">–</span>';
 }
 let genresShownAt = 0;
+// The last answer, kept in this browser: the card shows it at once and is updated when the new one comes, so it's
+// never blank while Siansa Beats is busy (the owner's phone waited ~10 s, 10 Nov).
+function keptGenres() { try { return JSON.parse(localStorage.getItem("beats-genres") || "null"); } catch (e) { return null; } }
 async function refreshGenres(force) {
   if (!force && Date.now() - genresShownAt < 30000) return;
   genresShownAt = Date.now();
+  const kept = keptGenres();
+  if (kept && !$("genre-top").innerHTML) drawGenres(kept, true);
   let answer;
-  try { answer = await api("api/genres"); } catch (e) { return; }
+  try { answer = await api("api/genres"); } catch (e) {
+    if (!kept) $("genre-progress").textContent = "Siansa Beats isn't answering yet; trying again shortly.";
+    return;
+  }
+  try { localStorage.setItem("beats-genres", JSON.stringify(answer)); } catch (e) { /* private window: not kept */ }
+  drawGenres(answer, false);
+}
+function drawGenres(answer, old) {
   const st = answer.styles || {};
   if (!st.available) {
     $("genre-progress").textContent = "No style model in this image: genres are the songs' tags.";
@@ -743,7 +755,7 @@ async function refreshGenres(force) {
   $("genre-progress").textContent = `${st.done || 0} of ${st.total || 0} songs heard` +
     (st.failed ? ` · ${st.failed} couldn't be` : "") +
     (st.current ? ` · now ${st.current.artist} – ${st.current.title}` : left > 0 ? " · the rest while the queue is empty" : "") +
-    (st.device ? ` · on the ${st.device}` : "");
+    (st.device ? ` · on the ${st.device}` : "") + (old ? " · updating…" : "");
   const a = st.agreement;
   $("genre-agree").innerHTML = a && a.songs ? `<p>Over ${a.songs} songs with tags: the sound's genre matches the tags' on
     <strong>${Math.round((a.family || 0) * 100)} %</strong>; the tagged style is in the sound's top 3 on
