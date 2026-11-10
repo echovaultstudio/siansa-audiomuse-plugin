@@ -404,9 +404,16 @@ class App:
         return names
 
     def genre_about(self, name):
-        """``{"name", "about", "pending"}``: a kept description at once; a new one waits a few seconds at most."""
+        """``{"name", "about", "pending", "status"}``: a kept description at once; a new one waits a few seconds at most.
+        ``status``: "found", "pending" (still being looked up), "missing" (Wikipedia has nothing on it) or "failed"
+        (Wikipedia couldn't be asked: tried again in half an hour)."""
         found, pending = self.about.answer(name)
-        return {"name": name, "about": found, "pending": pending}
+        from . import about as about_module
+
+        kept = self.store.setting(about_module.key_of(name)) or {}
+        # Why there's none, for the app's log: Wikipedia has nothing on it, or couldn't be asked (tried again soon).
+        status = "found" if found else "pending" if pending else "failed" if kept.get("failed") else "missing"
+        return {"name": name, "about": found, "pending": pending, "status": status}
 
     def genre_list(self):
         """Every style with songs voted into it, most first, kept ready (:class:`Kept`): ``[{"label", "genre", "style",

@@ -536,6 +536,11 @@ class ServiceTest(Base):
                                                     "source": "Wikipedia", "at": time.time()})
         about = self.call("/api/v1/genre/about?name=Trance")  # kept: not looked up on Wikipedia in the tests
         self.assertEqual((about["name"], about["about"]["summary"]), ("Trance", "Fast."))
+        self.assertEqual(about["status"], "found")
+        self.app.store.set_setting("about:polka", {"at": time.time(), "v": 2})  # Wikipedia has nothing on it
+        self.assertEqual(self.call("/api/v1/genre/about?name=Polka")["status"], "missing")
+        self.app.store.set_setting("about:surf", {"failed": True, "at": time.time(), "v": 2})
+        self.assertEqual(self.call("/api/v1/genre/about?name=Surf")["status"], "failed")
         made = self.call("/api/v1/bad-blends", "POST", {"from_id": "t140", "to_id": "t122", "technique": "echo out"})
         self.assertEqual(self.call("/api/bad-blends")[0]["id"], made["id"])
         with self.assertRaises(urllib.error.HTTPError) as caught:
