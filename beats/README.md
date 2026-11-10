@@ -81,6 +81,8 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
 ## Use it
 
 The page shows one page at a time, picked from the menu on the left (on a phone, behind the ☰ button), in three groups.
+The button at the top right says whether everything works (a green dot, "All working"); tap it for each connection
+(Navidrome, AudioMuse-AI), the models and how the app connects.
 Each page has its own address (`#songs`, `#loudness`…), so Back and bookmarks work:
 
 | Group | Page | What's on it |
