@@ -171,7 +171,7 @@
   },
   "/api/v1/genre/about": {
    "get": {
-    "summary": "A short description of a genre, from Wikipedia",
+    "summary": "A short description of a genre, from Wikipedia (kept; a new one is looked up and may say pending)",
     "parameters": [
      {
       "name": "name",
@@ -800,6 +800,10 @@
         "type": "string"
        }
       }
+     },
+     "pending": {
+      "type": "boolean",
+      "description": "Still being looked up: ask again in a few seconds"
      }
     }
    },

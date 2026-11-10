@@ -56,19 +56,31 @@ main { padding: 20px 24px 64px; min-width: 0; outline: none; }
 main > section { display: none; }
 main > section.on { display: grid; gap: 16px; }
 .page-head { margin-bottom: 4px; } .page-head .sub { max-width: 72ch; }
+.menu-button, .page-name, .scrim, .nav-close { display: none; }
 @media (max-width: 900px) {
-  /* On a phone the menu is a row of tabs under the header, scrolled sideways. */
+  /* On a phone the menu is a drawer behind a menu button (the owner, 10 Nov: the row of tabs was hard to use). */
   .shell { grid-template-columns: minmax(0, 1fr); }
-  .nav { position: sticky; top: var(--header-h); z-index: 5; height: auto; display: flex; gap: 4px; overflow-x: auto; padding: 8px 12px;
-    border-right: 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--page) 92%, transparent); backdrop-filter: blur(10px); scrollbar-width: none; }
-  .nav::-webkit-scrollbar { display: none; }
-  .nav .group { display: contents; }
-  .nav .group-name { display: none; }
-  .nav a { flex: 0 0 auto; padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 999px; white-space: nowrap; }
-  .nav a[aria-current=page] { background: var(--amber); border-color: var(--amber); color: var(--on-amber); }
+  .bar { flex-wrap: nowrap; gap: 10px; padding: 0 8px 0 4px; }
+  .menu-button { display: inline-flex; border: 0; padding: 10px; font-size: 1.35rem; line-height: 1; border-radius: 12px; }
+  .page-name { display: block; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .page-name::before { content: "·"; margin-right: 8px; color: var(--faint); }
+  h1 { white-space: nowrap; }
+  .nav { position: fixed; z-index: 30; top: 0; left: 0; bottom: 0; width: min(300px, 84vw); height: auto; padding: 12px 12px 24px;
+    background: var(--raised); border-right: 1px solid var(--line); transform: translateX(-102%); transition: transform 0.22s ease;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.45); }
+  body.menu-open .nav { transform: none; }
+  .nav-close { display: flex; justify-content: space-between; align-items: center; padding: 4px 4px 14px 10px; }
+  .nav-close button { border: 0; font-size: 1.2rem; padding: 8px 12px; }
+  .nav a { padding: 12px 12px; font-size: 1rem; }
+  .scrim { display: block; position: fixed; inset: 0; z-index: 25; background: rgba(0, 0, 0, 0.5); opacity: 0; pointer-events: none; transition: opacity 0.22s ease; }
+  body.menu-open .scrim { opacity: 1; pointer-events: auto; }
+  body.menu-open { overflow: hidden; }
   main { padding: 16px 16px 48px; }
-  .pills { margin-left: 0; }
+  .pills { margin-left: auto; flex-wrap: nowrap; overflow: hidden; }
+  .nav-pills { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 10px 0; border-top: 1px solid var(--line); margin-top: 6px; }
 }
+@media (min-width: 901px) { .nav-pills { display: none; } }
+@media (prefers-reduced-motion: reduce) { .nav, .scrim { transition: none; } }
 
 .card { background: var(--raised); border: 1px solid var(--line); border-radius: 14px; padding: 16px; min-width: 0; }
 .card-head { display: flex; align-items: baseline; gap: 12px; } .card-head .more { margin-left: auto; font-size: 0.88rem; }
@@ -193,12 +205,16 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 <a class="skip" href="#content">Skip to the page</a>
 <header>
   <div class="bar">
+    <button class="menu-button" id="menu" aria-label="Menu" aria-controls="nav" aria-expanded="false">☰</button>
     <h1><a href="#overview" id="home" title="Overview"><b>Siansa</b> Beats</a></h1>
+    <span class="page-name" id="page-name"></span>
     <div class="pills" id="pills" aria-live="polite"></div>
   </div>
 </header>
 <div class="shell">
-  <nav class="nav" aria-label="Pages">
+  <div class="scrim" id="scrim"></div>
+  <nav class="nav" id="nav" aria-label="Pages">
+    <div class="nav-close"><h1><b>Siansa</b> Beats</h1><button id="menu-close" aria-label="Close the menu">✕</button></div>
     <div class="group">
       <div class="group-name">Analysis</div>
       <a href="#overview" data-view="overview">Overview</a>
@@ -218,6 +234,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       <a href="#log" data-view="log">Log</a>
       <a href="#setup" data-view="setup">Setup</a>
     </div>
+    <div class="nav-pills" id="nav-pills"></div>
   </nav>
 
   <main id="content" tabindex="-1">
@@ -375,6 +392,13 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         <div id="genre-agree"></div>
       </div>
       <div class="card">
+        <div class="card-head"><h3>Descriptions</h3><button class="more" id="about-fetch">Fetch all now</button></div>
+        <p class="sub">Each genre's page in the app opens with a short description from Wikipedia. They're fetched in the
+          background and kept (a found one for 90 days, a genre Wikipedia has nothing on for a week, one it couldn't be
+          asked about for half an hour), so the app shows them at once.</p>
+        <div class="counts top-gap" id="about-counts"></div>
+      </div>
+      <div class="card">
         <h3>Genres by songs</h3>
         <div class="tools"><input type="search" class="grow" id="genre-find" placeholder="Find a genre" aria-label="Find a genre"></div>
         <div id="genre-top" class="hbars"></div>
@@ -461,6 +485,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v)) ? "–" : Number(v).toFixed(d);
+const num = (n) => (n ?? 0).toLocaleString();
 const pct = (v) => (v === null || v === undefined) ? "–" : Math.round(v * 100) + "%";
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const BUSY = ["downloading", "decoding", "ready", "analysing"];
@@ -518,6 +543,7 @@ async function refreshStatus() {
     s.log_level === "debug" ? `<span class="pill wait" title="The log says every step: turn it off under Log when you're done">Debug details on</span>` : "",
     `<span class="pill">v${esc(s.version)}</span>`,
   ].filter(Boolean).join("");
+  $("nav-pills").innerHTML = $("pills").innerHTML;
   if (s.current) {
     $("now-what").textContent = `${s.current.artist} – ${s.current.title}`;
     $("now-step").textContent = `${s.current.step} for ${fmt(s.current.for_seconds)} s` +
@@ -915,6 +941,18 @@ refreshLibraries();
 refreshStatus();
 setInterval(refreshStatus, 2000);
 
+// ---- the menu on a phone ----
+function menu(open) {
+  document.body.classList.toggle("menu-open", open);
+  $("menu").setAttribute("aria-expanded", String(open));
+  if (open) $("nav").querySelector('[aria-current="page"]')?.focus();
+}
+$("menu").addEventListener("click", () => menu(true));
+$("menu-close").addEventListener("click", () => menu(false));
+$("scrim").addEventListener("click", () => menu(false));
+$("nav").addEventListener("click", (e) => { if (e.target.closest("a")) menu(false); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.body.classList.contains("menu-open")) { menu(false); $("menu").focus(); } });
+
 // ---- pages ----
 // One page at a time, chosen in the side menu (tabs on a phone) and kept in the address (#songs, #song=<id>), so Back
 // and a bookmark work.
@@ -925,7 +963,7 @@ function showView(view, keepHash) {
   currentView = view;
   document.querySelectorAll("main > section[data-view]").forEach((sec) => sec.classList.toggle("on", sec.dataset.view === view));
   document.querySelectorAll(".nav [data-view]").forEach((a) => {
-    if (a.dataset.view === view) { a.setAttribute("aria-current", "page"); a.scrollIntoView({block: "nearest", inline: "nearest"}); }
+    if (a.dataset.view === view) { a.setAttribute("aria-current", "page"); $("page-name").textContent = a.textContent.trim(); }
     else a.removeAttribute("aria-current");
   });
   if (!keepHash && location.hash !== "#" + view) history.replaceState(null, "", "#" + view);
@@ -983,6 +1021,16 @@ function drawGenres(answer, old) {
   $("genre-agree").innerHTML = a && a.songs ? `<p>Over ${a.songs} songs with tags: the sound's genre matches the tags' on
     <strong>${Math.round((a.family || 0) * 100)} %</strong>; the tagged style is in the sound's top 3 on
     <strong>${a.style == null ? "–" : Math.round(a.style * 100) + " %"}</strong>.</p>` : "";
+  const ab = answer.about;
+  if (ab) {
+    $("about-counts").innerHTML = `<span><b>${num(ab.found)}</b> of ${num(ab.genres)} genres have one</span>` +
+      (ab.missing ? `<span><b>${num(ab.missing)}</b> Wikipedia has nothing on</span>` : "") +
+      (ab.failed ? `<span><b>${num(ab.failed)}</b> to try again (Wikipedia didn't answer)</span>` : "") +
+      (ab.round ? `<span>fetching now: ${num(ab.round.done)} of ${num(ab.round.total)}${ab.round.current ? ` · ${esc(ab.round.current)}` : ""}</span>` :
+        ab.waiting ? `<span><b>${num(ab.waiting)}</b> to fetch</span>` : "") +
+      (ab.last_round ? `<span>last round ${new Date(ab.last_round.at * 1000).toLocaleString()}</span>` : "");
+    $("about-fetch").disabled = !!ab.round;
+  }
   const list = answer.genres || [];
   // A style name under two genres (Electro: Electronic and Hip Hop) says which, for both.
   const genresOf = {};
@@ -1028,7 +1076,6 @@ setInterval(refreshLog, 3000);
 
 
 // ---- overview ----
-const num = (n) => (n ?? 0).toLocaleString();
 function tile(href, k, v, of, s, meter) {
   const bar = meter ? `<div class="meter">${meter.map(([cls, n]) => `<span class="${cls}" style="width:${of ? 100 * n / of : 0}%"></span>`).join("")}</div>` : "";
   return `<a class="tile" href="${href}"><div class="k">${esc(k)}</div><div class="v">${v}${of != null ? ` <small>of ${num(of)}</small>` : ""}</div><div class="s">${s}</div>${bar}</a>`;
@@ -1123,6 +1170,12 @@ function drawGenreBars() {
   $("genre-top").innerHTML = shown.map((g) => `<div class="hbar" title="${esc(g.label)}"><span class="name">${esc(g.name)}</span><span class="track"><span style="width:${100 * g.songs / most}%"></span></span><span class="n">${num(g.songs)}</span></div>`).join("") || '<p class="sub">No genres yet.</p>';
 }
 $("genre-find").addEventListener("input", drawGenreBars);
+
+$("about-fetch").addEventListener("click", async () => {
+  $("about-fetch").disabled = true;
+  try { await api("api/genres/about/fetch", {method: "POST"}); } catch (e) { banner(e.message); }
+  setTimeout(() => refreshGenres(true), 1500);
+});
 
 // ---- similar music ----
 function drawSimilarStatus() {
