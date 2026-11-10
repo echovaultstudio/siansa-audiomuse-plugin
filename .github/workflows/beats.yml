@@ -28,18 +28,24 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: numpy, for the style model's input (the rest is plain Python)
+      # -P (not -I) below: the tests need the user site, where numpy and scipy are installed.
+      - name: numpy, for the style model's input and the loudness
         run: python3 -m pip install --break-system-packages --user numpy==1.26.4 || python3 -m pip install --user numpy
       - name: Tempo, bars and the comparison
-        run: cd beats && python3 -I tests/test_grid.py
+        run: cd beats && python3 -P tests/test_grid.py
       - name: Bars, phrases, where the beat locks in, and each end's sound
-        run: cd beats && python3 -I tests/test_phrase.py && python3 -I tests/test_ends.py && python3 -I tests/test_genres.py && python3 -I tests/test_about.py
+        run: cd beats && python3 -P tests/test_phrase.py && python3 -P tests/test_ends.py && python3 -P tests/test_genres.py && python3 -P tests/test_about.py
+      - name: Loudness, fades and key (checked against scipy's filters and ffmpeg's own loudness meter)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+          python3 -m pip install --break-system-packages --user scipy || python3 -m pip install --user scipy
+          cd beats && python3 -P tests/test_loudness.py
       - name: CPU or GPU
-        run: cd beats && python3 -I tests/test_analyser.py
+        run: cd beats && python3 -P tests/test_analyser.py
       - name: The service against a fake Navidrome and AudioMuse-AI
-        run: cd beats && python3 -I tests/test_service.py
+        run: cd beats && python3 -P tests/test_service.py
       - name: The page's script parses
-        run: cd beats && python3 -I tests/test_page_script.py
+        run: cd beats && python3 -P tests/test_page_script.py
 
   image:
     # Two images: the CPU one (latest) and the cuda one for an NVIDIA GPU (cuda). GitHub's runners have no GPU, so the

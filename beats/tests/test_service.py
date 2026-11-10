@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from beats import __version__, grid  # noqa: E402
 from beats.server import App, Config, make_server  # noqa: E402
 from beats.store import Store  # noqa: E402
+from beats.worker import Worker  # noqa: E402
 from beats.subsonic import Subsonic, SubsonicError  # noqa: E402
 from fakes import PASSWORD, TOKEN, USER, FakeServer  # noqa: E402
 
@@ -76,6 +77,15 @@ def fake_decode(path):
     if song_id == "bad":
         raise RuntimeError("ffmpeg couldn't read the song: invalid data")
     return Samples(song_id, song["duration"])
+
+
+def fake_sound(path, samples, rate):
+    """Stands in for the loudness, fades and key measure: the stand-in files aren't audio."""
+    song_id = samples.song_id
+    if song_id == "t96w":
+        raise RuntimeError("ffmpeg couldn't read the song for its loudness: nope")
+    return {"ref_lufs": -9.5 if song_id == "t140" else -12.25, "start_ramp": "xAAA", "end_ramp": "xAAB",
+            "duration_ms": int(samples.seconds * 1000), "key": "A", "scale": "minor", "key_strength": 0.8}
 
 
 class FakeTracker:
@@ -275,13 +285,13 @@ class StoreTest(unittest.TestCase):
 
 
 class ServiceTest(Base):
-    def start(self, password="", style=None):
+    def start(self, password="", style=None, api_key=""):
         env = {"NAVIDROME_URL": self.fake.url, "NAVIDROME_USER": USER, "NAVIDROME_PASSWORD": PASSWORD,
                "AUDIOMUSE_URL": self.fake.url, "AUDIOMUSE_TOKEN": TOKEN, "DATA_DIR": os.path.join(self.tmp, "data"),
-               "BEATS_PASSWORD": password, "PORT": "0"}
+               "BEATS_PASSWORD": password, "BEATS_API_KEY": api_key, "PORT": "0"}
         self.tracker = FakeTracker()
         self.app = App(Config(env), tracker=self.tracker, decode=fake_decode, style=style or FakeStyle(
-            os.path.join(self.tmp, "models"), on=False))
+            os.path.join(self.tmp, "models"), on=False), sound=fake_sound)
         self.server = make_server(self.app, host="127.0.0.1", port=0)
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
         import threading
@@ -457,6 +467,133 @@ class ServiceTest(Base):
             self.call("/api/grids?ids=" + ",".join(str(n) for n in range(2001)))
         self.assertEqual(caught.exception.code, 400)
 
+    def test_v1_capabilities_and_profiles_for_the_app(self):
+        self.start()
+        empty = self.call("/api/v1/capabilities")
+        self.assertEqual((empty["service"], empty["api"]), ("siansa-beats", 1))
+        self.assertEqual(empty["features"]["beat_grids"]["songs"], 0)
+        self.assertTrue(empty["features"]["similar"]["available"])  # AUDIOMUSE_URL is set
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        caps = self.call("/api/v1/capabilities")
+        self.assertEqual(caps["songs"]["analysed"], 3)
+        self.assertEqual(caps["features"]["beat_grids"]["songs"], 3)
+        self.assertEqual(caps["features"]["loudness"]["songs"], 2)  # t96w couldn't be measured
+        self.assertEqual(caps["limits"]["profile_ids"], 500)
+
+        answer = self.call("/api/v1/profiles?ids=t140,nope,t96w,t140")
+        self.assertEqual(answer["schema_version"], 1)
+        self.assertEqual(answer["pending"], ["nope"])
+        profiles = {p["track_id"]: p for p in answer["profiles"]}
+        self.assertEqual(set(profiles), {"t140", "t96w"})
+        p = profiles["t140"]
+        self.assertEqual((p["ref_lufs"], p["start_ramp"], p["end_ramp"], p["duration_ms"]), (-9.5, "xAAA", "xAAB", 60000))
+        self.assertEqual((p["key"], p["scale"], p["beat_grid"]), ("A", "minor", "siansa_beats"))
+        self.assertAlmostEqual(p["intro_bpm"], 140.0, delta=0.1)
+        self.assertNotIn("beats_until_ms", p)  # nulls are left out, as the plugin did
+        grid_only = profiles["t96w"]  # its beats, without loudness: the app levels it by its tags
+        self.assertEqual((grid_only["ref_lufs"], grid_only["start_ramp"], grid_only["duration_ms"]), (None, "", 0))
+        self.assertNotIn("key", grid_only)
+        self.assertEqual(grid_only["beat_grid"], "siansa_beats")
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.call("/api/v1/profiles?ids=" + ",".join(str(n) for n in range(501)))
+        self.assertEqual(caught.exception.code, 400)
+        self.assertEqual(self.call("/api/status")["loudness"]["measured"], 2)
+
+    def test_v1_genres_about_and_bad_blends(self):
+        self.start(style=FakeStyle(os.path.join(self.tmp, "models"), on=True))
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.assertEqual(self.call("/api/v1/genres")["genres"], self.call("/api/genres")["genres"])
+        listed = {g["style"]: g for g in self.call("/api/v1/genres")["genres"]}
+        self.assertEqual(listed["Trance"]["libraries"], {"1": listed["Trance"]["songs"]})  # each library's songs
+        trance = self.call("/api/v1/genre?name=Trance")
+        self.assertEqual((set(trance["ids"]), trance["styles"]), ({"t140", "t96w"}, ["Electronic---Trance"]))
+        for path in ("/api/v1/genre", "/api/v1/genre/about", "/api/v1/genre?name=Trance&limit=x"):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.call(path)
+            self.assertEqual(caught.exception.code, 400, path)
+        self.app.store.set_setting("about:trance", {"summary": "Fast.", "url": "https://en.wikipedia.org/wiki/Trance_music",
+                                                    "source": "Wikipedia", "at": time.time()})
+        about = self.call("/api/v1/genre/about?name=Trance")  # kept: not looked up on Wikipedia in the tests
+        self.assertEqual((about["name"], about["about"]["summary"]), ("Trance", "Fast."))
+        made = self.call("/api/v1/bad-blends", "POST", {"from_id": "t140", "to_id": "t122", "technique": "echo out"})
+        self.assertEqual(self.call("/api/bad-blends")[0]["id"], made["id"])
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.call("/api/v1/bad-blends", "POST", {"from_id": "t140"})
+        self.assertEqual(caught.exception.code, 400)
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.call("/api/v1/nothing")
+        self.assertEqual(caught.exception.code, 404)
+        spec = self.call("/api/v1/openapi.json")
+        self.assertEqual(spec["info"]["version"], "1")
+        for path in ("/api/v1/capabilities", "/api/v1/profiles", "/api/v1/genres", "/api/v1/genre", "/api/v1/genre/about",
+                     "/api/v1/bad-blends"):
+            self.assertIn(path, spec["paths"])
+
+    def test_v1_similar_albums_and_artists_asked_of_audiomuse(self):
+        self.start()
+        self.assertTrue(self.call("/api/v1/capabilities")["features"]["similar"]["available"])
+        albums = self.call("/api/v1/similar/albums?track_id=t140")
+        self.assertEqual((albums["source"], albums["similar"][0]["album"], albums["similar"][0]["track_id"]), ("audiomuse", "Deep", "t122"))
+        self.assertEqual(albums["similar"][0]["asked"], {"track_id": "t140"})
+        artists = self.call("/api/v1/similar/artists?artist=Ecsape&server=Home")
+        self.assertEqual(artists["similar"][0]["artist"], "House Test")
+        self.assertEqual(artists["similar"][0]["asked"], {"artist": "Ecsape", "server": "Home"})
+        for path, code in (("/api/v1/similar/albums", 400), ("/api/v1/similar/albums?artist=x", 400),
+                           ("/api/v1/similar/albums?track_id=nope", 502)):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.call(path)
+            self.assertEqual(caught.exception.code, code, path)
+
+    def test_loudness_already_measured_by_the_plugin_is_taken_not_measured_again(self):
+        Worker.MEASURE_IDLE_SECONDS = 0.5
+        self.addCleanup(setattr, Worker, "MEASURE_IDLE_SECONDS", 60.0)
+        self.start()
+        for song in self.fake.songs:  # the plugin measured t122 (the fake AudioMuse-AI hands its "plugin" profile on)
+            if song["id"] == "t122":
+                song["plugin"] = {"ref_lufs": -7.5, "start_ramp": "xAAA", "end_ramp": "xAAA", "duration_ms": 50000,
+                                  "key": "F#", "scale": "major"}
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        with self.app.store.lock, self.app.store.db:  # as 0.19 left them: beats, no loudness
+            self.app.store.db.execute("DELETE FROM measures")
+        measured = []
+        self.app.worker.sound = lambda path, samples, rate: measured.append(samples.song_id) or fake_sound(path, samples, rate)
+        end = time.time() + 20
+        while time.time() < end and self.app.store.measure_counts(1)["waiting"]:
+            time.sleep(0.2)
+        p = self.call("/api/v1/profiles?ids=t122")["profiles"][0]
+        self.assertEqual((p["ref_lufs"], p["key"], p["scale"]), (-7.5, "F#", "major"))
+        self.assertNotIn("t122", measured)  # taken from the plugin, not downloaded again
+        self.assertIn("t140", measured)  # the plugin's t140 has no loudness: measured here
+        self.assertIn("taken from AudioMuse-AI", " ".join(e["message"] for e in self.app.store.events()))
+
+    def test_an_api_key_for_the_app(self):
+        self.start(password="s3cret", api_key="k3y")
+        self.assertEqual(self.call("/api/v1/capabilities", password="", headers={"Authorization": "Bearer k3y"})["api"], 1)
+        self.assertEqual(self.call("/api/v1/capabilities", password="", headers={"Authorization": "Bearer s3cret"})["api"], 1)
+        self.assertEqual(self.call("/api/v1/capabilities")["api"], 1)  # Basic with the password
+        for header in ({}, {"Authorization": "Bearer wrong"}, {"Authorization": "Basic " + base64.b64encode(b"siansa:k3y").decode()}):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.call("/api/v1/profiles?ids=t140", password="", headers=header)
+            self.assertEqual(caught.exception.code, 401, header)
+        self.assertEqual(self.call("/api/health", password="")["status"], "ok")
+
+    def test_songs_analysed_before_get_their_loudness_while_the_queue_is_empty(self):
+        Worker.MEASURE_IDLE_SECONDS = 0.5
+        self.addCleanup(setattr, Worker, "MEASURE_IDLE_SECONDS", 60.0)
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        with self.app.store.lock, self.app.store.db:  # as 0.19 left them: beats, no loudness
+            self.app.store.db.execute("DELETE FROM measures")
+        end = time.time() + 20
+        while time.time() < end and self.app.store.measure_counts(1)["waiting"]:
+            time.sleep(0.2)
+        self.assertEqual(self.app.store.measure_counts(1), {"measured": 2, "failed": 1, "waiting": 0})
+        self.assertEqual(self.call("/api/v1/profiles?ids=t122")["profiles"][0]["ref_lufs"], -12.25)
+
     def test_the_log_shows_every_step_with_debug_details_and_no_secrets(self):
         from beats import log
 
@@ -521,7 +658,7 @@ class ServiceTest(Base):
         self.assertEqual(self.call("/api/genre?name=Opera")["ids"], [])
         listed = self.call("/api/genres")
         self.assertEqual(listed["genres"][0], {"label": "Electronic---Trance", "genre": "Electronic", "style": "Trance",
-                                               "songs": 2, "name": "Trance"})
+                                               "songs": 2, "name": "Trance", "libraries": {"1": 2}})
         status = self.call("/api/status")["styles"]
         self.assertTrue(status["available"])
         self.assertEqual(status["done"], 3)
@@ -561,7 +698,8 @@ class ServiceTest(Base):
         self.assertEqual(report["versions"]["siansa_beats"], __version__)
         self.assertEqual(report["setup"]["navidrome_password"], "set")
         self.assertEqual(report["setup"]["page_password"], "set")
-        self.assertEqual(report["setup"]["unused"], ["AUDIOMUSE_URL", "AUDIOMUSE_TOKEN"])
+        self.assertEqual(report["setup"]["audiomuse_token"], "set")
+        self.assertNotIn(f'"{TOKEN}"', body.decode())
         self.assertIn("beats-model", report["threads"])
         self.assertEqual(report["status"]["counts"]["failed"], 1)
         self.assertNotIn("pagepass", body.decode())

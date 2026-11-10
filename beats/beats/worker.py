@@ -9,6 +9,9 @@ Each song's style comes from its sound too (:mod:`beats.style`, when the image h
 the samples already decoded, for songs analysed before from a third thread that downloads them again while the queue
 is empty. Their genres are then voted (:mod:`beats.genres`) from the sound and their tags.
 
+Each song's loudness, fades (:mod:`beats.loudness`) and key (:mod:`beats.key`) are measured on the way too, from the
+file already downloaded; songs analysed before 0.20 get them from a fourth thread while the queue is empty.
+
 The songs come from the Navidrome libraries chosen on the page (all, or some: leaving out compilations, say). They're
 read again every few hours for new songs.
 """
@@ -22,7 +25,9 @@ import time
 from . import features
 from . import genres
 from . import grid
+from . import key as key_finder
 from . import log
+from . import loudness
 from .subsonic import SubsonicError
 
 _log = log.get("worker")
@@ -37,9 +42,27 @@ STYLE_RATE = 16_000  # the style model's sample rate: songs analysed before are 
 STYLE_REPORT_EVERY = 500  # the agreement with the tags is worked out again after this many more songs
 
 
+def measure_sound(path, samples, rate):
+    """A song's loudness and fades from its file (a second decode, at 48 kHz) and its key from the samples already
+    decoded: :func:`beats.loudness.profile`'s fields with :func:`beats.key.find`'s."""
+    values = loudness.measure_file(path)
+    try:
+        values.update(key_finder.find(samples, rate) or {})
+    except Exception as e:  # the loudness still counts without the key
+        _log.debug("Finding the key failed: %s", e)
+    return values
+
+
 class Worker:
-    def __init__(self, store, navidrome, tracker, decode, data_dir, model_name, measure=None, style=None):
+    MEASURE_IDLE_SECONDS = 60.0  # between looks for songs to measure, when there were none
+    def __init__(self, store, navidrome, tracker, decode, data_dir, model_name, measure=None, style=None,
+                 sound=None):
         self.store = store
+        self.sound = sound or measure_sound  # (path, samples, rate) -> loudness, fades and key
+        self.measuring = None  # {"id", "title", "artist", "since"}: a song analysed before, getting its loudness
+        # (ids) -> {id: loudness, fades, key}: what AudioMuse-AI's Siansa plugin already measured, taken instead of
+        # downloading the song again (AudioMuse.profiles); None without AudioMuse-AI.
+        self.importer = None
         self.style = style  # beats.style.StyleModel, or None
         self.styling = None  # {"id", "title", "artist", "since"}: a song analysed before, getting its styles
         self.genre_report = None  # beats.genres.agreement of the last vote
@@ -74,7 +97,8 @@ class Worker:
     def start(self):
         if not self._threads:
             for target, name in ((self._prepare_loop, "beats-prepare"), (self._run, "beats-model"),
-                                 (self._library_loop, "beats-library"), (self._style_loop, "beats-style")):
+                                 (self._library_loop, "beats-library"), (self._style_loop, "beats-style"),
+                                 (self._measure_loop, "beats-loudness")):
                 thread = threading.Thread(target=target, name=name, daemon=True)
                 thread.start()
                 self._threads.append(thread)
@@ -321,6 +345,75 @@ class Worker:
             if path and os.path.exists(path):
                 os.remove(path)
 
+    def _measure(self, song, path, samples, rate):
+        """Measures the song's loudness, fades and key, keeping why when it can't: never stops its analysis."""
+        started = time.monotonic()
+        try:
+            values = self.sound(path, samples, rate)
+            self.store.save_measure(song["id"], values, loudness.VERSION)
+            _log.debug("%s – %s: %s LUFS, key %s %s, in %.2fs", song.get("artist"), song.get("title"),
+                       values.get("ref_lufs"), values.get("key"), values.get("scale"), time.monotonic() - started)
+        except Exception as e:
+            _log.warning("%s – %s: couldn't measure its loudness: %s", song.get("artist"), song.get("title"), e)
+            self.store.save_measure(song["id"], {}, loudness.VERSION, str(e) or e.__class__.__name__)
+
+    def _measure_loop(self):
+        """Measures the loudness, fades and key of songs analysed before 0.20, one at a time, while nothing else is
+        being done (new songs get them on the way)."""
+        while not self._stop.wait(3.0):
+            if self.paused or self.current or self.preparing or self.styling or self.store.counts().get("queued"):
+                continue
+            waiting = self.store.without_measure(loudness.VERSION, limit=20)
+            if not waiting:
+                self._stop.wait(self.MEASURE_IDLE_SECONDS)
+                continue
+            if self.importer and self._import(waiting):
+                continue  # some came from the plugin: look again for the rest
+            for song_id in waiting:
+                if self._stop.is_set() or self.paused or self.styling or self.store.counts().get("queued"):
+                    break
+                self._measure_again(song_id)
+
+    def _import(self, waiting):
+        """Takes what the Siansa plugin on AudioMuse-AI already measured of the songs left to measure, a few hundred at a
+        time, each asked for once: True while there were songs to ask about. Then the rest are measured here."""
+        tried = self.__dict__.setdefault("_import_tried", set())
+        ids = [i for i in self.store.without_measure(loudness.VERSION, limit=len(tried) + 500) if i not in tried][:500]
+        if not ids:
+            self.importer = None
+            _log.info("Took what AudioMuse-AI's Siansa plugin had measured; the rest are measured here")
+            return False
+        tried.update(ids)
+        try:
+            found = self.importer(ids)
+        except Exception as e:  # AudioMuse-AI away: the songs are measured here instead
+            _log.info("Couldn't take loudness from AudioMuse-AI's Siansa plugin: %s", e)
+            self.importer = None
+            return False
+        for song_id, values in found.items():
+            self.store.save_measure(song_id, values, loudness.VERSION)
+        if found:
+            self.store.event(f"Loudness, fades and key of {len(found)} songs taken from AudioMuse-AI's Siansa plugin")
+        return True
+
+    def _measure_again(self, song_id):
+        song = self.store.song(song_id) or {"id": song_id, "title": song_id, "artist": ""}
+        self.measuring = {"id": song_id, "title": song.get("title"), "artist": song.get("artist"), "since": time.time()}
+        path = None
+        try:
+            fd, path = tempfile.mkstemp(prefix="loudness-", dir=self.data_dir)
+            os.close(fd)
+            self.navidrome.download(song_id, path)
+            samples = self.decode(path)
+            self._measure(song, path, samples, self.decode_rate)
+        except Exception as e:  # Navidrome away, a file ffmpeg can't read: kept, so it isn't tried again and again
+            _log.warning("%s – %s: couldn't get its sound for its loudness: %s", song.get("artist"), song.get("title"), e)
+            self.store.save_measure(song_id, {}, loudness.VERSION, str(e) or e.__class__.__name__)
+        finally:
+            self.measuring = None
+            if path and os.path.exists(path):
+                os.remove(path)
+
     # ---- the work ----
 
     def _prepare_loop(self):
@@ -388,6 +481,7 @@ class Worker:
             _log.debug("%s: decoded %d samples (%.1fs of sound) in %.2fs", label, len(samples), len(samples) / 22_050.0,
                        decode_seconds)
             self._style(song, samples, self.decode_rate)
+            self._measure(song, path, samples, self.decode_rate)
             try:
                 levels = self.measure(samples)
                 _log.debug("%s: measured the sound", label)

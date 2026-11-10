@@ -14,6 +14,10 @@ services:
       BEATS_MODEL: ${BEATS_MODEL:-final0}
       BEATS_THREADS: ${BEATS_THREADS:-0}
       BEATS_PASSWORD: ${BEATS_PASSWORD:-}
+      # A key for the Siansa app instead of the password, and AudioMuse-AI for similar albums and artists (optional).
+      BEATS_API_KEY: ${BEATS_API_KEY:-}
+      AUDIOMUSE_URL: ${AUDIOMUSE_URL:-}
+      AUDIOMUSE_TOKEN: ${AUDIOMUSE_TOKEN:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - beats-data:/data

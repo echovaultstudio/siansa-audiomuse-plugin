@@ -6,6 +6,14 @@
   "requirements": [],
   "versions": [
     {
+      "version": "0.5.3",
+      "min_core_version": "3.6.4",
+      "changelog": "The genres list says how many songs each genre has in each library, so Siansa Dev can leave out genres only in libraries it hides.",
+      "imageUrl": "",
+      "sourceUrl": "https://raw.githubusercontent.com/echovaultstudio/siansa-audiomuse-plugin/dev/dist/siansa_beats-0.5.3.zip",
+      "checksum": "216e6bb454837ef9c44b05e76cfc9c6a"
+    },
+    {
       "version": "0.5.2",
       "min_core_version": "3.6.4",
       "changelog": "Genre descriptions from Siansa Beats (0.19 and later), for Siansa Dev's genre pages.",

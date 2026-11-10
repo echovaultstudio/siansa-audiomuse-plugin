@@ -145,6 +145,21 @@ def checks(base, catalog, problems):
         top = listed[0]["style"]
         if not call(base, "/api/genre?name=" + urllib.parse.quote(top))["ids"]:
             problems.append(f"the radio for {top} found no songs")
+    # The app's API (v1), in the real image: loudness and fades measured from each real file, keys found.
+    caps = call(base, "/api/v1/capabilities")
+    if caps.get("api") != 1 or caps["features"]["beat_grids"]["songs"] < len(catalog) - 1:
+        problems.append(f"the capabilities aren't right: {caps}")
+    end = time.time() + 60
+    while time.time() < end and call(base, "/api/v1/capabilities")["features"]["loudness"]["songs"] < len(catalog) - 1:
+        time.sleep(1)
+    profiles = call(base, "/api/v1/profiles?ids=" + ",".join(catalog))["profiles"]
+    measured = [p for p in profiles if p.get("ref_lufs") is not None and p.get("start_ramp")]
+    if len(measured) < len(catalog) - 1:
+        problems.append(f"only {len(measured)} of {len(catalog)} songs have their loudness: {profiles[:2]}")
+    if not any(p.get("intro_bpm") and p.get("beat_grid") == "siansa_beats" for p in profiles):
+        problems.append("no profile carries its beat grid")
+    if call(base, "/api/v1/openapi.json").get("openapi", "")[:1] != "3":
+        problems.append("the API's description isn't there")
     report = call(base, "/api/debug")
     if "beats-model" not in report.get("threads", {}) or not report.get("versions", {}).get("torch"):
         problems.append("the debug report lacks the threads or torch's version")

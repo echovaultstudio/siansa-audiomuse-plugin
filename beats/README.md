@@ -5,13 +5,15 @@ music. It reads the songs of the Navidrome libraries you choose, finds every bea
 its tempo and bars next to the file's BPM tag, so misread songs stand out. You can play any song with a click on each beat to hear whether they're right.
 
 It runs in its own container, reads Navidrome without changing anything, and keeps what it finds in its own
-database. Nothing is written to your music files or Navidrome. The Siansa Beats (dev) plugin on AudioMuse-AI asks it
-for each song's beat grid (`GET /api/grids`), for Siansa Dev's DJ blends.
+database. Nothing is written to your music files or Navidrome. Siansa Dev talks to it directly (Settings › Connections
+› Siansa Beats) for each song's loudness, fades, key and beat grid, the genres and their descriptions: the
+[app's API](#the-apps-api-v1). The Siansa Beats (dev) plugin on AudioMuse-AI can still pass its beat grids on
+(`GET /api/grids`) for those who'd rather keep the plugin.
 
 | | |
 |---|---|
 | **Reads** | The Navidrome libraries chosen on its page (all of them, or leaving some out, as compilations): each song's original file, BPM tag and genre. |
-| **Finds** | Every beat and downbeat (Beat This!, the `final0` model, on the CPU or an NVIDIA GPU), and from them the tempo of the whole song and of each end (the first and last 30 seconds), how steady it is, the beats a bar and the first downbeat. |
+| **Finds** | Every beat and downbeat (Beat This!, the `final0` model, on the CPU or an NVIDIA GPU), and from them the tempo of the whole song and of each end (the first and last 30 seconds), how steady it is, the beats a bar and the first downbeat. Each song's loudness (EBU R128) and how it fades in and out, and its key. |
 | **Keeps** | `/data/beats.db` (SQLite) in the container's volume. Each song is downloaded to `/data` while it's read, then deleted. |
 | **Shows** | A page at port 8090: what it's doing, a table of every song with what the readings say together, and a page per song with its beats, a player with clicks on the beats, and its tempo along the song. |
 
@@ -34,7 +36,8 @@ memory free while it works.
 
 3. **Fill in `.env`:**
    - `NAVIDROME_URL`, `NAVIDROME_USER`, `NAVIDROME_PASSWORD`: as you sign in to Siansa;
-   - optionally `BEATS_PASSWORD`, if others on the network shouldn't see the page (its user name is `siansa`).
+   - optionally `BEATS_PASSWORD`, if others on the network shouldn't see the page (its user name is `siansa`);
+   - optionally `AUDIOMUSE_URL` and `AUDIOMUSE_TOKEN` (one of AudioMuse-AI's API tokens), for similar albums and artists.
 
 4. **Start it:**
 
@@ -256,8 +259,30 @@ On the server, after setting it up:
 | `BEATS_THREADS` | `0` (all) | The model's CPU threads. |
 | `BEATS_CPUS` | `4` | (docker-compose) The cores the container may use. |
 | `BEATS_PASSWORD` | empty | The page and API ask for it (user `siansa`); `/api/health` stays open for Docker. |
+| `AUDIOMUSE_URL`, `AUDIOMUSE_TOKEN` | empty | AudioMuse-AI and one of its API tokens: similar albums and artists are asked of its Siansa plugin, for the app. |
+| `BEATS_API_KEY` | empty | A key for the Siansa app, so it needn't know the page's password (`Authorization: Bearer <key>`). The password works as a key too. |
 
-## API
+## The app's API (v1)
+
+What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/openapi.json`](beats/openapi.json)
+(`GET /api/v1/openapi.json`). Within v1, fields are only ever added, so an older app keeps working.
+
+| | |
+|---|---|
+| `GET /api/v1/capabilities` | What this Siansa Beats can do now and how far it is: songs analysed, measured for loudness, the style model. |
+| `GET /api/v1/profiles?ids=a,b` | Up to 500 songs: loudness (`ref_lufs`), fades (`start_ramp`, `end_ramp`), key and scale, and the beat grid at each end. Songs with nothing yet are `pending`. |
+| `GET /api/v1/genres` | Every style with songs voted into it. |
+| `GET /api/v1/genre?name=&limit=` | The songs of a genre, by vote. |
+| `GET /api/v1/genre/about?name=` | A short description of a genre, from Wikipedia. |
+| `GET /api/v1/similar/albums?track_id=` | Albums that sound like that song's album, asked of AudioMuse-AI's Siansa plugin (until Siansa Beats works them out itself). |
+| `GET /api/v1/similar/artists?track_id=` or `?artist=` | Artists that sound like that one, the same way. |
+| `POST /api/v1/bad-blends` | A song change marked as bad in the app. |
+
+Songs analysed before 0.20 get their loudness, fades and key while the queue is empty: with `AUDIOMUSE_URL` and
+`AUDIOMUSE_TOKEN` set, whatever AudioMuse-AI's Siansa plugin already measured is taken from it (nothing to download),
+and the rest are downloaded once more and measured here. New songs are measured on the way.
+
+## The page's API
 
 `GET /api/health`, `/api/status`, `/api/libraries`, `/api/songs`, `/api/songs/<id>` (with every beat),
 `/api/beats/<id>`, `/api/audio/<id>`, `/api/grids?ids=`, `/api/export.csv`, `/api/export.json`;
