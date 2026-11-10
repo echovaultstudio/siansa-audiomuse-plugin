@@ -38,7 +38,7 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
           python3 -m pip install --break-system-packages --user scipy || python3 -m pip install --user scipy
-          cd beats && python3 -I tests/test_loudness.py
+          cd beats && python3 -P tests/test_loudness.py  # -P keeps the user site, where numpy and scipy are
       - name: CPU or GPU
         run: cd beats && python3 -I tests/test_analyser.py
       - name: The service against a fake Navidrome and AudioMuse-AI
