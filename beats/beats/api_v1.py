@@ -13,8 +13,14 @@ that would break that is v2, next to v1. The full description is ``openapi.json`
     POST /api/v1/bad-blends            {"from_id", "to_id", "technique", "details"}: a song change marked as bad
     GET  /api/v1/openapi.json          this API described
 
-Song ids are Navidrome's (the app's, when it plays from that Navidrome). Like the rest of the API, it asks for the
-password or the API key when one is set (``Authorization: Bearer <key>``, or Basic with the password).
+Song ids are the music server's own (the app's, when it plays from that server). With several servers (0.23.0:
+Navidrome, Emby, Jellyfin, several users of one), every request may say which it means with ``?server=``, its id or
+name from the capabilities' ``servers``; without it the default server is meant, so an app from before keeps working.
+Ids that are asked about are understood from any server; ids that are answered (a genre's songs) are the named
+server's, and songs it doesn't have are left out.
+
+Like the rest of the API, it asks for the password or the API key when one is set (``Authorization: Bearer <key>``,
+or Basic with the password).
 """
 
 import json
@@ -30,18 +36,25 @@ MAX_IDS = 500
 SPEC = os.path.join(os.path.dirname(__file__), "openapi.json")
 
 
-def capabilities(app):
-    """What this Siansa Beats can answer and how far it is: the app decides from it what to offer (a DJ mix needs beat
-    grids; the genres need the style model)."""
-    counts = app.store.counts()
-    styles = app.styles_status()
-    measured = app.store.measure_counts(loudness.VERSION)
+def capabilities(app, server=None):
+    """What this Siansa Beats can answer and how far it is (for ``server``'s songs): the app decides from it what to
+    offer (a DJ mix needs beat grids; the genres need the style model)."""
+    server = server or app.servers.default_id
+    only = app.only(server)
+    counts = app.store.counts(only)
+    styles = app.styles_status(server)
+    measured = app.store.measure_counts(loudness.VERSION, only)
+    shown = app.servers.get(server) or {}
     return {
         "service": "siansa-beats",
         "version": __version__,
         "api": API,
         "apis": [API],
-        "music_server": {"kind": "navidrome", "set_up": bool(app.config.navidrome_url)},
+        "music_server": {"kind": shown.get("kind") or "navidrome", "set_up": bool(shown), "id": shown.get("id"),
+                         "name": shown.get("name")},
+        # Every music server here: the app names the one it plays from (?server=<id>) so the ids are that server's.
+        "servers": [{k: s[k] for k in ("id", "kind", "name", "url", "user", "default", "songs")}
+                    for s in app.server_list()],
         "songs": {"known": counts.get("songs", 0), "analysed": counts.get("done", 0), "failed": counts.get("failed", 0),
                   "waiting": sum(counts.get(s, 0) for s in ("queued", "downloading", "decoding", "ready", "analysing"))},
         "features": {
@@ -49,25 +62,28 @@ def capabilities(app):
             "loudness": {"available": True, "songs": measured["measured"], "waiting": measured["waiting"],
                          "version": loudness.VERSION},
             "keys": {"available": True, "songs": measured["measured"]},
-            "genres": {"available": bool(styles.get("available")), "styles": len(app.genre_list())},
+            "genres": {"available": bool(styles.get("available")), "styles": len(app.genre_list(server))},
             "genre_about": {"available": True, "source": "Wikipedia"},
             "bad_blends": {"available": True},
             "similar": {"available": app.audiomuse.configured, "source": "audiomuse"},
+            "servers": {"available": True, "kinds": ["navidrome", "emby", "jellyfin"]},
         },
         "limits": {"profile_ids": MAX_IDS, "genre_songs": 2000},
     }
 
 
-def profiles(app, ids):
+def profiles(app, ids, server=None):
     """``{"schema_version", "profiles", "pending"}`` in the layout the app reads from the plugin: each song's loudness
     and fades (``ref_lufs``, ``start_ramp``, ``end_ramp``, ``duration_ms``), key and scale, and the beat grid at each
     end (``intro_*``, ``outro_*``, ``beats_until_ms``, ``mix_track``, ``drops_ms``, ``breakdowns_ms``) with
-    ``beat_grid`` "siansa_beats". A song with only one of them has it alone; one with neither is ``pending``."""
-    measures = app.store.measures(ids)
-    grids = app.store.ends(ids, app.config.model)
+    ``beat_grid`` "siansa_beats". A song with only one of them has it alone; one with neither is ``pending``. The ids
+    are the caller's (any server's): each profile's ``track_id`` is the id it was asked by."""
+    here = app.store.resolve(ids, server)
+    measures = app.store.measures(here.values())
+    grids = app.store.ends(here.values(), app.config.model)
     out, pending = [], []
     for song_id in ids:
-        sound, grid = measures.get(song_id), grids.get(song_id)
+        sound, grid = measures.get(here.get(song_id)), grids.get(here.get(song_id))
         if sound is None and grid is None:
             pending.append(song_id)
             continue
@@ -88,15 +104,16 @@ def profiles(app, ids):
     return {"schema_version": SCHEMA_VERSION, "profiles": out, "pending": pending}
 
 
-def get(handler, path, query):
-    """Answers a GET of ``/api/v1/…``; False when it isn't one of its paths."""
+def get(handler, path, query, server=None):
+    """Answers a GET of ``/api/v1/…`` about ``server`` (the default without one); False when it isn't one of its
+    paths."""
     app = handler.app
 
     def arg(name, default=""):
         return (query.get(name) or [default])[0].strip()
 
     if path == "/api/v1/capabilities":
-        return handler._json(capabilities(app)) or True
+        return handler._json(capabilities(app, server)) or True
     if path == "/api/v1/openapi.json":
         with open(SPEC, "rb") as f:
             return handler._send(HTTPStatus.OK, f.read(), "application/json") or True
@@ -104,7 +121,7 @@ def get(handler, path, query):
         ids = [i for i in dict.fromkeys(p.strip() for p in arg("ids").split(",")) if i]
         if len(ids) > MAX_IDS:
             return handler._error(HTTPStatus.BAD_REQUEST, f"at most {MAX_IDS} ids at a time") or True
-        return handler._json(profiles(app, ids)) or True
+        return handler._json(profiles(app, ids, server)) or True
     if path in ("/api/v1/similar/albums", "/api/v1/similar/artists"):
         from .audiomuse import AudioMuseError, PASSED_ON
 
@@ -116,7 +133,7 @@ def get(handler, path, query):
         except AudioMuseError as e:
             return handler._error(HTTPStatus.BAD_GATEWAY, str(e)) or True
     if path == "/api/v1/genres":
-        return handler._json({"styles": app.styles_status(), "genres": app.genre_list()}) or True
+        return handler._json({"styles": app.styles_status(server), "genres": app.genre_list(server)}) or True
     if path in ("/api/v1/genre", "/api/v1/genre/about"):
         name = arg("name")
         if not name:
@@ -127,25 +144,28 @@ def get(handler, path, query):
             limit = max(1, min(2000, int(arg("limit", "300") or 300)))
         except ValueError:
             return handler._error(HTTPStatus.BAD_REQUEST, "limit is a number") or True
-        return handler._json(app.genre_songs(name, limit)) or True
+        return handler._json(app.genre_songs(name, limit, server)) or True
     return False
 
 
-def post(handler, path, body):
+def post(handler, path, body, server=None):
     """Answers a POST of ``/api/v1/…``; False when it isn't one of its paths."""
     if path == "/api/v1/bad-blends":
-        answer, problem = add_bad_blend(handler.app, body)
+        answer, problem = add_bad_blend(handler.app, body, server)
         if problem:
             return handler._error(HTTPStatus.BAD_REQUEST, problem) or True
         return handler._json(answer) or True
     return False
 
 
-def add_bad_blend(app, body):
-    """Keeps a song change marked as bad in the app: ``({"id"}, None)``, or ``(None, why)`` when it isn't one."""
+def add_bad_blend(app, body, server=None):
+    """Keeps a song change marked as bad in the app: ``({"id"}, None)``, or ``(None, why)`` when it isn't one. The two
+    songs are kept by their ids here, whichever server the app plays them from."""
     from_id, to_id = str(body.get("from_id") or "").strip(), str(body.get("to_id") or "").strip()
     if not from_id or not to_id:
         return None, "from_id and to_id needed: the two songs"
+    here = app.store.resolve([from_id, to_id], server)
+    from_id, to_id = here.get(from_id, from_id), here.get(to_id, to_id)
     details = body.get("details") if isinstance(body.get("details"), dict) else {}
     technique = str(body.get("technique") or "")[:80]
     blend_id = app.store.add_bad_blend(from_id, to_id, technique, details)

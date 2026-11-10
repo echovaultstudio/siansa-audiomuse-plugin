@@ -1,9 +1,10 @@
-"""Siansa Beats: Beat This! for the songs of the chosen Navidrome libraries, with a page to watch it, its log and
-a debug report.
+"""Siansa Beats: Beat This! for the songs of the chosen libraries of your music servers (Navidrome, Emby, Jellyfin),
+with a page to watch it, its log and a debug report.
 
 Run with ``python -m beats.server``. Set up with environment variables (see the README):
 
-    NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASSWORD   the music server (read only)
+    NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASSWORD   the music server (read only); more servers, Emby and Jellyfin
+                                                         among them, and more users of one are added on the page
     BEATS_MODEL (final0 | small0), BEATS_DEVICE (auto | cpu | cuda | cuda:N), BEATS_FLOAT16, BEATS_THREADS
     BEATS_PASSWORD                                       optional: the page and API ask for it (user "siansa")
     AUDIOMUSE_URL, AUDIOMUSE_TOKEN                       optional: AudioMuse-AI, asked for similar albums and artists
@@ -18,7 +19,18 @@ page (JSON):
 
     GET  /api/health                  {"status": "ok", "model", "model_loaded"}
     GET  /api/status                  the queue, what's being done, setup and recent activity
-    GET  /api/libraries               Navidrome's libraries, each with "on" (analysed) and its songs here and done
+    GET  /api/servers                 the music servers, each with its songs here (never a password)
+    POST /api/servers                 {"kind", "name", "url", "user", "password"}: one more (kind: navidrome, emby
+                                      or jellyfin), once it answers and takes the login
+    POST /api/servers/test            the same fields: asks the server and says its version and libraries, adds nothing
+    POST /api/servers/<id>            {"name", "url", "user", "password"}: changes one (an empty field stays)
+    POST /api/servers/<id>/default    makes it the default: read first, and meant when a request names no server
+    DELETE /api/servers/<id>          takes it away, with the songs only it had
+    GET  /api/libraries               the server's libraries, each with "on" (analysed) and its songs here and done
+
+What's asked about a server's songs (status, libraries, songs, genres, loudness, the exports) takes ``?server=``, its
+id or name: the default server's without it.
+
     GET  /api/songs                   the songs with their readings and what they say together, with ?find=,
                                       ?show=differ|done|failed and ?limit= (200 when not given, at most 1000)
     GET  /api/songs/<id>              one song, with every beat and downbeat and its tempo along the song
@@ -67,10 +79,13 @@ import urllib.request
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import gzip
+
 from . import __version__, api_v1, grid, loudness
 from .audiomuse import AudioMuse
+from .servers import KINDS, MAIN, Servers, folders_key
 from .store import Store
-from .subsonic import Subsonic, SubsonicError
+from .subsonic import ServerError, SubsonicError
 from .worker import Worker
 from . import genres as genres_module
 from . import log
@@ -162,25 +177,49 @@ class App:
         self.config = config
         os.makedirs(config.data_dir, exist_ok=True)
         self.store = Store(os.path.join(config.data_dir, "beats.db"))
-        self.navidrome = Subsonic(config.navidrome_url, config.navidrome_user, config.navidrome_password)
+        self.servers = Servers(self.store, config)
         self.audiomuse = AudioMuse(config.audiomuse_url, config.audiomuse_token)
         self.tracker = tracker or analyser.BeatThis(config.model, config.device, config.models_dir, config.threads,
                                                     config.float16)
         self.style = style if style is not None else style_module.StyleModel(config.models_dir, config.style_threads, config.device)
-        self.worker = Worker(self.store, self.navidrome, self.tracker, decode or analyser.decode,
+        self.worker = Worker(self.store, self.servers, self.tracker, decode or analyser.decode,
                              config.data_dir, config.model, measure, self.style, sound)
         self.started = time.time()
         # Answers the page and the app ask for often, kept ready: the genre list changes only when songs are voted,
         # the styles' counts with each song heard (the page asks every 2 s).
-        changes = lambda: self.store.genre_changes  # noqa: E731
-        self.kept_genres = Kept(self._genre_list, 60, changes)
-        self.kept_style_counts = Kept(self.store.style_counts, 30, changes)  # its total follows songs added, too
-        self.worker.on_voted = lambda: self.kept_genres.refresh()
+        # One of each for every server looked at (its songs alone); with one server, for all the songs.
+        self._kept, self._kept_lock = {}, threading.Lock()
+        self.worker.on_voted = lambda: [k.refresh() for (name, _), k in list(self._kept.items()) if name == "genres"]
         from . import about as about_module
 
         self.about = about_module.Keeper(self.store, self.about_names)
         if self.audiomuse.configured:  # what the Siansa plugin already measured needn't be downloaded again
             self.worker.importer = self.audiomuse.profiles
+
+    @property
+    def navidrome(self):
+        """The default server's client (its name from when Navidrome was the only one)."""
+        return self.servers.client()
+
+    def only(self, server):
+        """What the store is asked for ``server``'s songs: nothing to leave out while it's the only server."""
+        return server if self.servers.several() else None
+
+    def kept(self, name, server, work, seconds, changes):
+        """The kept answer ``name`` for ``server``'s songs (:class:`Kept`), made the first time it's asked for."""
+        key = (name, self.only(server))
+        with self._kept_lock:
+            if key not in self._kept:
+                self._kept[key] = Kept(lambda: work(key[1]), seconds, changes)
+            return self._kept[key]
+
+    def server_list(self):
+        """The music servers as the page and the app see them: no passwords, each with its songs here and its chosen
+        libraries."""
+        counts = self.store.server_counts()
+        return [{**self.servers.public(s), "songs": counts.get(s["id"], 0),
+                 "libraries": [str(f) for f in self.store.setting(folders_key(s["id"])) or []]}
+                for s in self.servers.all()]
 
     # ---- what the API returns ----
 
@@ -190,12 +229,12 @@ class App:
 
     SONGS_SHOWN, SONGS_MOST = 200, 1000  # songs in one answer for the table, unless asked for more (at most)
 
-    def songs(self, find=None, show="all", limit=None):
+    def songs(self, find=None, show="all", limit=None, server=None):
         """The table's songs: those ``find`` finds, of those to ``show`` (all, "differ" or "failed"), at most
-        ``limit`` (``0``: every one, for the exports)."""
+        ``limit`` (``0``: every one, for the exports), of ``server``'s (every server's without one)."""
         limit = None if limit == 0 else min(int(limit or self.SONGS_SHOWN), self.SONGS_MOST)
         rows = self.store.overview(self.config.model, find, show if show in ("done", "failed") else None,
-                                   None if show == "differ" else limit)
+                                   None if show == "differ" else limit, server=self.only(server))
         rows = [self.song_row(r) for r in rows]
         if show == "differ":
             rows = [r for r in rows if any(level == "warn" for level, _ in r["verdict"])]
@@ -215,6 +254,9 @@ class App:
         row["grid"] = self.steady_grid(full)
         row["end_seconds"] = grid.END_SECONDS
         row["marks"] = self.store.marks(song_id)
+        names = {s["id"]: s["name"] for s in self.servers.all()}
+        row["servers"] = [{"id": server, "name": names.get(server, server), "item_id": item_id}
+                          for server, item_id in self.store.where(song_id)]
         return row
 
     def steady_grid(self, full):
@@ -224,11 +266,11 @@ class App:
         beats, bpm, per_bar = full["beats"], full["bpm"], full.get("beats_per_bar") or 4
         return grid.with_sound(grid.steady_grid(beats, full["downbeats"], bpm, per_bar), full.get("levels"))
 
-    def export(self, find=None, show="all"):
+    def export(self, find=None, show="all", server=None):
         """The analysed songs the table finds (every one without ``find`` and ``show``) with what the grid and
         phrases are worked out from (the model's beats and downbeats, the sound's levels) and what they came to: to
         tune them on real music. Song names and genres, no addresses."""
-        out = [s for s in (self.song_data(row["id"], row) for row in self.songs(find, show, 0)) if s]
+        out = [s for s in (self.song_data(row["id"], row) for row in self.songs(find, show, 0, server)) if s]
         return {"version": __version__, "model": self.config.model, "songs": out}
 
     def song_data(self, song_id, row=None):
@@ -245,9 +287,9 @@ class App:
                 "beats": full["beats"], "downbeats": full["downbeats"], "levels": full.get("levels"),
                 "marks": [m["seconds"] for m in self.store.marks(song_id)]}
 
-    def failed_export(self):
+    def failed_export(self, server=None):
         """Every song that couldn't be analysed, with why and what kind of file it is: one file to look into them with."""
-        rows = self.store.overview(self.config.model, None, "failed", None)
+        rows = self.store.overview(self.config.model, None, "failed", None, server=self.only(server))
         return {"version": __version__, "model": self.config.model, "failed": [
             {"id": r["id"], "artist": r.get("artist"), "title": r.get("title"), "album": r.get("album"),
              "suffix": r.get("suffix"), "duration": r.get("duration"), "library": r.get("folder"),
@@ -296,12 +338,16 @@ class App:
 
     FADE_DB = -18  # the level the app fades on (its Crossfade.QUIET_DB)
 
-    def loudness_report(self):
+    def loudness_report(self, server=None):
         """The page's loudness dashboard: how far it is, where the numbers came from, how loud the songs are, how they
-        start and end, and their keys."""
-        summary = self.store.measure_summary()
+        start and end, and their keys (of ``server``'s songs). Kept ready: it reads every measured song."""
+        report = self.kept("loudness", server, self._loudness_report, 30, lambda: self.store.measure_changes).get()
+        return {**report, "measuring": dict(self.worker.measuring) if self.worker.measuring else None}
+
+    def _loudness_report(self, only):
+        summary = self.store.measure_summary(only)
         rows = summary["rows"]
-        counts = self.store.measure_counts(loudness.VERSION)
+        counts = self.store.measure_counts(loudness.VERSION, only)
         lufs = [r["ref_lufs"] for r in rows if r["ref_lufs"] is not None]
 
         def bins(values, lo, hi, step):
@@ -328,7 +374,6 @@ class App:
         lufs_sorted = sorted(lufs)
         return {
             **counts,
-            "measuring": dict(self.worker.measuring) if self.worker.measuring else None,
             "sources": {"beats": sum(1 for r in rows if (r["source"] or "beats") == "beats"),
                         "plugin": sum(1 for r in rows if r["source"] == "plugin")},
             "with_key": sum(1 for r in rows if r["key"]),
@@ -340,9 +385,12 @@ class App:
             "failed_songs": summary["failed"],
         }
 
-    def status(self):
-        counts = self.store.counts()
+    def status(self, server=None):
+        server = server or self.servers.default_id
+        only = self.only(server)
+        counts = self.store.counts(only)
         worker = self.worker
+        shown = self.servers.get(server) or {}
         current = dict(worker.current) if worker.current else None
         if current:
             current["for_seconds"] = round(time.time() - current.pop("since"), 1)
@@ -357,13 +405,19 @@ class App:
             "current": current,
             "next": preparing,
             "bad_blends": self.store.bad_blend_count(),
-            "styles": self.styles_status(),
-            "connections": {"navidrome": self.navidrome.configured, "audiomuse": self.audiomuse.configured,
+            "styles": self.styles_status(server),
+            "connections": {"navidrome": bool(shown), "audiomuse": self.audiomuse.configured,
                             "api_key": bool(self.config.api_key), "password": bool(self.config.password)},
-            "loudness": {**self.store.measure_counts(loudness.VERSION),
+            "loudness": {**self.store.measure_counts(loudness.VERSION, only),
                          "measuring": dict(worker.measuring) if worker.measuring else None},
             "regridding": dict(worker.regridding) if worker.regridding else None,
-            "libraries": {"chosen": self.store.setting("folders") or [], "read_at": self.store.setting("library_read_at")},
+            "libraries": {"chosen": self.store.setting(folders_key(server)) or [],
+                          "read_at": self.store.setting("library_read_at")},
+            # The server these numbers are of, and all of them (for the page's switch).
+            "server": server,
+            "server_kind": shown.get("kind"),
+            "server_name": shown.get("name"),
+            "servers": self.server_list(),
             "paused": worker.paused,
             "last_error": worker.last_error,
             "model": self.config.model,
@@ -373,20 +427,23 @@ class App:
             "float16": self.config.float16,
             "model_loaded": self.tracker_loaded(),
             "model_load_seconds": getattr(self.tracker, "load_seconds", None),
-            "navidrome": self.config.navidrome_url or None,
+            "navidrome": shown.get("url") or None,  # the shown server's address (its name from before 0.23)
             "log_level": log.level(),
             "uptime_seconds": round(time.time() - self.started),
             "events": self.store.events(),
         }
 
-    def styles_status(self):
-        """The style model: whether the image has it, how far the songs are, and how often it agrees with the tags."""
+    def styles_status(self, server=None):
+        """The style model: whether the image has it, how far the songs (``server``'s) are, and how often it agrees
+        with the tags."""
         worker, style = self.worker, self.style
         available = bool(style is not None and style.available)
         out = {"available": available, "loaded": bool(available and style.loaded),
                "device": getattr(style, "backend", None), "problem": getattr(style, "problem", None)}
         if available:
-            out.update(self.kept_style_counts.get())
+            # Kept ready: the page asks every few seconds; its total follows songs added, too.
+            out.update(self.kept("styles", server or self.servers.default_id, self.store.style_counts, 30,
+                                 lambda: self.store.genre_changes).get())
             out["agreement"] = worker.genre_report
             styling = dict(worker.styling) if worker.styling else None
             if styling:
@@ -415,14 +472,17 @@ class App:
         status = "found" if found else "pending" if pending else "failed" if kept.get("failed") else "missing"
         return {"name": name, "about": found, "pending": pending, "status": status}
 
-    def genre_list(self):
-        """Every style with songs voted into it, most first, kept ready (:class:`Kept`): ``[{"label", "genre", "style",
-        "songs", "name", "libraries"}]``; ``libraries``: the songs in each Navidrome library, by its id."""
-        return self.kept_genres.get()
+    def genre_list(self, server=None):
+        """Every style with songs (of ``server``'s) voted into it, most first, kept ready (:class:`Kept`): ``[{"label",
+        "genre", "style", "songs", "name", "libraries"}]``; ``libraries``: the songs in each of the server's libraries,
+        by its id."""
+        server = server or self.servers.default_id
+        return self.kept("genres", server, lambda only: self._genre_list(server, only), 60,
+                         lambda: self.store.genre_changes).get()
 
-    def _genre_list(self):
-        counts = self.store.vote_counts(genres_module.RADIO_MIN)
-        by_library = self.store.vote_counts_by_library(genres_module.RADIO_MIN)
+    def _genre_list(self, server, only):
+        counts = self.store.vote_counts(genres_module.RADIO_MIN, only)
+        by_library = self.store.vote_counts_by_library(genres_module.RADIO_MIN, server)
         ranked = sorted(counts.items(), key=lambda p: -p[1])
         named = {}
         for label, _ in ranked:
@@ -437,10 +497,11 @@ class App:
                         "libraries": by_library.get(label, {})})
         return out
 
-    def genre_songs(self, name, limit=300):
+    def genre_songs(self, name, limit=300, server=None):
         """The songs a radio for the genre ``name`` plays (a tag as the app shows it: "Trance", "Electronic /
-        Trance"), by vote: ``{"name", "styles", "genres", "ids"}``. Nothing when the style model isn't there or the
-        name matches none of its styles, so the app falls back to the tags."""
+        Trance"), by vote: ``{"name", "styles", "genres", "ids"}``, the ids ``server``'s own for the songs it has.
+        Nothing when the style model isn't there or the name matches none of its styles, so the app falls back to the
+        tags."""
         taxonomy = self.worker.taxonomy()
         if taxonomy is None:
             return {"name": name, "styles": [], "genres": [], "ids": [], "why": "no style model in this image"}
@@ -448,7 +509,7 @@ class App:
         labels = set(styles)
         for f in families:
             labels |= set(taxonomy.by_genre.get(genres_module.key(f), []))
-        ids = self.store.songs_voted(labels, genres_module.RADIO_MIN, limit)
+        ids = self.store.songs_voted(labels, genres_module.RADIO_MIN, limit, server or self.servers.default_id)
         return {"name": name, "styles": sorted(styles), "genres": sorted(families), "ids": ids,
                 "why": None if labels else "no style of that name"}
 
@@ -482,6 +543,7 @@ class App:
         c = self.config
         setup = {"navidrome_url": c.navidrome_url or None, "navidrome_user": c.navidrome_user or None,
                  "navidrome_password": "set" if c.navidrome_password else "not set", "model": c.model,
+                 "servers": self.server_list(), "default_server": self.servers.default_id,
                  "device": c.device, "float16": c.float16, "threads": c.threads,
                  "page_password": "set" if c.password else "not set", "api_key": "set" if c.api_key else "not set",
                  "audiomuse_url": c.audiomuse_url or None, "audiomuse_token": "set" if c.audiomuse_token else "not set", "data_dir": c.data_dir,
@@ -498,7 +560,7 @@ class App:
     def tracker_loaded(self):
         return bool(getattr(self.tracker, "loaded", True))
 
-    def csv(self, find=None, show="all"):
+    def csv(self, find=None, show="all", server=None):
         out = io.StringIO()
         columns = ["artist", "title", "album", "genres", "voted_genres", "sound_top", "tag_bpm", "bpm",
                    "main_share", "bpm_fit", "grid_bpm", "on_grid", "grid_drift", "downbeat_source", "phrase_first_ms", "phrase_bars", "phrase_count",
@@ -507,7 +569,7 @@ class App:
                    "model_seconds", "state", "notes", "error"]
         w = csv.writer(out)
         w.writerow(columns)
-        for row in self.songs(find, show, 0):
+        for row in self.songs(find, show, 0, server):
             r = row["result"] or {}
             by = {}
             for g in row["genres"]:
@@ -581,15 +643,24 @@ class Handler(BaseHTTPRequestHandler):
             return hmac.compare_digest(given.encode(), password.encode())
         return False
 
+    SQUEEZE_FROM = 1024  # bytes: answers this big are sent gzipped to a browser or app that takes it
+
     def _send(self, status, body=b"", kind="application/json", headers=None):
         if isinstance(body, (dict, list)):
-            body = json.dumps(body).encode()
+            body = json.dumps(body, separators=(",", ":")).encode()
         elif isinstance(body, str):
             body = body.encode()
+        squeezed = (len(body) >= self.SQUEEZE_FROM and "gzip" in self.headers.get("Accept-Encoding", "")
+                    and kind.startswith(("application/json", "text/")))
+        if squeezed:  # the songs' table is a megabyte of JSON: a tenth of it over a phone's Wi-Fi
+            body = gzip.compress(body, 5)
         self.send_response(status)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if squeezed:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
         for k, v in (headers or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -610,6 +681,19 @@ class Handler(BaseHTTPRequestHandler):
             return json.loads(self.rfile.read(min(length, 65536)) or b"{}")
         except ValueError:
             return {}
+
+    def _server(self, query):
+        """The id of the server a request is about (``?server=``, its id or name; the default without it), or None
+        after answering that there's no such server."""
+        asked = (query.get("server") or [""])[0]
+        found = self.app.servers.find(asked)
+        if found is None:
+            names = ", ".join(s["name"] for s in self.app.servers.all()) or "none"
+            self._error(HTTPStatus.BAD_REQUEST, f"No server {asked} here (the servers: {names})")
+        return found
+
+    def _query(self):
+        return urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
 
     def _guard(self):
         if self._authorised():
@@ -633,13 +717,22 @@ class Handler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
         app = self.app
         try:
-            if path.startswith("/api/v1/") and api_v1.get(self, path, query):
-                return None
             if path in ("/", "/index.html"):
                 with open(PAGE, "rb") as f:
                     return self._send(HTTPStatus.OK, f.read(), "text/html; charset=utf-8")
+            if path == "/api/servers":
+                return self._json({"servers": app.server_list(), "default": app.servers.default_id,
+                                   "kinds": [{"id": k, "name": v} for k, v in KINDS.items()]})
+            # Similar music is asked of AudioMuse-AI, whose own name for the server is passed on as it is.
+            server = app.servers.find((query.get("server") or [""])[0]) or app.servers.default_id \
+                if path.startswith("/api/v1/similar/") else self._server(query)
+            if server is None:
+                return None
+            if path.startswith("/api/v1/") and api_v1.get(self, path, query, server):
+                return None
             if path == "/api/genres":
-                return self._json({"styles": app.styles_status(), "genres": app.genre_list(), "about": app.about.status()})
+                return self._json({"styles": app.styles_status(server), "genres": app.genre_list(server),
+                                   "about": app.about.status()})
             if path == "/api/genre/about":
                 name = (query.get("name") or [""])[0].strip()
                 if not name:
@@ -653,11 +746,11 @@ class Handler(BaseHTTPRequestHandler):
                     limit = max(1, min(2000, int((query.get("limit") or ["300"])[0])))
                 except ValueError:
                     return self._error(HTTPStatus.BAD_REQUEST, "limit is a number")
-                return self._json(app.genre_songs(name, limit))
+                return self._json(app.genre_songs(name, limit, server))
             if path == "/api/loudness":
-                return self._json(app.loudness_report())
+                return self._json(app.loudness_report(server))
             if path == "/api/status":
-                return self._json(app.status())
+                return self._json(app.status(server))
             if path == "/api/log":
                 def number(key, default):
                     try:
@@ -675,11 +768,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(HTTPStatus.OK, json.dumps(app.debug_report(), indent=1, default=str), "application/json",
                                   {"Content-Disposition": f'attachment; filename="siansa-beats-debug-{stamp}.json"'})
             if path == "/api/libraries":
-                return self._json(app.worker.libraries())
+                return self._json(app.worker.libraries(server))
             if path == "/api/bad-blends":
                 return self._json(app.store.bad_blends())
             if path == "/api/failed/export":
-                body = json.dumps(app.failed_export(), indent=1).encode()
+                body = json.dumps(app.failed_export(server), indent=1).encode()
                 return self._send(HTTPStatus.OK, body, "application/json",
                                   {"Content-Disposition": 'attachment; filename="siansa-beats-failed.json"'})
             if path == "/api/bad-blends/export":
@@ -692,20 +785,22 @@ class Handler(BaseHTTPRequestHandler):
                     limit = int((query.get("limit") or ["0"])[0] or 0)
                 except ValueError:
                     return self._error(HTTPStatus.BAD_REQUEST, "limit is a number")
-                return self._json(app.songs(find, show, limit or None))
+                return self._json(app.songs(find, show, limit or None, server))
             if path == "/api/grids":
                 ids = [i for i in dict.fromkeys(p.strip() for p in (query.get("ids") or [""])[0].split(",")) if i]
                 if len(ids) > 2000:
                     return self._error(HTTPStatus.BAD_REQUEST, "at most 2000 ids at a time")
-                found = app.store.ends(ids, app.config.model)
-                return self._json({"version": __version__, "grids": [{"track_id": i, **found[i]} for i in ids if i in found],
-                                   "missing": [i for i in ids if i not in found]})
+                here = app.store.resolve(ids, server)
+                found = app.store.ends(here.values(), app.config.model)
+                return self._json({"version": __version__,
+                                   "grids": [{"track_id": i, **found[here[i]]} for i in ids if here.get(i) in found],
+                                   "missing": [i for i in ids if here.get(i) not in found]})
             if path == "/api/export.json":
-                body = json.dumps(app.export(find, show)).encode()
+                body = json.dumps(app.export(find, show, server)).encode()
                 return self._send(HTTPStatus.OK, body, "application/json",
                                   {"Content-Disposition": 'attachment; filename="siansa-beats-data.json"'})
             if path == "/api/export.csv":
-                return self._send(HTTPStatus.OK, app.csv(find, show), "text/csv; charset=utf-8",
+                return self._send(HTTPStatus.OK, app.csv(find, show, server), "text/csv; charset=utf-8",
                                   {"Content-Disposition": 'attachment; filename="siansa-beats.csv"'})
             m = re.fullmatch(r"/api/songs/([^/]+)", path)
             if m:
@@ -728,25 +823,30 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         app, body = self.app, self._body()
         try:
+            if path.startswith("/api/servers"):
+                return self._servers_post(path, body)
+            server = self._server(self._query())
+            if server is None:
+                return None
             if path == "/api/libraries":
                 ids = body.get("ids")
                 if not isinstance(ids, list):
                     return self._error(HTTPStatus.BAD_REQUEST, 'ids needed: a list of library ids ([] for none)')
                 try:
-                    return self._json(app.worker.choose(ids))
+                    return self._json(app.worker.choose(ids, server))
                 except ValueError as e:
                     return self._error(HTTPStatus.BAD_REQUEST, str(e))
-            if path.startswith("/api/v1/") and api_v1.post(self, path, body):
+            if path.startswith("/api/v1/") and api_v1.post(self, path, body, server):
                 return None
             if path == "/api/bad-blends":
-                answer, problem = api_v1.add_bad_blend(app, body)
+                answer, problem = api_v1.add_bad_blend(app, body, server)
                 return self._error(HTTPStatus.BAD_REQUEST, problem) if problem else self._json(answer)
             if path == "/api/genres/about/fetch":
                 return self._json(app.about.fetch_all())
             if path == "/api/libraries/read":
                 return self._json(app.worker.read_libraries())
             if path == "/api/analyse-all":
-                queued = sum(app.store.queue(r["id"], force=True) for r in app.store.overview(app.config.model))
+                queued = sum(app.store.queue(song_id, force=True) for song_id in app.store.song_ids())
                 app.store.event(f"Analysing every song again: {queued} queued")
                 app.worker.wake()
                 return self._json({"queued": queued})
@@ -784,10 +884,56 @@ class Handler(BaseHTTPRequestHandler):
         except SubsonicError as e:
             return self._error(HTTPStatus.BAD_GATEWAY, str(e))
 
+    def _servers_post(self, path, body):
+        """Adds, tests or changes a music server, or makes one the default. A server is only kept once it answers and
+        takes the login; what went wrong is said in plain words, never with the password."""
+        app = self.app
+        fields = {k: body.get(k) for k in ("name", "url", "user", "password")}
+        try:
+            if path == "/api/servers/test":
+                return self._json(app.servers.test(str(body.get("kind") or "").lower(), str(fields["url"] or "").strip().rstrip("/"),
+                                                   str(fields["user"] or "").strip(), fields["password"] or ""))
+            if path == "/api/servers":
+                added = app.servers.add(body.get("kind"), **fields)
+                app.store.event(f"Music server added: {added['name']} ({KINDS[added['kind']]}, user {added['user']})")
+                return self._json(added)
+            m = re.fullmatch(r"/api/servers/([^/]+)(/default)?", path)
+            if not m:
+                return self._error(HTTPStatus.NOT_FOUND, "not found")
+            server_id = _id(m[1])
+            if m[2]:
+                app.servers.set_default(server_id)
+                app.store.event(f"The default music server is now {app.servers.get(server_id)['name']}")
+                return self._json({"default": server_id})
+            changed = app.servers.update(server_id, **fields)
+            app.store.event(f"Music server changed: {changed['name']}")
+            return self._json(changed)
+        except KeyError:
+            return self._error(HTTPStatus.NOT_FOUND, "no such server")
+        except ValueError as e:
+            return self._error(HTTPStatus.BAD_REQUEST, str(e))
+        except ServerError as e:
+            return self._error(HTTPStatus.BAD_GATEWAY, f"The server didn't take it: {e}")
+
     def do_DELETE(self):
         if not self._guard():
             return
         path = self.path.split("?", 1)[0]
+        m = re.fullmatch(r"/api/servers/([^/]+)", path)
+        if m:
+            server_id = _id(m[1])
+            try:
+                name = (self.app.servers.get(server_id) or {}).get("name")
+                removed = self.app.servers.remove(server_id)
+            except KeyError:
+                return self._error(HTTPStatus.NOT_FOUND, "no such server")
+            except ValueError as e:
+                return self._error(HTTPStatus.CONFLICT, str(e))
+            self.app.store.event(f"Music server removed: {name} (and the {removed} songs' links to it)")
+            return self._json({"removed": removed})
+        server = self._server(self._query())
+        if server is None:
+            return None
         m = re.fullmatch(r"/api/bad-blends/(\d+)", path)
         if m:
             if not self.app.store.remove_bad_blend(int(m[1])):
@@ -796,7 +942,7 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/libraries/([^/]+)/songs", path)
         if m:
             try:
-                return self._json({"removed": self.app.worker.remove_library(_id(m[1]))})
+                return self._json({"removed": self.app.worker.remove_library(_id(m[1]), server)})
             except ValueError as e:
                 return self._error(HTTPStatus.CONFLICT, str(e))
             except SubsonicError as e:
@@ -812,19 +958,22 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"removed": True})
 
     def _audio(self, song_id):
-        """Navidrome's MP3 of the song (every browser plays it), passed through with seeking (Range) kept."""
+        """The song for the page's player, from a server that has it (Navidrome's MP3, which every browser plays; Emby's
+        and Jellyfin's own file), passed through with seeking (Range) kept."""
         if not self.app.store.song(song_id):
             return self._error(HTTPStatus.NOT_FOUND, "no such song")
-        url = self.app.navidrome.address("stream", id=song_id, format="mp3", maxBitRate=320)
-        request = urllib.request.Request(url)
-        if self.headers.get("Range"):
-            request.add_header("Range", self.headers["Range"])
-        try:
-            upstream = urllib.request.urlopen(request, timeout=60)
-        except urllib.error.HTTPError as e:
-            return self._error(e.code, "Navidrome didn't send the song")
-        except (urllib.error.URLError, OSError) as e:
-            return self._error(HTTPStatus.BAD_GATEWAY, f"Navidrome: {getattr(e, 'reason', e)}")
+        upstream, problem = None, None
+        for server, item_id in self.app.store.where(song_id) or [(MAIN, song_id)]:
+            client = self.app.servers.client(server)
+            try:
+                upstream = client.audio(item_id, self.headers.get("Range"))
+                break
+            except urllib.error.HTTPError as e:
+                problem = problem or (e.code, f"{client.label} didn't send the song")
+            except (urllib.error.URLError, OSError) as e:
+                problem = problem or (HTTPStatus.BAD_GATEWAY, f"{client.label}: {getattr(e, 'reason', e)}")
+        if upstream is None:
+            return self._error(*problem)
         with upstream:
             self.send_response(upstream.status)
             for name in PASSTHROUGH:
@@ -885,14 +1034,15 @@ def main():
     app.about.start()
     app.store.event(f"Started: model {config.model}, device {config.device}"
                     f"{' (half precision on a GPU)' if config.float16 else ''}")
-    if not app.navidrome.configured:
-        app.store.event("Navidrome isn't set up: set NAVIDROME_URL, NAVIDROME_USER and NAVIDROME_PASSWORD", "error")
-    else:
+    if not app.servers.all():
+        app.store.event("No music server is set up: set NAVIDROME_URL, NAVIDROME_USER and NAVIDROME_PASSWORD, or add "
+                        "one on the page (Setup)", "error")
+    for server in app.servers.all():
         try:
-            info = app.navidrome.ping()
-            app.store.event(f"Navidrome answers ({info.get('type') or 'server'} {info.get('version') or ''})".strip())
+            info = app.servers.client(server["id"]).ping()
+            app.store.event(f"{server['name']} answers ({info.get('type') or 'server'} {info.get('version') or ''})".strip())
         except SubsonicError as e:
-            app.store.event(f"Navidrome doesn't answer: {e}", "error")
+            app.store.event(f"{server['name']} doesn't answer: {e}", "error")
     def background():  # after the page is up: a big library takes minutes
         try:
             app.worker.regrid()

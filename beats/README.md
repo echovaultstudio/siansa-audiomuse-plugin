@@ -1,18 +1,18 @@
 # Siansa Beats
 
 A test of [Beat This!](https://github.com/CPJKU/beat_this) (CPJKU, 2024), the beat and downbeat tracker, on your own
-music. It reads the songs of the Navidrome libraries you choose, finds every beat and downbeat in each, and shows them on a page:
+music. It reads the songs of the libraries you choose on Navidrome, Emby or Jellyfin, finds every beat and downbeat in each, and shows them on a page:
 its tempo and bars next to the file's BPM tag, so misread songs stand out. You can play any song with a click on each beat to hear whether they're right.
 
-It runs in its own container, reads Navidrome without changing anything, and keeps what it finds in its own
-database. Nothing is written to your music files or Navidrome. Siansa Dev talks to it directly (Settings › Connections
+It runs in its own container, reads your music servers without changing anything, and keeps what it finds in its own
+database. Nothing is written to your music files or the servers. Siansa Dev talks to it directly (Settings › Connections
 › Siansa Beats) for each song's loudness, fades, key and beat grid, the genres and their descriptions: the
 [app's API](#the-apps-api-v1). The Siansa Beats (dev) plugin on AudioMuse-AI can still pass its beat grids on
 (`GET /api/grids`) for those who'd rather keep the plugin.
 
 | | |
 |---|---|
-| **Reads** | The Navidrome libraries chosen on its page (all of them, or leaving some out, as compilations): each song's original file, BPM tag and genre. |
+| **Reads** | The libraries chosen on its page (all of them, or leaving some out, as compilations) of Navidrome, Emby and Jellyfin, several of them and several users of one: each song's original file, BPM tag and genre. A song two servers have is analysed once. |
 | **Finds** | Every beat and downbeat (Beat This!, the `final0` model, on the CPU or an NVIDIA GPU), and from them the tempo of the whole song and of each end (the first and last 30 seconds), how steady it is, the beats a bar and the first downbeat. Each song's loudness (EBU R128) and how it fades in and out, and its key. |
 | **Keeps** | `/data/beats.db` (SQLite) in the container's volume. Each song is downloaded to `/data` while it's read, then deleted. |
 | **Shows** | A page at port 8090: what it's doing, a table of every song with what the readings say together, and a page per song with its beats, a player with clicks on the beats, and its tempo along the song. |
@@ -82,20 +82,48 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
 
 The page shows one page at a time, picked from the menu on the left (on a phone, behind the ☰ button), in three groups.
 The button at the top right says whether everything works (a green dot, "All working"); tap it for each connection
-(Navidrome, AudioMuse-AI), the models and how the app connects.
+(your music servers, AudioMuse-AI), the models and how the app connects.
 Each page has its own address (`#songs`, `#loudness`…), so Back and bookmarks work:
 
 | Group | Page | What's on it |
 |---|---|---|
 | Analysis | **Overview** | What's being done now, how far the beats, loudness and genres are, and the latest activity |
-| | **Libraries** | The Navidrome libraries to analyse, Start analysis, Look for new songs, and starting over |
+| | **Libraries** | The server's libraries to analyse, Start analysis, Look for new songs, and starting over |
 | | **Songs** | The table, and a song's page (its beats, loudness, fades, key and genres) when one is open |
 | For the Siansa app | **Loudness & keys** | How many songs are measured (here or taken from the plugin), how loud they are, how they start and end, their keys, and the ones that couldn't be measured |
 | | **Genres** | The style model's progress, how often it agrees with the tags, the genre descriptions (with **Fetch all now**), and every genre by songs |
 | | **Similar music** | Whether AudioMuse-AI is set up, and a song to try: the albums and artists like it |
 | | **Bad blends** | The song changes marked as bad in Siansa Dev |
 | Service | **Activity**, **Log** | What was done, and the container's log with Debug details |
-| | **Setup** | The connections and the model (no passwords), how to connect the app, the debug report |
+| | **Setup** | The music servers (add one, or another user of one), the connections and the model (no passwords), how to connect the app, the debug report |
+
+### Several music servers, and several users of one
+
+Siansa Beats reads **Navidrome, Emby and Jellyfin**, as many as you have (0.23.0). The one in the container's settings
+(`NAVIDROME_URL`…) is the first; add the others under **Setup › Music servers**: its kind, a name, its address, a user
+name and password. It's only kept once it answers and takes the login (**Test** asks without adding). Then tick its
+libraries under **Libraries**.
+
+- **A song two servers have is analysed once.** When a server's library is read, each song is looked for among the
+  songs already here: by its file (the same path, or paths that end alike, as each server has the music folder under
+  its own path: `/music/Artist/Album/01 Song.flac` and `/mnt/media/music/Artist/Album/01 Song.flac`), then by its tags
+  (title, artists and album), then by title and album when the lengths agree. Lengths more than 3 seconds apart never
+  match. A song that can't be placed for sure is analysed as a new one: never guessed. Activity says how many were
+  found and by what ("4,012 already analysed from another server (4,012 by their file)"). So pointing Emby or Jellyfin
+  at the folder Navidrome has costs a read of the library, not days of analysis.
+- **Navidrome's real paths** come from its own API (the one its web page uses), with the same user and password: the
+  path in the Subsonic API is made up from the tags unless the player is set to report real paths.
+- **Another user of the same server** is added the same way (same kind and address, another user name): it sees the
+  libraries that user may, and its songs are the first user's by their ids.
+- **The menu's Music server switch** (shown once there are two) picks whose songs the pages show: the overview's
+  numbers, the libraries, the table, the genres and the loudness are that server's alone.
+- **The default server** is read first and is the one the Siansa app is answered for when it doesn't name one (an app
+  from before 0.23, or the plugin). **Make default** changes it.
+- **Removing a server** forgets the songs only it had; songs another server has too stay, analysed.
+- Passwords added on the page are kept in the data folder (`beats.db`) and never shown, logged or put in the debug
+  report. Emby and Jellyfin are logged in to with the user name and password; the token they give is sent in a header,
+  never in an address. Nothing is ever written to a server.
+- Similar albums and artists are still asked of AudioMuse-AI, by the ids of the server AudioMuse-AI knows.
 
 1. On **Libraries**, tick the libraries to analyse and press **Start analysis**. It reads their songs from Navidrome and works
    through them a song at a time; the top shows the song
@@ -206,6 +234,13 @@ Every change is tested by GitHub Actions (`.github/workflows/beats.yml` in this 
   a fake Navidrome (`tests/test_service.py`): the token login, libraries, the queue, failures, the
   page's API, the audio passing through with seeking, the CSV, the log and debug report (with no secrets in them),
   pause and the password. `tests/test_page_script.py` checks the page's script parses.
+- **Several servers** (`tests/test_match.py`, `tests/test_servers.py`): finding the same song on two servers by its
+  file or tags and never by a guess; fake Emby and Jellyfin servers, each taking only its own way of logging in; a
+  song another server has not analysed again; a song only the other has, analysed from it; a second user of one
+  server; each server's own ids and numbers with `?server=`; and no password in any answer.
+- **Real servers** (`tests/real_servers.py`): real Navidrome, Emby and Jellyfin with the same music (the Siansa app's
+  test servers, their newest releases and the oldest it supports): each one's login, libraries, songs, file paths and
+  downloads, and the songs analysed from Navidrome found again on the other two by their files, none analysed twice.
 - **CPU or GPU** (`tests/test_analyser.py`): which device each `BEATS_DEVICE` gives, and the fallback to the CPU,
   with a note, when a GPU is asked for but missing.
 - **With the model**: both images (CPU and cuda) are built, `tests/make_test_songs.py` makes five songs of known tempo and bars (140,
@@ -263,7 +298,7 @@ On the server, after setting it up:
 
 | Variable | Default | |
 |---|---|---|
-| `NAVIDROME_URL`, `NAVIDROME_USER`, `NAVIDROME_PASSWORD` | | Navidrome, read only. The password never leaves the container: requests carry a salted token. |
+| `NAVIDROME_URL`, `NAVIDROME_USER`, `NAVIDROME_PASSWORD` | | The first music server (Navidrome), read only. The password never leaves the container: requests carry a salted token. More servers (Emby and Jellyfin too) and more users are added on the page, under Setup. |
 | `STYLE_THREADS` | `2` | The style model's CPU threads. |
 | `LOG_LEVEL` | `info` | `debug`: every step of every song in the log, from the start. The page's **Debug details** switch changes it while running and wins over this. |
 | `BEATS_MODEL` | `final0` | `small0` is smaller and faster, a little less exact. Both are in the image. |
@@ -290,6 +325,12 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 | `GET /api/v1/similar/albums?track_id=` | Albums that sound like that song's album, asked of AudioMuse-AI's Siansa plugin (until Siansa Beats works them out itself). |
 | `GET /api/v1/similar/artists?track_id=` or `?artist=` | Artists that sound like that one, the same way. |
 | `POST /api/v1/bad-blends` | A song change marked as bad in the app. |
+
+With several music servers, every one of these takes `?server=`: the id (or name) of the server the app plays from,
+from the capabilities' `servers` (each with its `kind`, `url` and `user`, to tell which is the app's). Ids asked about
+(`profiles`, `bad-blends`) are understood from any server; ids answered (`genre`) are that server's own, and the counts
+(`capabilities`, `genres`) are of its songs. Without `server` the default one is meant. (`similar/…` passes its `server`
+on to AudioMuse-AI, whose own name for a server it is.)
 
 Songs analysed before 0.20 get their loudness, fades and key while the queue is empty: with `AUDIOMUSE_URL` and
 `AUDIOMUSE_TOKEN` set, whatever AudioMuse-AI's Siansa plugin already measured is taken from it (nothing to download),

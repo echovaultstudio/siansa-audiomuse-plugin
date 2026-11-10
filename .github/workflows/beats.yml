@@ -44,8 +44,57 @@ jobs:
         run: cd beats && python3 -P tests/test_analyser.py
       - name: The service against a fake Navidrome and AudioMuse-AI
         run: cd beats && python3 -P tests/test_service.py
+      - name: Several servers (fake Emby and Jellyfin), and finding a song on two of them
+        run: cd beats && python3 -P tests/test_match.py && python3 -P tests/test_servers.py
       - name: The page's script parses
         run: cd beats && python3 -P tests/test_page_script.py
+
+  servers:
+    # Siansa Beats against real Navidrome, Emby and Jellyfin servers with the same music (0.23.0): the Siansa app's test
+    # servers (its scripts/servers, issue #903), their newest releases and the oldest ones the app supports. No model.
+    name: Real servers (${{ matrix.set }})
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - set: newest
+            navidrome: latest
+            emby: latest
+            jellyfin: latest
+          - set: oldest supported
+            navidrome: 0.64.2
+            emby: 4.8.10.0
+            jellyfin: 10.10.7
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: echovaultstudio/Siansa
+          path: siansa-app
+          sparse-checkout: scripts/servers
+      - name: numpy and ffmpeg (for making the test library)
+        run: |
+          python3 -m pip install --quiet --break-system-packages --user numpy==1.26.4 imageio-ffmpeg==0.6.0
+          echo "FFMPEG=$(python3 -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" >> "$GITHUB_ENV"
+      - name: Start Navidrome, Emby and Jellyfin with the test library
+        env:
+          ND_VERSION: ${{ matrix.navidrome }}
+          EMBY_VERSION: ${{ matrix.emby }}
+          JELLYFIN_VERSION: ${{ matrix.jellyfin }}
+        run: |
+          siansa-app/scripts/servers/start.sh
+          cat "$RUNNER_TEMP/siansa-servers/servers.env" >> "$GITHUB_ENV"
+      - name: Siansa Beats on every server, and each song analysed once
+        run: cd beats && python3 -P tests/real_servers.py "$SIANSA_TEST_SERVERS" "$SIANSA_TEST_LIBRARY"
+      - name: The servers' logs
+        if: failure()
+        run: |
+          tail -40 "$RUNNER_TEMP/siansa-servers/navidrome.log" || true
+          docker logs siansa-emby 2>&1 | tail -40 || true
+          docker logs siansa-jellyfin 2>&1 | tail -40 || true
 
   image:
     # Two images: the CPU one (latest) and the cuda one for an NVIDIA GPU (cuda). GitHub's runners have no GPU, so the
