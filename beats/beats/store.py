@@ -172,6 +172,11 @@ class Store:
                            "WHERE COALESCE(j.state, '') != 'failed'")[0]["n"]  # a song that failed has no sound to hear
         return {"done": by.get("sound", 0), "failed": by.get("sound-failed", 0), "total": total}
 
+    def tag_genres(self, limit=300):
+        """The songs' own genre tags, most songs first: ``["Hard Rock", …]`` (the genres Siansa shows without a vote)."""
+        return [r["label"] for r in self._rows(
+            "SELECT label, COUNT(*) AS n FROM genres WHERE source='tag' GROUP BY label ORDER BY n DESC LIMIT ?", (limit,))]
+
     def genre_rows(self, song_ids=None, sources=("sound", "tag")):
         """``{song_id: {source: [(label, weight)]}}`` of ``song_ids`` (every song when ``None``), for voting."""
         out = {}

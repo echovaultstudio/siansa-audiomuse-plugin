@@ -80,7 +80,7 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
 
 ## Use it
 
-The page shows one page at a time, picked from the menu on the left (a row of tabs on a phone), in three groups.
+The page shows one page at a time, picked from the menu on the left (on a phone, behind the ☰ button), in three groups.
 Each page has its own address (`#songs`, `#loudness`…), so Back and bookmarks work:
 
 | Group | Page | What's on it |
@@ -89,7 +89,7 @@ Each page has its own address (`#songs`, `#loudness`…), so Back and bookmarks 
 | | **Libraries** | The Navidrome libraries to analyse, Start analysis, Look for new songs, and starting over |
 | | **Songs** | The table, and a song's page (its beats, loudness, fades, key and genres) when one is open |
 | For the Siansa app | **Loudness & keys** | How many songs are measured (here or taken from the plugin), how loud they are, how they start and end, their keys, and the ones that couldn't be measured |
-| | **Genres** | The style model's progress, how often it agrees with the tags, and every genre by songs |
+| | **Genres** | The style model's progress, how often it agrees with the tags, the genre descriptions (with **Fetch all now**), and every genre by songs |
 | | **Similar music** | Whether AudioMuse-AI is set up, and a song to try: the albums and artists like it |
 | | **Bad blends** | The song changes marked as bad in Siansa Dev |
 | Service | **Activity**, **Log** | What was done, and the container's log with Debug details |
@@ -284,7 +284,7 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 | `GET /api/v1/profiles?ids=a,b` | Up to 500 songs: loudness (`ref_lufs`), fades (`start_ramp`, `end_ramp`), key and scale, and the beat grid at each end. Songs with nothing yet are `pending`. |
 | `GET /api/v1/genres` | Every style with songs voted into it. |
 | `GET /api/v1/genre?name=&limit=` | The songs of a genre, by vote. |
-| `GET /api/v1/genre/about?name=` | A short description of a genre, from Wikipedia. |
+| `GET /api/v1/genre/about?name=` | A short description of a genre, from Wikipedia. Every genre's (the voted ones and the songs' tags) is fetched in the background every 6 hours and kept; one not fetched yet waits up to 3 s and then answers `"pending": true`, to ask again shortly. |
 | `GET /api/v1/similar/albums?track_id=` | Albums that sound like that song's album, asked of AudioMuse-AI's Siansa plugin (until Siansa Beats works them out itself). |
 | `GET /api/v1/similar/artists?track_id=` or `?artist=` | Artists that sound like that one, the same way. |
 | `POST /api/v1/bad-blends` | A song change marked as bad in the app. |

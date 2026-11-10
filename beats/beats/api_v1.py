@@ -122,9 +122,7 @@ def get(handler, path, query):
         if not name:
             return handler._error(HTTPStatus.BAD_REQUEST, "name needed: the genre, as a tag (Trance)") or True
         if path.endswith("/about"):
-            from . import about
-
-            return handler._json({"name": name, "about": about.about(app.store, name)}) or True
+            return handler._json(app.genre_about(name)) or True
         try:
             limit = max(1, min(2000, int(arg("limit", "300") or 300)))
         except ValueError:

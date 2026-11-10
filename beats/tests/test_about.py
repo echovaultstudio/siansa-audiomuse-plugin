@@ -69,6 +69,59 @@ class AboutTest(unittest.TestCase):
         about.about(store, "Mercury", get, lambda: now[0])
         self.assertGreater(len(asked), before)
 
+    def test_wikipedia_out_of_reach_isnt_nothing_on_it(self):
+        # A timeout used to be kept as "nothing on it" for a week: the genre page showed none.
+        store = Store(os.path.join(tempfile.mkdtemp(), "b.db"))
+        now = [1_000_000.0]
+        self.assertIsNone(about.about(store, "House", lambda title: about.FAILED, lambda: now[0]))
+        self.assertTrue(store.setting(about.key_of("House"))["failed"])
+        self.assertIsNone(about.about(store, "House", PAGES.get, lambda: now[0] + 60))  # not asked again at once
+        now[0] += about.AGAIN_FAILED + 1
+        self.assertEqual("House music", about.about(store, "House", PAGES.get, lambda: now[0])["title"])
+        # One title out of reach and none of the others it: tried again, not "nothing".
+        self.assertIs(about.lookup("Mercury", lambda t: about.FAILED if t == "Mercury (music)" else PAGES.get(t)), about.FAILED)
+
+    def test_the_keeper_fetches_every_genre_and_answers_at_once(self):
+        store = Store(os.path.join(tempfile.mkdtemp(), "b.db"))
+        asked = []
+
+        def get(title):
+            asked.append(title)
+            return PAGES.get(title)
+
+        keeper = about.Keeper(store, lambda: ["House", "Dubstep", "Mercury"], get)
+        keeper.PAUSE = 0
+        self.assertEqual(keeper.counts()["waiting"], 3)
+        self.assertEqual(keeper.run_round(), 3)
+        self.assertEqual(keeper.counts(), {"genres": 3, "found": 2, "missing": 1, "failed": 0, "waiting": 0})
+        before = len(asked)
+        found, pending = keeper.answer("House")
+        self.assertEqual((found["title"], pending), ("House music", False))
+        self.assertEqual(before, len(asked))  # kept: Wikipedia isn't asked
+        self.assertEqual(keeper.run_round(), 0)  # nothing left to look up
+
+    def test_a_slow_lookup_says_pending_and_carries_on(self):
+        import threading
+
+        store = Store(os.path.join(tempfile.mkdtemp(), "b.db"))
+        go = threading.Event()
+
+        def slow(title):
+            go.wait(5)
+            return PAGES.get(title)
+
+        keeper = about.Keeper(store, lambda: [], slow)
+        keeper.WAIT = 0.2
+        self.assertEqual(keeper.answer("Dubstep"), (None, True))
+        go.set()
+        for _ in range(50):
+            found, pending = keeper.answer("Dubstep")
+            if found:
+                break
+            import time
+            time.sleep(0.1)
+        self.assertEqual(found["title"], "Dubstep")
+
 
 if __name__ == "__main__":
     unittest.main()

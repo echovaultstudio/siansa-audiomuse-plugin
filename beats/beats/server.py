@@ -176,6 +176,9 @@ class App:
         self.kept_genres = Kept(self._genre_list, 60, changes)
         self.kept_style_counts = Kept(self.store.style_counts, 30, changes)  # its total follows songs added, too
         self.worker.on_voted = lambda: self.kept_genres.refresh()
+        from . import about as about_module
+
+        self.about = about_module.Keeper(self.store, self.about_names)
         if self.audiomuse.configured:  # what the Siansa plugin already measured needn't be downloaded again
             self.worker.importer = self.audiomuse.profiles
 
@@ -390,6 +393,20 @@ class App:
                 styling["for_seconds"] = round(time.time() - styling.pop("since"), 1)
             out["current"] = styling
         return out
+
+    def about_names(self):
+        """Every genre the app may show a page for: the voted ones as the app names them, then the songs' tags."""
+        names, seen = [], set()
+        for name in [g["name"] for g in self.genre_list()] + self.store.tag_genres():
+            if name and name.lower() not in seen:
+                seen.add(name.lower())
+                names.append(name)
+        return names
+
+    def genre_about(self, name):
+        """``{"name", "about", "pending"}``: a kept description at once; a new one waits a few seconds at most."""
+        found, pending = self.about.answer(name)
+        return {"name": name, "about": found, "pending": pending}
 
     def genre_list(self):
         """Every style with songs voted into it, most first, kept ready (:class:`Kept`): ``[{"label", "genre", "style",
@@ -615,14 +632,12 @@ class Handler(BaseHTTPRequestHandler):
                 with open(PAGE, "rb") as f:
                     return self._send(HTTPStatus.OK, f.read(), "text/html; charset=utf-8")
             if path == "/api/genres":
-                return self._json({"styles": app.styles_status(), "genres": app.genre_list()})
+                return self._json({"styles": app.styles_status(), "genres": app.genre_list(), "about": app.about.status()})
             if path == "/api/genre/about":
                 name = (query.get("name") or [""])[0].strip()
                 if not name:
                     return self._error(HTTPStatus.BAD_REQUEST, "name needed: the genre, as a tag (Trance)")
-                from . import about
-
-                return self._json({"name": name, "about": about.about(app.store, name)})
+                return self._json(app.genre_about(name))
             if path == "/api/genre":
                 name = (query.get("name") or [""])[0].strip()
                 if not name:
@@ -719,6 +734,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/bad-blends":
                 answer, problem = api_v1.add_bad_blend(app, body)
                 return self._error(HTTPStatus.BAD_REQUEST, problem) if problem else self._json(answer)
+            if path == "/api/genres/about/fetch":
+                return self._json(app.about.fetch_all())
             if path == "/api/libraries/read":
                 return self._json(app.worker.read_libraries())
             if path == "/api/analyse-all":
@@ -858,6 +875,7 @@ def main():
         log.set_level(chosen)
     _log.info("Log level %s (%s)", log.level(), "chosen on the page" if chosen else "LOG_LEVEL")
     app.worker.start()
+    app.about.start()
     app.store.event(f"Started: model {config.model}, device {config.device}"
                     f"{' (half precision on a GPU)' if config.float16 else ''}")
     if not app.navidrome.configured:
