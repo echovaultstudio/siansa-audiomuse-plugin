@@ -198,6 +198,16 @@ class Store:
         return {r["label"]: r["n"] for r in self._rows(
             "SELECT label, COUNT(*) AS n FROM genres WHERE source='vote' AND weight >= ? GROUP BY label", (minimum,))}
 
+    def vote_counts_by_library(self, minimum):
+        """``{label: {library: songs}}``: :meth:`vote_counts` split by the Navidrome library the songs are in, so the
+        app can leave out a genre whose songs are all in libraries it hides."""
+        out = {}
+        for r in self._rows(
+                "SELECT g.label, COALESCE(s.folder, '') AS folder, COUNT(*) AS n FROM genres g JOIN songs s ON s.id = g.song_id "
+                "WHERE g.source='vote' AND g.weight >= ? GROUP BY g.label, s.folder", (minimum,)):
+            out.setdefault(r["label"], {})[str(r["folder"])] = r["n"]
+        return out
+
     def songs_voted(self, labels, minimum, limit):
         """Song ids (random order) with any of ``labels`` in their vote at ``minimum`` or more, at most ``limit``."""
         labels = list(labels)

@@ -724,6 +724,13 @@
      "name": {
       "type": "string",
       "description": "What to ask /api/v1/genre for"
+     },
+     "libraries": {
+      "type": "object",
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "description": "Its songs in each Navidrome library, by the library's id: leave out a genre whose songs are all in libraries the app hides"
      }
     }
    },

@@ -505,6 +505,8 @@ class ServiceTest(Base):
         self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
         self.assertEqual(self.call("/api/v1/genres")["genres"], self.call("/api/genres")["genres"])
+        listed = {g["style"]: g for g in self.call("/api/v1/genres")["genres"]}
+        self.assertEqual(listed["Trance"]["libraries"], {"1": listed["Trance"]["songs"]})  # each library's songs
         trance = self.call("/api/v1/genre?name=Trance")
         self.assertEqual((set(trance["ids"]), trance["styles"]), ({"t140", "t96w"}, ["Electronic---Trance"]))
         for path in ("/api/v1/genre", "/api/v1/genre/about", "/api/v1/genre?name=Trance&limit=x"):
@@ -633,7 +635,7 @@ class ServiceTest(Base):
         self.assertEqual(self.call("/api/genre?name=Opera")["ids"], [])
         listed = self.call("/api/genres")
         self.assertEqual(listed["genres"][0], {"label": "Electronic---Trance", "genre": "Electronic", "style": "Trance",
-                                               "songs": 2, "name": "Trance"})
+                                               "songs": 2, "name": "Trance", "libraries": {"1": 2}})
         status = self.call("/api/status")["styles"]
         self.assertTrue(status["available"])
         self.assertEqual(status["done"], 3)

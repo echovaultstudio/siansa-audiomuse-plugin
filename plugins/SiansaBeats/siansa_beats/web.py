@@ -33,7 +33,7 @@ from plugin.api import enqueue, get_db, get_setting, logger, manage_plugins_url,
 from . import beats_service, generations, jobs, similarity, status, store
 
 PLUGIN_ID = "siansa_beats"
-VERSION = "0.5.2"  # the newest in plugin.json: AudioMuse-AI and the Siansa app show it (test_version.py)
+VERSION = "0.5.3"  # the newest in plugin.json: AudioMuse-AI and the Siansa app show it (test_version.py)
 SCHEMA_VERSION = 1
 MAX_IDS = 500
 
@@ -220,7 +220,8 @@ def genre_list():
         logger.info("siansa_beats: no genre list from Siansa Beats: %s", e)
         return _error(str(e), 502)
     listed = [{"name": g.get("name") or g.get("style"), "style": g.get("style"), "genre": g.get("genre"),
-               "songs": g.get("songs", 0)} for g in (answer.get("genres") or [])[:limit]]
+               "songs": g.get("songs", 0), "libraries": g.get("libraries") or {}}
+              for g in (answer.get("genres") or [])[:limit]]
     return jsonify({"genres": listed, "available": bool((answer.get("styles") or {}).get("available")),
                     "source": "siansa_beats"})
 

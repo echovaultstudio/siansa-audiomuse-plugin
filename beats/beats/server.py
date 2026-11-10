@@ -325,11 +325,12 @@ class App:
 
     def genre_list(self):
         """Every style with songs voted into it, most first, kept ready (:class:`Kept`): ``[{"label", "genre", "style",
-        "songs", "name"}]``."""
+        "songs", "name", "libraries"}]``; ``libraries``: the songs in each Navidrome library, by its id."""
         return self.kept_genres.get()
 
     def _genre_list(self):
         counts = self.store.vote_counts(genres_module.RADIO_MIN)
+        by_library = self.store.vote_counts_by_library(genres_module.RADIO_MIN)
         ranked = sorted(counts.items(), key=lambda p: -p[1])
         named = {}
         for label, _ in ranked:
@@ -340,7 +341,8 @@ class App:
             style = style or label
             # "name": what a radio asks for: the style, or "Genre / Style" when two genres share its name.
             out.append({"label": label, "genre": genre, "style": style, "songs": n,
-                        "name": f"{genre} / {style}" if len(named[style]) > 1 else style})
+                        "name": f"{genre} / {style}" if len(named[style]) > 1 else style,
+                        "libraries": by_library.get(label, {})})
         return out
 
     def genre_songs(self, name, limit=300):
