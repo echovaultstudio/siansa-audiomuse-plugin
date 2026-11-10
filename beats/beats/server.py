@@ -6,11 +6,14 @@ Run with ``python -m beats.server``. Set up with environment variables (see the 
     NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASSWORD   the music server (read only)
     BEATS_MODEL (final0 | small0), BEATS_DEVICE (auto | cpu | cuda | cuda:N), BEATS_FLOAT16, BEATS_THREADS
     BEATS_PASSWORD                                       optional: the page and API ask for it (user "siansa")
+    BEATS_API_KEY                                        optional: a key for the Siansa app instead of the password
+                                                         (``Authorization: Bearer <key>``; the password works there too)
     DATA_DIR (/data), MODELS_DIR (/models), PORT (8090)
     STYLE_THREADS (2)                                   the style model's CPU threads
     LOG_LEVEL (info | debug)                             how much the log says at start (the page can change it)
 
-API (JSON):
+The Siansa app's API is :mod:`beats.api_v1` (``/api/v1/…``, described in ``beats/openapi.json``). The rest, for the
+page (JSON):
 
     GET  /api/health                  {"status": "ok", "model", "model_loaded"}
     GET  /api/status                  the queue, what's being done, setup and recent activity
@@ -63,7 +66,7 @@ import urllib.request
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import __version__, grid
+from . import __version__, api_v1, grid, loudness
 from .store import Store
 from .subsonic import Subsonic, SubsonicError
 from .worker import Worker
@@ -88,6 +91,7 @@ class Config:
         self.threads = int(env.get("BEATS_THREADS", "0") or 0)
         self.style_threads = int(env.get("STYLE_THREADS", "2") or 2)
         self.password = env.get("BEATS_PASSWORD", "")
+        self.api_key = env.get("BEATS_API_KEY", "")
         self.data_dir = env.get("DATA_DIR", "/data")
         self.models_dir = env.get("MODELS_DIR", "/models")
         self.port = int(env.get("PORT", "8090"))
@@ -148,7 +152,7 @@ class Kept:
 class App:
     """Everything the handler needs, so the tests can make one with stand-ins."""
 
-    def __init__(self, config, tracker=None, decode=None, measure=None, style=None):
+    def __init__(self, config, tracker=None, decode=None, measure=None, style=None, sound=None):
         from . import analyser
         from . import style as style_module
 
@@ -160,7 +164,7 @@ class App:
                                                     config.float16)
         self.style = style if style is not None else style_module.StyleModel(config.models_dir, config.style_threads, config.device)
         self.worker = Worker(self.store, self.navidrome, self.tracker, decode or analyser.decode,
-                             config.data_dir, config.model, measure, self.style)
+                             config.data_dir, config.model, measure, self.style, sound)
         self.started = time.time()
         # Answers the page and the app ask for often, kept ready: the genre list changes only when songs are voted,
         # the styles' counts with each song heard (the page asks every 2 s).
@@ -281,6 +285,8 @@ class App:
             "next": preparing,
             "bad_blends": self.store.bad_blend_count(),
             "styles": self.styles_status(),
+            "loudness": {**self.store.measure_counts(loudness.VERSION),
+                         "measuring": dict(worker.measuring) if worker.measuring else None},
             "regridding": dict(worker.regridding) if worker.regridding else None,
             "libraries": {"chosen": self.store.setting("folders") or [], "read_at": self.store.setting("library_read_at")},
             "paused": worker.paused,
@@ -461,11 +467,14 @@ class Handler(BaseHTTPRequestHandler):
     # ---- plumbing ----
 
     def _authorised(self):
-        password = self.app.config.password
-        if not password:
+        password, api_key = self.app.config.password, self.app.config.api_key
+        if not password and not api_key:
             return True
         header = self.headers.get("Authorization", "")
-        if header.startswith("Basic "):
+        if header.startswith("Bearer "):
+            given = header[7:].strip().encode()
+            return any(hmac.compare_digest(given, k.encode()) for k in (api_key, password) if k)
+        if header.startswith("Basic ") and password:
             try:
                 user, _, given = base64.b64decode(header[6:]).decode().partition(":")
             except (ValueError, UnicodeDecodeError):
@@ -506,7 +515,7 @@ class Handler(BaseHTTPRequestHandler):
     def _guard(self):
         if self._authorised():
             return True
-        self._send(HTTPStatus.UNAUTHORIZED, {"error": "password needed"},
+        self._send(HTTPStatus.UNAUTHORIZED, {"error": "password or API key needed"},
                    headers={"WWW-Authenticate": 'Basic realm="Siansa Beats", charset="UTF-8"'})
         return False
 
@@ -525,6 +534,8 @@ class Handler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
         app = self.app
         try:
+            if path.startswith("/api/v1/") and api_v1.get(self, path, query):
+                return None
             if path in ("/", "/index.html"):
                 with open(PAGE, "rb") as f:
                     return self._send(HTTPStatus.OK, f.read(), "text/html; charset=utf-8")
@@ -626,17 +637,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(app.worker.choose(ids))
                 except ValueError as e:
                     return self._error(HTTPStatus.BAD_REQUEST, str(e))
+            if path.startswith("/api/v1/") and api_v1.post(self, path, body):
+                return None
             if path == "/api/bad-blends":
-                from_id, to_id = str(body.get("from_id") or "").strip(), str(body.get("to_id") or "").strip()
-                if not from_id or not to_id:
-                    return self._error(HTTPStatus.BAD_REQUEST, "from_id and to_id needed: the two songs")
-                details = body.get("details") if isinstance(body.get("details"), dict) else {}
-                technique = str(body.get("technique") or "")[:80]
-                blend_id = app.store.add_bad_blend(from_id, to_id, technique, details)
-                names = {s: (app.store.song(s) or {}).get("title", s) for s in (from_id, to_id)}
-                app.store.event(f"Bad blend marked in the app: {names[from_id]} into {names[to_id]}"
-                                + (f" ({technique})" if technique else ""), "warn")
-                return self._json({"id": blend_id})
+                answer, problem = api_v1.add_bad_blend(app, body)
+                return self._error(HTTPStatus.BAD_REQUEST, problem) if problem else self._json(answer)
             if path == "/api/libraries/read":
                 return self._json(app.worker.read_libraries())
             if path == "/api/analyse-all":

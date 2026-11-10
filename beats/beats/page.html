@@ -346,6 +346,9 @@ async function refreshStatus() {
   $("counts").innerHTML = `<span><b>${total}</b> songs</span><span><b>${done}</b> done</span><span><b>${queued + busy}</b> to go</span><span><b>${failed}</b> failed</span>` +
     (avg ? `<span>about <b>${fmt(avg)}</b> s a song in the model</span>` : "") +
     (s.regridding ? `<span>working out again: <b>${s.regridding.done}</b> of ${s.regridding.total}</span>` : "") +
+    (s.loudness ? `<span title="Loudness, fades and key, for the Siansa app"><b>${s.loudness.measured}</b> measured for loudness` +
+      (s.loudness.waiting ? ` · ${s.loudness.waiting} to go` : "") +
+      (s.loudness.measuring ? ` · now ${esc(s.loudness.measuring.artist)} – ${esc(s.loudness.measuring.title)}` : "") + `</span>` : "") +
     (s.last_error ? `<span>last error: ${esc(s.last_error)}</span>` : "");
   $("events").innerHTML = s.events.map((e) => `<li class="${esc(e.level)}"><time>${new Date(e.at * 1000).toLocaleTimeString()}</time>${esc(e.message)}</li>`).join("") || `<li>Nothing yet.</li>`;
   const key = JSON.stringify(c) + (s.current ? s.current.id + s.current.step : "");

@@ -1,0 +1,684 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "Siansa Beats",
+  "version": "1",
+  "description": "What the Siansa app asks Siansa Beats for. Within v1 fields are only added, never renamed or removed. Song ids are the music server's (Navidrome's). When BEATS_PASSWORD or BEATS_API_KEY is set, every path but /api/health needs Authorization: Bearer <key or password> (or Basic with user siansa and the password)."
+ },
+ "servers": [
+  {
+   "url": "/"
+  }
+ ],
+ "security": [
+  {
+   "bearer": []
+  },
+  {
+   "basic": []
+  }
+ ],
+ "paths": {
+  "/api/health": {
+   "get": {
+    "summary": "Whether the service runs (always open)",
+    "security": [],
+    "responses": {
+     "200": {
+      "description": "Running",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Health"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/capabilities": {
+   "get": {
+    "summary": "What this Siansa Beats can do now, and how far it is",
+    "responses": {
+     "200": {
+      "description": "Its features",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Capabilities"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "The password or API key is needed"
+     }
+    }
+   }
+  },
+  "/api/v1/profiles": {
+   "get": {
+    "summary": "Loudness, fades, key and beat grids of up to 500 songs",
+    "parameters": [
+     {
+      "name": "ids",
+      "in": "query",
+      "required": true,
+      "description": "Song ids (Navidrome's), comma-separated, at most 500",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "The songs that have one; the rest are pending",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Profiles"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Something was missing or wrong: {\"error\": why}",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "The password or API key is needed"
+     }
+    }
+   }
+  },
+  "/api/v1/genres": {
+   "get": {
+    "summary": "Every style with songs voted into it, most songs first",
+    "responses": {
+     "200": {
+      "description": "The styles",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Genres"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "The password or API key is needed"
+     }
+    }
+   }
+  },
+  "/api/v1/genre": {
+   "get": {
+    "summary": "The songs of a genre, by vote",
+    "parameters": [
+     {
+      "name": "name",
+      "in": "query",
+      "required": true,
+      "description": "The genre as a tag (Trance, or Electronic / Trance)",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 2000,
+       "default": 300
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Its songs (none when the style model isn't there: use the tags)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GenreSongs"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Something was missing or wrong: {\"error\": why}",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "The password or API key is needed"
+     }
+    }
+   }
+  },
+  "/api/v1/genre/about": {
+   "get": {
+    "summary": "A short description of a genre, from Wikipedia",
+    "parameters": [
+     {
+      "name": "name",
+      "in": "query",
+      "required": true,
+      "description": "The genre as a tag (Trance, or Electronic / Trance)",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Its description, or about null",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GenreAbout"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Something was missing or wrong: {\"error\": why}",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "The password or API key is needed"
+     }
+    }
+   }
+  },
+  "/api/v1/bad-blends": {
+   "post": {
+    "summary": "A song change marked as bad in the app",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/BadBlend"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Kept",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "integer"
+          }
+         }
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Something was missing or wrong: {\"error\": why}",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "The password or API key is needed"
+     }
+    }
+   }
+  },
+  "/api/v1/openapi.json": {
+   "get": {
+    "summary": "This description",
+    "responses": {
+     "200": {
+      "description": "OpenAPI 3.1"
+     }
+    }
+   }
+  }
+ },
+ "components": {
+  "securitySchemes": {
+   "bearer": {
+    "type": "http",
+    "scheme": "bearer",
+    "description": "BEATS_API_KEY or BEATS_PASSWORD"
+   },
+   "basic": {
+    "type": "http",
+    "scheme": "basic",
+    "description": "User siansa, password BEATS_PASSWORD"
+   }
+  },
+  "schemas": {
+   "Error": {
+    "type": "object",
+    "properties": {
+     "error": {
+      "type": "string"
+     }
+    }
+   },
+   "Health": {
+    "type": "object",
+    "properties": {
+     "status": {
+      "type": "string",
+      "const": "ok"
+     },
+     "version": {
+      "type": "string"
+     },
+     "model": {
+      "type": "string"
+     },
+     "model_loaded": {
+      "type": "boolean"
+     }
+    }
+   },
+   "Feature": {
+    "type": "object",
+    "required": [
+     "available"
+    ],
+    "properties": {
+     "available": {
+      "type": "boolean"
+     },
+     "songs": {
+      "type": "integer",
+      "description": "Songs that have it"
+     }
+    },
+    "additionalProperties": true
+   },
+   "Capabilities": {
+    "type": "object",
+    "required": [
+     "service",
+     "version",
+     "api",
+     "features"
+    ],
+    "properties": {
+     "service": {
+      "type": "string",
+      "const": "siansa-beats"
+     },
+     "version": {
+      "type": "string"
+     },
+     "api": {
+      "type": "integer",
+      "description": "The newest API version it answers"
+     },
+     "apis": {
+      "type": "array",
+      "items": {
+       "type": "integer"
+      }
+     },
+     "music_server": {
+      "type": "object",
+      "properties": {
+       "kind": {
+        "type": "string"
+       },
+       "set_up": {
+        "type": "boolean"
+       }
+      }
+     },
+     "songs": {
+      "type": "object",
+      "properties": {
+       "known": {
+        "type": "integer"
+       },
+       "analysed": {
+        "type": "integer"
+       },
+       "failed": {
+        "type": "integer"
+       },
+       "waiting": {
+        "type": "integer"
+       }
+      }
+     },
+     "features": {
+      "type": "object",
+      "description": "beat_grids, loudness, keys, genres, genre_about, bad_blends, similar; more may come",
+      "additionalProperties": {
+       "$ref": "#/components/schemas/Feature"
+      }
+     },
+     "limits": {
+      "type": "object",
+      "properties": {
+       "profile_ids": {
+        "type": "integer"
+       },
+       "genre_songs": {
+        "type": "integer"
+       }
+      }
+     }
+    }
+   },
+   "Profile": {
+    "type": "object",
+    "required": [
+     "track_id",
+     "ref_lufs",
+     "start_ramp",
+     "end_ramp",
+     "duration_ms"
+    ],
+    "properties": {
+     "track_id": {
+      "type": "string"
+     },
+     "ref_lufs": {
+      "type": [
+       "number",
+       "null"
+      ],
+      "description": "Integrated loudness (BS.1770, LUFS); null when not measured yet or silent"
+     },
+     "start_ramp": {
+      "type": "string",
+      "description": "How soon the song reaches each level: base64 of 3-byte (int8 dB, uint16le 100 ms chunk) pairs"
+     },
+     "end_ramp": {
+      "type": "string",
+      "description": "How long before the end the song is last at each level, the same way"
+     },
+     "duration_ms": {
+      "type": "integer"
+     },
+     "key": {
+      "type": "string",
+      "description": "C, C#, D \u2026 B"
+     },
+     "scale": {
+      "type": "string",
+      "enum": [
+       "major",
+       "minor"
+      ]
+     },
+     "intro_bpm": {
+      "type": "number",
+      "description": "Tempo at this end (intro)"
+     },
+     "intro_beat_ms": {
+      "type": "number",
+      "description": "A beat on the grid (ms from the start) (intro)"
+     },
+     "intro_bar_ms": {
+      "type": "number",
+      "description": "A downbeat on the grid (ms) (intro)"
+     },
+     "intro_rhythm": {
+      "type": "number",
+      "description": "How clear the beat is, 0..1 (intro)"
+     },
+     "intro_steady": {
+      "type": "number",
+      "description": "How steady the tempo is, 0..1 (intro)"
+     },
+     "intro_phrase_ms": {
+      "type": "number",
+      "description": "Where a phrase starts (ms) (intro)"
+     },
+     "intro_phrase_bars": {
+      "type": "number",
+      "description": "Bars in a phrase (intro)"
+     },
+     "intro_lock_ms": {
+      "type": "number",
+      "description": "Where the beat locks in (ms) (intro)"
+     },
+     "intro_bass_bars": {
+      "type": "number",
+      "description": "Bars before the bass comes in (intro)"
+     },
+     "intro_energy": {
+      "type": "number",
+      "description": "Loudness of this end against the song (dB) (intro)"
+     },
+     "outro_bpm": {
+      "type": "number",
+      "description": "Tempo at this end (outro)"
+     },
+     "outro_beat_ms": {
+      "type": "number",
+      "description": "A beat on the grid (ms from the start) (outro)"
+     },
+     "outro_bar_ms": {
+      "type": "number",
+      "description": "A downbeat on the grid (ms) (outro)"
+     },
+     "outro_rhythm": {
+      "type": "number",
+      "description": "How clear the beat is, 0..1 (outro)"
+     },
+     "outro_steady": {
+      "type": "number",
+      "description": "How steady the tempo is, 0..1 (outro)"
+     },
+     "outro_phrase_ms": {
+      "type": "number",
+      "description": "Where a phrase starts (ms) (outro)"
+     },
+     "outro_phrase_bars": {
+      "type": "number",
+      "description": "Bars in a phrase (outro)"
+     },
+     "outro_lock_ms": {
+      "type": "number",
+      "description": "Where the beat locks in (ms) (outro)"
+     },
+     "outro_bass_bars": {
+      "type": "number",
+      "description": "Bars before the bass comes in (outro)"
+     },
+     "outro_energy": {
+      "type": "number",
+      "description": "Loudness of this end against the song (dB) (outro)"
+     },
+     "beats_until_ms": {
+      "type": "number",
+      "description": "Where the beat stops well before the end (ms)"
+     },
+     "mix_track": {
+      "type": "boolean",
+      "description": "Part of a continuous mix"
+     },
+     "drops_ms": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      }
+     },
+     "breakdowns_ms": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      }
+     },
+     "beat_grid": {
+      "type": "string",
+      "const": "siansa_beats",
+      "description": "Present when the beat grid fields are there"
+     }
+    }
+   },
+   "Profiles": {
+    "type": "object",
+    "properties": {
+     "schema_version": {
+      "type": "integer",
+      "const": 1
+     },
+     "profiles": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Profile"
+      }
+     },
+     "pending": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Asked for, but nothing measured yet"
+     }
+    }
+   },
+   "Genre": {
+    "type": "object",
+    "properties": {
+     "label": {
+      "type": "string"
+     },
+     "genre": {
+      "type": "string"
+     },
+     "style": {
+      "type": "string"
+     },
+     "songs": {
+      "type": "integer"
+     },
+     "name": {
+      "type": "string",
+      "description": "What to ask /api/v1/genre for"
+     }
+    }
+   },
+   "Genres": {
+    "type": "object",
+    "properties": {
+     "styles": {
+      "type": "object",
+      "description": "The style model's state"
+     },
+     "genres": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Genre"
+      }
+     }
+    }
+   },
+   "GenreSongs": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string"
+     },
+     "styles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "genres": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "ids": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "why": {
+      "type": "string"
+     }
+    }
+   },
+   "GenreAbout": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string"
+     },
+     "about": {
+      "type": [
+       "object",
+       "null"
+      ],
+      "properties": {
+       "summary": {
+        "type": "string"
+       },
+       "url": {
+        "type": "string"
+       },
+       "source": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   },
+   "BadBlend": {
+    "type": "object",
+    "required": [
+     "from_id",
+     "to_id"
+    ],
+    "properties": {
+     "from_id": {
+      "type": "string"
+     },
+     "to_id": {
+      "type": "string"
+     },
+     "technique": {
+      "type": "string",
+      "maxLength": 80
+     },
+     "details": {
+      "type": "object"
+     }
+    }
+   }
+  }
+ }
+}

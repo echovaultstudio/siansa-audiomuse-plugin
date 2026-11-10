@@ -9,6 +9,8 @@ Tables:
 - ``jobs``: each song's place in the queue and what's happening to it;
 - ``results``: Beat This!'s readings, one row per song and model, with every beat and downbeat;
 - ``events``: what the service did, for the page's activity list;
+- ``measures``: each song's loudness, fade ramps and key (:mod:`beats.loudness`, :mod:`beats.key`), for the app's
+  volume levelling, fades and blends in key (``error`` when it couldn't be measured);
 - ``bad_blends``: song changes the owner marked as bad in Siansa Dev, with how the app blended them;
 - ``settings``: what the page chose (the libraries to analyse), kept across restarts.
 
@@ -53,6 +55,10 @@ CREATE TABLE IF NOT EXISTS marks (
 );
 CREATE INDEX IF NOT EXISTS marks_song ON marks (song_id);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS measures (
+    song_id TEXT PRIMARY KEY, ref_lufs REAL, start_ramp TEXT, end_ramp TEXT, duration_ms INTEGER, key TEXT, scale TEXT,
+    key_strength REAL, version INTEGER, measured_at REAL, error TEXT
+);
 CREATE TABLE IF NOT EXISTS bad_blends (
     id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL, from_id TEXT, to_id TEXT, technique TEXT, details TEXT
 );
@@ -355,6 +361,48 @@ class Store:
                                 f"AND song_id IN ({', '.join('?' for _ in chunk)})", (model, *chunk)):
                 out[r["song_id"]] = json.loads(r["ends"])
         return out
+
+    # ---- loudness, fades and key ----
+
+    def save_measure(self, song_id, values, version, error=None):
+        """``values``: :func:`beats.loudness.profile` with :func:`beats.key.find`'s fields (either may be missing);
+        ``error`` when the song couldn't be measured, so it isn't tried again and again."""
+        with self.lock, self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO measures (song_id, ref_lufs, start_ramp, end_ramp, duration_ms, key, scale, "
+                "key_strength, version, measured_at, error) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (song_id, values.get("ref_lufs"), values.get("start_ramp"), values.get("end_ramp"),
+                 values.get("duration_ms"), values.get("key"), values.get("scale"), values.get("key_strength"),
+                 version, time.time(), (error or None) and str(error)[:300]))
+
+    def measures(self, song_ids):
+        """``{song_id: {"ref_lufs", "start_ramp", "end_ramp", "duration_ms", "key", "scale"}}`` of the songs among
+        ``song_ids`` that were measured (not those that failed)."""
+        out = {}
+        ids = list(dict.fromkeys(song_ids))
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            for r in self._rows("SELECT song_id, ref_lufs, start_ramp, end_ramp, duration_ms, key, scale FROM measures "
+                                f"WHERE error IS NULL AND song_id IN ({', '.join('?' for _ in chunk)})", chunk):
+                out[r.pop("song_id")] = r
+        return out
+
+    def without_measure(self, version, limit=20):
+        """Songs analysed for their beats but not yet measured by this ``version`` (failed ones aren't asked for again,
+        unless measured by an older version)."""
+        return [r["song_id"] for r in self._rows(
+            "SELECT j.song_id FROM jobs j LEFT JOIN measures m ON m.song_id = j.song_id WHERE j.state = 'done' AND "
+            "(m.song_id IS NULL OR (m.version < ? AND m.error IS NULL)) ORDER BY j.finished_at DESC LIMIT ?",
+            (version, limit))]
+
+    def measure_counts(self, version):
+        """``{"measured", "failed", "waiting"}`` for the page and the capabilities."""
+        row = self._rows(
+            "SELECT SUM(CASE WHEN m.error IS NULL AND m.version >= ? THEN 1 ELSE 0 END) AS measured, "
+            "SUM(CASE WHEN m.error IS NOT NULL THEN 1 ELSE 0 END) AS failed, "
+            "SUM(CASE WHEN m.song_id IS NULL OR (m.version < ? AND m.error IS NULL) THEN 1 ELSE 0 END) AS waiting "
+            "FROM jobs j LEFT JOIN measures m ON m.song_id = j.song_id WHERE j.state = 'done'", (version, version))[0]
+        return {k: row[k] or 0 for k in ("measured", "failed", "waiting")}
 
     def overview(self, model, find=None, state=None, limit=None, song_id=None):
         """The songs with their job and result (no beats), for the table: those whose name, artist,
