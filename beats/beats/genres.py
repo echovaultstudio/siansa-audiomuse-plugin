@@ -129,6 +129,9 @@ def target(taxonomy, name):
     """What a radio for ``name`` (a tag as the app shows it: "Trance", "Electronic / Trance") plays: ``(styles,
     genres)``. The most precise wins: a name with a style is that style, one that is only a genre is the genre."""
     styles, genres = taxonomy.match(name)
+    if styles and genres:  # "Hip Hop / Electro": the Electro of Hip Hop, not Electronic's too
+        within = {s for s in styles if s.partition("---")[0] in genres}
+        styles = within or styles
     return (styles, set()) if styles else (set(), genres)
 
 

@@ -521,7 +521,7 @@ class ServiceTest(Base):
         self.assertEqual(self.call("/api/genre?name=Opera")["ids"], [])
         listed = self.call("/api/genres")
         self.assertEqual(listed["genres"][0], {"label": "Electronic---Trance", "genre": "Electronic", "style": "Trance",
-                                               "songs": 2})
+                                               "songs": 2, "name": "Trance"})
         status = self.call("/api/status")["styles"]
         self.assertTrue(status["available"])
         self.assertEqual(status["done"], 3)
