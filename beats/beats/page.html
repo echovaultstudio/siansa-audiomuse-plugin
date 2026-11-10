@@ -36,10 +36,26 @@ h2 { font-size: 1.35rem; margin: 0 0 4px; letter-spacing: -0.01em; }
 h3 { font-size: 1rem; margin: 0 0 12px; }
 h4 { font-size: 0.82rem; margin: 18px 0 8px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.05em; }
 h4 .sub { text-transform: none; letter-spacing: 0; }
-.pills { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
 .pill { border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 10px; font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
 .pill.ok::before, .pill.bad::before, .pill.wait::before { content: "●"; margin-right: 6px; }
 .pill.ok::before { color: var(--ok); } .pill.bad::before { color: var(--bad); } .pill.wait::before { color: var(--warn); }
+/* The connections in one button and its menu (the owner, 10 Nov: the row of them made the page too wide). */
+.status { position: relative; margin-left: auto; flex: 0 0 auto; }
+.status-button { gap: 8px; padding: 6px 12px; font-size: 0.86rem; color: var(--muted); max-width: 46vw; }
+.status-button .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-button .caret { font-size: 0.7rem; color: var(--faint); transition: transform 0.15s ease; }
+.status-button[aria-expanded=true] .caret { transform: rotate(180deg); }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: var(--faint); }
+.dot.ok { background: var(--ok); } .dot.wait { background: var(--warn); } .dot.bad { background: var(--bad); }
+.status-panel { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; width: min(380px, calc(100vw - 24px));
+  background: var(--raised); border: 1px solid var(--line-strong); border-radius: 14px; padding: 8px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); }
+.status-panel[hidden] { display: none; }
+.status-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; align-items: baseline; padding: 9px 10px; border-radius: 10px; }
+.status-row + .status-row { border-top: 1px solid var(--line); border-radius: 0; }
+.status-row .dot { transform: translateY(1px); }
+.status-row .name { font-weight: 600; font-size: 0.9rem; }
+.status-row .detail { grid-column: 2; color: var(--muted); font-size: 0.82rem; overflow-wrap: anywhere; }
+.status-foot { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px 4px; font-size: 0.82rem; color: var(--faint); border-top: 1px solid var(--line); margin-top: 4px; }
 
 /* The page: a side menu of three groups (the owner, 10 Nov: "easily navigable and structured"), one page at a time. */
 .shell { display: grid; grid-template-columns: var(--nav-w) minmax(0, 1fr); max-width: 1440px; margin: 0 auto; }
@@ -76,10 +92,9 @@ main > section.on { display: grid; gap: 16px; }
   body.menu-open .scrim { opacity: 1; pointer-events: auto; }
   body.menu-open { overflow: hidden; }
   main { padding: 16px 16px 48px; }
-  .pills { margin-left: auto; flex-wrap: nowrap; overflow: hidden; }
-  .nav-pills { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 10px 0; border-top: 1px solid var(--line); margin-top: 6px; }
+  .status-button { padding: 8px 10px; }
+  .status-button .label { display: none; }
 }
-@media (min-width: 901px) { .nav-pills { display: none; } }
 @media (prefers-reduced-motion: reduce) { .nav, .scrim { transition: none; } }
 
 .card { background: var(--raised); border: 1px solid var(--line); border-radius: 14px; padding: 16px; min-width: 0; }
@@ -92,8 +107,6 @@ main > section.on { display: grid; gap: 16px; }
 @media (max-width: 600px) {
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .tile { padding: 12px; } .tile .v { font-size: 1.35rem; }
-  /* A phone shows only what needs attention in the header; the rest is under Setup. */
-  .pills .pill:not(.bad):not(.wait) { display: none; }
 }
 .tile { background: var(--raised); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; text-decoration: none; color: inherit; display: block; }
 a.tile:hover { border-color: var(--amber); }
@@ -208,7 +221,15 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
     <button class="menu-button" id="menu" aria-label="Menu" aria-controls="nav" aria-expanded="false">☰</button>
     <h1><a href="#overview" id="home" title="Overview"><b>Siansa</b> Beats</a></h1>
     <span class="page-name" id="page-name"></span>
-    <div class="pills" id="pills" aria-live="polite"></div>
+    <div class="status">
+      <button class="status-button" id="status-button" aria-haspopup="true" aria-expanded="false" aria-controls="status-panel">
+        <span class="dot" id="status-dot"></span><span class="label" id="status-label">Connecting…</span><span class="caret" aria-hidden="true">▾</span>
+      </button>
+      <div class="status-panel" id="status-panel" role="dialog" aria-label="Connections and the model" hidden>
+        <div id="status-rows" aria-live="polite"></div>
+        <div class="status-foot"><span id="status-version"></span><a href="#setup" id="status-setup">Setup ›</a></div>
+      </div>
+    </div>
   </div>
 </header>
 <div class="shell">
@@ -234,7 +255,6 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       <a href="#log" data-view="log">Log</a>
       <a href="#setup" data-view="setup">Setup</a>
     </div>
-    <div class="nav-pills" id="nav-pills"></div>
   </nav>
 
   <main id="content" tabindex="-1">
@@ -536,14 +556,7 @@ async function refreshStatus() {
   if (s.bad_blends !== badCount) { badCount = s.bad_blends; refreshBad(); }
   const done = c.done || 0, failed = c.failed || 0, queued = c.queued || 0;
   const busy = BUSY.reduce((n, k) => n + (c[k] || 0), 0);
-  $("pills").innerHTML = [
-    `<span class="pill ${s.model_loaded ? (s.device_note ? "wait" : "ok") : "wait"}" title="${esc(s.device_note || "")}">Model ${esc(s.model)} · ${s.model_loaded ? esc(s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") + (s.float16 && s.device !== "cpu" ? " (half precision)" : "") + (s.model_load_seconds ? ` · loaded in ${fmt(s.model_load_seconds)}s` : "") : (s.device === "cpu" ? "CPU" : "GPU if there is one") + " · loads with the first song"}</span>`,
-    `<span class="pill ${s.navidrome ? "ok" : "bad"}">Navidrome</span>`,
-    `<span class="pill ${(s.connections || {}).audiomuse ? "ok" : "wait"}" title="${(s.connections || {}).audiomuse ? "Asked for similar music and the plugin's loudness" : "Not set: no similar music"}">AudioMuse-AI</span>`,
-    s.log_level === "debug" ? `<span class="pill wait" title="The log says every step: turn it off under Log when you're done">Debug details on</span>` : "",
-    `<span class="pill">v${esc(s.version)}</span>`,
-  ].filter(Boolean).join("");
-  $("nav-pills").innerHTML = $("pills").innerHTML;
+  drawStatus(s);
   if (s.current) {
     $("now-what").textContent = `${s.current.artist} – ${s.current.title}`;
     $("now-step").textContent = `${s.current.step} for ${fmt(s.current.for_seconds)} s` +
@@ -940,6 +953,39 @@ $("all-again").addEventListener("click", async () => {
 refreshLibraries();
 refreshStatus();
 setInterval(refreshStatus, 2000);
+
+// ---- the connections, in one button and its menu ----
+// [state, name, detail]: "ok", "wait" (works, but worth a look) or "bad" (doesn't work).
+function statusRows(s) {
+  const cn = s.connections || {};
+  const where = s.model_loaded ? (s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") + (s.float16 && s.device !== "cpu" ? ", half precision" : "") : (s.device === "cpu" ? "CPU" : "the GPU if there is one");
+  return [
+    [s.navidrome ? "ok" : "bad", "Navidrome", s.navidrome ? s.navidrome : "Not set: NAVIDROME_URL, NAVIDROME_USER and NAVIDROME_PASSWORD"],
+    [cn.audiomuse ? "ok" : "wait", "AudioMuse-AI", cn.audiomuse ? "Asked for similar music, and the loudness its plugin measured" : "Not set (AUDIOMUSE_URL, AUDIOMUSE_TOKEN): no similar music"],
+    [s.model_loaded ? (s.device_note ? "wait" : "ok") : "wait", `Beat This! ${s.model}`, s.model_loaded ? `On the ${where}` + (s.model_load_seconds ? `, loaded in ${fmt(s.model_load_seconds)} s` : "") + (s.device_note ? `. ${s.device_note}` : "") : `Loads with the first song, on ${where}`],
+    [(s.styles || {}).available ? "ok" : "wait", "Style model", (s.styles || {}).available ? "Votes each song's genres from its sound" : "Not in this image: genres are the songs' tags"],
+    ["ok", "The Siansa app", cn.api_key ? "Connects with BEATS_API_KEY" : cn.password ? "Connects with this page's password" : "Connects without a key"],
+    s.log_level === "debug" ? ["wait", "Debug details on", "The log says every step: turn it off under Log when you're done"] : null,
+  ].filter(Boolean);
+}
+function drawStatus(s) {
+  const rows = statusRows(s), rank = {ok: 0, wait: 1, bad: 2};
+  const worst = rows.reduce((w, r) => rank[r[0]] > rank[w] ? r[0] : w, "ok");
+  const off = rows.filter((r) => r[0] !== "ok");
+  $("status-dot").className = "dot " + worst;
+  $("status-label").textContent = worst === "bad" ? `${off.filter((r) => r[0] === "bad")[0][1]} isn't working` : off.length ? `${off.length} to look at` : "All working";
+  $("status-button").title = rows.map((r) => `${r[1]}: ${r[2]}`).join("\n");
+  $("status-rows").innerHTML = rows.map(([st, name, detail]) => `<div class="status-row"><span class="dot ${st}"></span><span class="name">${esc(name)}</span><span class="detail">${esc(detail)}</span></div>`).join("");
+  $("status-version").textContent = `Siansa Beats ${s.version}`;
+}
+function statusMenu(open) {
+  $("status-panel").hidden = !open;
+  $("status-button").setAttribute("aria-expanded", String(open));
+}
+$("status-button").addEventListener("click", (e) => { e.stopPropagation(); statusMenu($("status-panel").hidden); });
+$("status-panel").addEventListener("click", (e) => { if (e.target.closest("a")) statusMenu(false); else e.stopPropagation(); });
+document.addEventListener("click", () => statusMenu(false));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("status-panel").hidden) { statusMenu(false); $("status-button").focus(); } });
 
 // ---- the menu on a phone ----
 function menu(open) {
