@@ -500,6 +500,25 @@ class ServiceTest(Base):
         self.assertEqual(caught.exception.code, 400)
         self.assertEqual(self.call("/api/status")["loudness"]["measured"], 2)
 
+    def test_the_loudness_dashboard(self):
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        report = self.call("/api/loudness")
+        self.assertEqual((report["measured"], report["failed"], report["waiting"]), (2, 1, 0))
+        self.assertEqual(report["sources"], {"beats": 2, "plugin": 0})
+        self.assertEqual(report["with_key"], 2)
+        self.assertEqual(report["keys"], {"A minor": 2})
+        self.assertEqual(sum(report["lufs"]["counts"]), 2)
+        self.assertEqual((report["lufs"]["quietest"], report["lufs"]["loudest"]), (-12.25, -9.5))
+        self.assertEqual(report["failed_songs"][0]["title"], "Waltz")
+        song = self.call("/api/songs/t140")
+        self.assertEqual((song["measure"]["ref_lufs"], song["measure"]["key"], song["measure"]["source"]), (-9.5, "A", "beats"))
+        row = next(s for s in self.call("/api/songs") if s["id"] == "t96w")
+        self.assertIn("nope", row["sound"]["error"])
+        status = self.call("/api/status")
+        self.assertEqual(status["connections"], {"navidrome": True, "audiomuse": True, "api_key": False, "password": False})
+
     def test_v1_genres_about_and_bad_blends(self):
         self.start(style=FakeStyle(os.path.join(self.tmp, "models"), on=True))
         self.call("/api/libraries", "POST", {"ids": ["1"]})

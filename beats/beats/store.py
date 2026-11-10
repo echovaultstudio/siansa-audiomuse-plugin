@@ -57,7 +57,7 @@ CREATE INDEX IF NOT EXISTS marks_song ON marks (song_id);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS measures (
     song_id TEXT PRIMARY KEY, ref_lufs REAL, start_ramp TEXT, end_ramp TEXT, duration_ms INTEGER, key TEXT, scale TEXT,
-    key_strength REAL, version INTEGER, measured_at REAL, error TEXT
+    key_strength REAL, version INTEGER, measured_at REAL, error TEXT, source TEXT
 );
 CREATE TABLE IF NOT EXISTS bad_blends (
     id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL, from_id TEXT, to_id TEXT, technique TEXT, details TEXT
@@ -88,6 +88,8 @@ class Store:
         with self.lock, self.db:
             self.db.execute("PRAGMA journal_mode=WAL")
             self.db.executescript(SCHEMA)
+            if "source" not in {r[1] for r in self.db.execute("PRAGMA table_info(measures)")}:
+                self.db.execute("ALTER TABLE measures ADD COLUMN source TEXT")  # 0.20.0's first builds had none
             if "folder" not in {r[1] for r in self.db.execute("PRAGMA table_info(songs)")}:
                 self.db.execute("ALTER TABLE songs ADD COLUMN folder TEXT")
             columns = {r[1] for r in self.db.execute("PRAGMA table_info(results)")}
@@ -374,16 +376,31 @@ class Store:
 
     # ---- loudness, fades and key ----
 
-    def save_measure(self, song_id, values, version, error=None):
+    def save_measure(self, song_id, values, version, error=None, source="beats"):
         """``values``: :func:`beats.loudness.profile` with :func:`beats.key.find`'s fields (either may be missing);
-        ``error`` when the song couldn't be measured, so it isn't tried again and again."""
+        ``error`` when the song couldn't be measured, so it isn't tried again and again. ``source``: "beats" (measured
+        here) or "plugin" (taken from AudioMuse-AI's Siansa plugin)."""
         with self.lock, self.db:
             self.db.execute(
                 "INSERT OR REPLACE INTO measures (song_id, ref_lufs, start_ramp, end_ramp, duration_ms, key, scale, "
-                "key_strength, version, measured_at, error) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "key_strength, version, measured_at, error, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (song_id, values.get("ref_lufs"), values.get("start_ramp"), values.get("end_ramp"),
                  values.get("duration_ms"), values.get("key"), values.get("scale"), values.get("key_strength"),
-                 version, time.time(), (error or None) and str(error)[:300]))
+                 version, time.time(), (error or None) and str(error)[:300], source))
+
+    def measure(self, song_id):
+        """One song's row of ``measures`` (with ``error`` and ``source``), or None."""
+        rows = self._rows("SELECT * FROM measures WHERE song_id=?", (song_id,))
+        return rows[0] if rows else None
+
+    def measure_summary(self):
+        """For the page's loudness dashboard: every measured song's loudness, key and where it came from, and the
+        songs that couldn't be measured with why: ``{"rows": [{"ref_lufs", "key", "scale", "source", "start_ramp",
+        "end_ramp"}], "failed": [{"id", "title", "artist", "error"}]}``."""
+        rows = self._rows("SELECT ref_lufs, key, scale, source, start_ramp, end_ramp FROM measures WHERE error IS NULL")
+        failed = self._rows("SELECT m.song_id AS id, s.title, s.artist, m.error, m.measured_at FROM measures m "
+                            "LEFT JOIN songs s ON s.id = m.song_id WHERE m.error IS NOT NULL ORDER BY m.measured_at DESC LIMIT 200")
+        return {"rows": rows, "failed": failed}
 
     def measures(self, song_ids):
         """``{song_id: {"ref_lufs", "start_ramp", "end_ramp", "duration_ms", "key", "scale"}}`` of the songs among
@@ -431,8 +448,10 @@ class Store:
             args += [like] * 4
         rows = self._rows(
             "SELECT s.*, j.state, j.step, j.error, j.finished_at, "
-            + ", ".join(f"r.{f} AS r_{f}" for f in RESULT_FIELDS) + ", r.analysed_at AS r_analysed_at"
+            + ", ".join(f"r.{f} AS r_{f}" for f in RESULT_FIELDS) + ", r.analysed_at AS r_analysed_at, "
+            + "m.ref_lufs AS m_ref_lufs, m.key AS m_key, m.scale AS m_scale, m.source AS m_source, m.error AS m_error"
             + " FROM songs s LEFT JOIN jobs j ON j.song_id=s.id LEFT JOIN results r ON r.song_id=s.id AND r.model=?"
+            + " LEFT JOIN measures m ON m.song_id=s.id"
             + (" WHERE " + " AND ".join(where) if where else "")
             + " ORDER BY s.artist COLLATE NOCASE, s.title COLLATE NOCASE" + (" LIMIT ?" if limit else ""),
             (*args, *([int(limit)] if limit else [])))
@@ -444,6 +463,9 @@ class Store:
             if row["result"]["analysed_at"] is None:
                 row["result"] = None
             row["genres"] = genres.get(row["id"], [])
+            # Loudness and key (for the app), or why they couldn't be measured; None when not measured yet.
+            m = {k: row.pop(f"m_{k}") for k in ("ref_lufs", "key", "scale", "source", "error")}
+            row["sound"] = m if (m["ref_lufs"] is not None or m["error"] or m["source"]) else None
         counts = self.mark_counts()
         for row in rows:
             row["marks"] = counts.get(row["id"], 0)

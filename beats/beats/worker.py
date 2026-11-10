@@ -391,7 +391,7 @@ class Worker:
             self.importer = None
             return False
         for song_id, values in found.items():
-            self.store.save_measure(song_id, values, loudness.VERSION)
+            self.store.save_measure(song_id, values, loudness.VERSION, source="plugin")
         if found:
             self.store.event(f"Loudness, fades and key of {len(found)} songs taken from AudioMuse-AI's Siansa plugin")
         return True

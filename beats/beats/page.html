@@ -9,91 +9,131 @@
   --page: #000000; --raised: #0B0F13; --raised-2: #121820; --text: #EEF2F5; --muted: #AFC2D3; --faint: #7F93A4;
   --line: rgba(175, 194, 211, 0.16); --line-strong: rgba(175, 194, 211, 0.32);
   --amber: #FFB547; --on-amber: #1A1200; --amber-text: #FFC56E; --frost: #9DB4C8;
-  --ok: #7FD1A0; --warn: #FFB547; --bad: #FF8A80; --band: rgba(127, 209, 160, 0.10); --mark: #E879F9;
+  --ok: #7FD1A0; --warn: #FFB547; --bad: #FF8A80; --mark: #E879F9;
   --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
+  --nav-w: 232px; --header-h: 58px;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
   :root {
     --page: #F3F6F8; --raised: #FFFFFF; --raised-2: #EDF1F4; --text: #0C1216; --muted: #46576A; --faint: #5C6E80;
     --line: rgba(12, 18, 22, 0.10); --line-strong: rgba(12, 18, 22, 0.22); --amber-text: #8F5200; --frost: #4E6B85;
-    --ok: #1F7A45; --warn: #8F5200; --bad: #B3261E; --band: rgba(31, 122, 69, 0.10); --mark: #A21CAF; color-scheme: light;
+    --ok: #1F7A45; --warn: #8F5200; --bad: #B3261E; --mark: #A21CAF; color-scheme: light;
   }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--page); color: var(--text); font: 15px/1.45 var(--sans); }
-header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--page) 88%, transparent);
+a { color: var(--amber-text); }
+.skip { position: absolute; left: -999px; } .skip:focus { left: 8px; top: 8px; z-index: 20; background: var(--raised); padding: 6px 10px; }
+header { position: sticky; top: 0; z-index: 6; background: color-mix(in srgb, var(--page) 88%, transparent);
   backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
-.wrap { max-width: 1280px; margin: 0 auto; padding: 0 16px; }
-.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; min-height: 58px; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: var(--header-h); padding: 0 16px; }
 h1 { font-size: 1.15rem; margin: 0; letter-spacing: -0.01em; }
 h1 b { color: var(--amber); }
-h1 a { color: inherit; text-decoration: none; } h1 a:hover b { text-decoration: underline; }
-h2 { font-size: 1rem; margin: 0 0 10px; }
+h1 a { color: inherit; text-decoration: none; }
+h2 { font-size: 1.35rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+h3 { font-size: 1rem; margin: 0 0 12px; }
+h4 { font-size: 0.82rem; margin: 18px 0 8px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.05em; }
+h4 .sub { text-transform: none; letter-spacing: 0; }
 .pills { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
-.pill { border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 10px; font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
+.pill { border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 10px; font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
 .pill.ok::before, .pill.bad::before, .pill.wait::before { content: "●"; margin-right: 6px; }
 .pill.ok::before { color: var(--ok); } .pill.bad::before { color: var(--bad); } .pill.wait::before { color: var(--warn); }
-main { padding: 16px 0 48px; display: grid; gap: 16px; }
-.card { background: var(--raised); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+
+/* The page: a side menu of three groups (the owner, 10 Nov: "easily navigable and structured"), one page at a time. */
+.shell { display: grid; grid-template-columns: var(--nav-w) minmax(0, 1fr); max-width: 1440px; margin: 0 auto; }
+.nav { position: sticky; top: var(--header-h); align-self: start; height: calc(100vh - var(--header-h)); overflow-y: auto;
+  padding: 16px 12px 32px; border-right: 1px solid var(--line); }
+.nav .group { margin-bottom: 18px; }
+.nav .group-name { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); padding: 0 10px 6px; }
+.nav a { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px; color: var(--muted); text-decoration: none; font-size: 0.92rem; }
+.nav a:hover { background: var(--raised-2); color: var(--text); }
+.nav a[aria-current=page] { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--text); font-weight: 600; }
+.nav .count { margin-left: auto; font-size: 0.75rem; border-radius: 999px; padding: 0 7px; background: var(--raised-2); color: var(--muted); }
+.nav .count:empty { display: none; }
+main { padding: 20px 24px 64px; min-width: 0; outline: none; }
+main > section { display: none; }
+main > section.on { display: grid; gap: 16px; }
+.page-head { margin-bottom: 4px; } .page-head .sub { max-width: 72ch; }
+@media (max-width: 900px) {
+  /* On a phone the menu is a row of tabs under the header, scrolled sideways. */
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .nav { position: sticky; top: var(--header-h); z-index: 5; height: auto; display: flex; gap: 4px; overflow-x: auto; padding: 8px 12px;
+    border-right: 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--page) 92%, transparent); backdrop-filter: blur(10px); scrollbar-width: none; }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav .group { display: contents; }
+  .nav .group-name { display: none; }
+  .nav a { flex: 0 0 auto; padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 999px; white-space: nowrap; }
+  .nav a[aria-current=page] { background: var(--amber); border-color: var(--amber); color: var(--on-amber); }
+  main { padding: 16px 16px 48px; }
+  .pills { margin-left: 0; }
+}
+
+.card { background: var(--raised); border: 1px solid var(--line); border-radius: 14px; padding: 16px; min-width: 0; }
+.card-head { display: flex; align-items: baseline; gap: 12px; } .card-head .more { margin-left: auto; font-size: 0.88rem; }
+.kicker { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); margin-bottom: 2px; }
 .now { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 24px; align-items: center; }
-.now .what { font-size: 1.05rem; font-weight: 600; }
-@media (max-width: 700px) { .now { grid-template-columns: minmax(0, 1fr); } .controls input { flex: 1 1 160px; } }
-.now .step { color: var(--muted); font-size: 0.9rem; }
-.progress { grid-column: 1 / -1; height: 8px; border-radius: 99px; background: var(--raised-2); overflow: hidden; display: flex; }
-.progress span { display: block; height: 100%; }
-.progress .done { background: var(--amber); } .progress .failed { background: var(--bad); } .progress .busy { background: var(--frost); }
-.counts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 0.88rem; }
+.what { font-size: 1.05rem; font-weight: 600; }
+.step { color: var(--muted); font-size: 0.9rem; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+@media (max-width: 600px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .tile { padding: 12px; } .tile .v { font-size: 1.35rem; }
+  /* A phone shows only what needs attention in the header; the rest is under Setup. */
+  .pills .pill:not(.bad):not(.wait) { display: none; }
+}
+.tile { background: var(--raised); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; text-decoration: none; color: inherit; display: block; }
+a.tile:hover { border-color: var(--amber); }
+.tile .k { font-size: 0.78rem; color: var(--faint); }
+.tile .v { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; margin: 2px 0; }
+.tile .v small { font-size: 0.9rem; font-weight: 500; color: var(--muted); }
+.tile .s { font-size: 0.82rem; color: var(--muted); }
+.tile .meter { height: 6px; border-radius: 99px; background: var(--raised-2); overflow: hidden; margin-top: 10px; display: flex; }
+.tile .meter span { display: block; height: 100%; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 760px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
+.progress { height: 8px; border-radius: 99px; background: var(--raised-2); overflow: hidden; display: flex; margin-bottom: 10px; }
+.progress span, .meter span { display: block; height: 100%; }
+.progress .done, .meter .done { background: var(--amber); } .progress .failed, .meter .failed { background: var(--bad); }
+.progress .busy, .meter .busy { background: var(--frost); } .meter .plugin { background: var(--ok); }
+.counts { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 0.88rem; }
 .counts b { color: var(--text); font-variant-numeric: tabular-nums; }
-.libs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.libs .label { color: var(--muted); font-size: 0.9rem; margin-right: 4px; }
+.libs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
 .libs button[aria-pressed=true] { background: var(--amber); color: var(--on-amber); border-color: var(--amber); }
 .libs button .n:empty { display: none; }
 .libs button .n { opacity: 0.75; font-size: 0.8rem; margin-left: 6px; font-variant-numeric: tabular-nums; }
 .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.controls.push { margin-left: auto; }
+.row-gap { margin: 10px 0; } .top-gap { margin-top: 12px; }
 button, .btn { font: inherit; font-size: 0.9rem; border-radius: 999px; padding: 7px 14px; border: 1px solid var(--line-strong);
   background: transparent; color: var(--text); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
 button:hover, .btn:hover { border-color: var(--amber); }
 button.primary { background: var(--amber); color: var(--on-amber); border-color: var(--amber); font-weight: 600; }
 button.mark { background: var(--mark); color: #1a0620; border-color: var(--mark); font-weight: 600; }
+button:disabled { opacity: 0.5; cursor: default; }
 .marks { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; align-items: center; }
 .marks .chip { display: inline-flex; gap: 6px; align-items: center; border-color: var(--mark); }
 .marks .chip button { border: 0; background: none; padding: 0 2px; color: inherit; cursor: pointer; }
 .marks .hint { color: var(--muted); font-size: 0.9em; }
-button:disabled { opacity: 0.5; cursor: default; }
 input[type=text], input[type=search], select { font: inherit; font-size: 0.9rem; border-radius: 999px; padding: 7px 12px;
   border: 1px solid var(--line-strong); background: var(--raised-2); color: var(--text); min-width: 0; }
 :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
-.split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
-/* One view at a time (the owner, 9 Nov: scrolling through everything on a phone was a nightmare). */
-.tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; padding-bottom: 8px; }
-.tabs::-webkit-scrollbar { display: none; }
-.tabs button { flex: 0 0 auto; border-radius: 999px; padding: 6px 14px; background: transparent; border: 1px solid var(--line-strong); color: var(--muted); }
-.tabs button[aria-selected=true] { background: var(--amber); border-color: var(--amber); color: var(--on-amber); }
-.tabs .count:empty { display: none; }
-.tabs .count { margin-left: 4px; font-size: 0.8em; opacity: 0.85; }
-main [data-view] { display: none; }
-body[data-view=now] main [data-view~=now], body[data-view=songs] main [data-view~=songs],
-body[data-view=genres] main [data-view~=genres], body[data-view=blends] main [data-view~=blends],
-body[data-view=log] main [data-view~=log] { display: block; }
-body[data-view=now] main .card.now { display: grid; }
-main #detail[data-view][hidden] { display: none; }
 .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
-.tools .grow { flex: 1 1 180px; }
+.tools .grow { flex: 1 1 200px; }
 .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 999px; overflow: hidden; }
 .seg button { border: 0; border-radius: 0; padding: 6px 12px; }
 .seg button[aria-pressed=true] { background: var(--amber); color: var(--on-amber); }
 .table { overflow-x: auto; }
-table { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 0.88rem; }
-#detail { scroll-margin-top: var(--header-h, 76px); }
+table { width: 100%; min-width: 940px; border-collapse: collapse; font-size: 0.88rem; }
+#detail { scroll-margin-top: calc(var(--header-h) + 64px); }
 th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { color: var(--faint); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+th { color: var(--faint); font-weight: 600; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
 td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--raised-2); }
 tbody tr[aria-selected=true] { background: color-mix(in srgb, var(--amber) 12%, transparent); }
-.sub { color: var(--faint); font-size: 0.8rem; }
+.sub { color: var(--faint); font-size: 0.82rem; margin: 0; }
 .big { font-weight: 700; font-size: 0.98rem; }
 .chip { display: inline-block; border-radius: 999px; padding: 1px 8px; margin: 0 4px 4px 0; font-size: 0.76rem; border: 1px solid var(--line-strong); color: var(--muted); }
 .note { display: block; font-size: 0.8rem; margin-bottom: 2px; }
@@ -101,161 +141,321 @@ tbody tr[aria-selected=true] { background: color-mix(in srgb, var(--amber) 12%, 
 .note.ok::before { content: "✓ "; } .note.warn::before { content: "! "; } .note.info::before { content: "· "; }
 .state { font-size: 0.8rem; white-space: nowrap; }
 .state.failed { color: var(--bad); } .state.done { color: var(--ok); } .state.busy { color: var(--amber-text); }
-.events { list-style: none; margin: 0; padding: 0; max-height: 520px; overflow-y: auto; font-size: 0.84rem; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.log { margin: 12px 0 0; max-height: 420px; overflow: auto; font: 0.74rem/1.45 var(--mono); color: var(--muted);
-  background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px; white-space: pre-wrap; word-break: break-word; }
-.log .warn { color: var(--warn); } .log .error { color: var(--bad); } .log .debug { color: var(--faint); }
-.events li { padding: 6px 0; border-bottom: 1px solid var(--line); color: var(--muted); }
-.events time { color: var(--faint); font-family: var(--mono); font-size: 0.76rem; margin-right: 6px; }
+.events { list-style: none; margin: 0; padding: 0; max-height: 420px; overflow-y: auto; font-size: 0.86rem; }
+.events.tall { max-height: none; }
+.events li { padding: 7px 0; border-bottom: 1px solid var(--line); color: var(--muted); }
+.events li:last-child { border-bottom: 0; }
+.events time { color: var(--faint); font-family: var(--mono); font-size: 0.76rem; margin-right: 8px; }
 .events .error { color: var(--bad); } .events .warn { color: var(--warn); }
+.log { margin: 4px 0 0; max-height: 65vh; overflow: auto; font: 0.74rem/1.45 var(--mono); color: var(--muted);
+  background: var(--page); border: 1px solid var(--line); border-radius: 10px; padding: 10px; white-space: pre-wrap; word-break: break-word; }
+.log .warn { color: var(--warn); } .log .error { color: var(--bad); } .log .debug { color: var(--faint); }
 .empty { color: var(--faint); padding: 24px 8px; text-align: center; }
 #detail[hidden] { display: none; }
 .detail-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; margin-bottom: 12px; }
 .detail-head .title { font-size: 1.15rem; font-weight: 700; }
-audio { width: 100%; margin: 6px 0 10px; }
+audio { width: 100%; margin: 6px 0 4px; }
 canvas { width: 100%; display: block; border-radius: 10px; background: var(--raised-2); }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.78rem; color: var(--faint); margin: 6px 0 14px; }
 .legend i { display: inline-block; width: 12px; height: 3px; vertical-align: middle; margin-right: 5px; }
-.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
 .fact { background: var(--raised-2); border-radius: 10px; padding: 10px; }
 .fact .k { font-size: 0.74rem; color: var(--faint); text-transform: uppercase; letter-spacing: 0.04em; }
-.fact .v { font-size: 1.05rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.fact .v { font-size: 1rem; font-weight: 650; font-variant-numeric: tabular-nums; }
 label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0.9rem; color: var(--muted); }
-.banner { border: 1px solid var(--bad); color: var(--bad); border-radius: 12px; padding: 10px 14px; }
+.banner { border: 1px solid var(--bad); color: var(--bad); border-radius: 12px; padding: 10px 14px; display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
 .banner[hidden], .btn[hidden] { display: none; }
-.banner { display: flex; gap: 12px; align-items: flex-start; }
 .banner span { flex: 1; }
 .banner button { padding: 2px 10px; border-color: currentColor; color: inherit; }
 .banner.warn { border-color: var(--warn); color: var(--warn); }
+/* Charts: plain bars, drawn with the page's colours in light and dark. */
+.bars { display: flex; align-items: flex-end; gap: 2px; height: 140px; padding-top: 6px; }
+.bars span { flex: 1 1 0; background: var(--amber); border-radius: 3px 3px 0 0; min-height: 1px; opacity: 0.9; }
+.bars span:hover { opacity: 1; outline: 1px solid var(--text); }
+.axis { display: flex; justify-content: space-between; font: 0.72rem var(--mono); color: var(--faint); margin-top: 4px; }
+.hbars { display: grid; gap: 6px; max-height: 420px; overflow-y: auto; padding-right: 4px; }
+.hbar { display: grid; grid-template-columns: minmax(90px, 30%) minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 0.86rem; }
+.hbar .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.hbar .track { height: 10px; border-radius: 99px; background: var(--raised-2); overflow: hidden; }
+.hbar .track span { display: block; height: 100%; background: var(--frost); border-radius: 99px; }
+.hbar .n { font-variant-numeric: tabular-nums; color: var(--faint); font-size: 0.8rem; }
+dl.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 0; font-size: 0.9rem; }
+dl.kv dt { color: var(--faint); } dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+.yes { color: var(--ok); } .no { color: var(--faint); }
+.steps { margin: 0 0 10px; padding-left: 20px; } .steps li { margin: 4px 0; }
+code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2); padding: 1px 6px; border-radius: 6px; }
+.picks { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 4px; }
+.picks button { width: 100%; justify-content: flex-start; border-radius: 10px; text-align: left; }
+.list { margin: 0; padding-left: 22px; font-size: 0.9rem; } .list li { margin: 4px 0; }
 </style>
 </head>
 <body>
+<a class="skip" href="#content">Skip to the page</a>
 <header>
-  <div class="wrap bar">
-    <h1><a href="./" id="home" title="Back to all songs"><b>Siansa</b> Beats</a></h1>
+  <div class="bar">
+    <h1><a href="#overview" id="home" title="Overview"><b>Siansa</b> Beats</a></h1>
     <div class="pills" id="pills" aria-live="polite"></div>
   </div>
-  <nav class="wrap tabs" role="tablist" aria-label="Views">
-    <button role="tab" data-view="now">Now</button>
-    <button role="tab" data-view="songs">Songs</button>
-    <button role="tab" data-view="genres">Genres</button>
-    <button role="tab" data-view="blends">Bad blends <span class="count" id="tab-blends"></span></button>
-    <button role="tab" data-view="log">Log</button>
-  </nav>
 </header>
-<main class="wrap">
-  <div class="banner" id="offline" role="alert" hidden></div>
-  <div class="banner" id="banner" role="alert" hidden><span id="banner-text"></span><button id="banner-close" aria-label="Close">✕</button></div>
-  <div class="banner warn" id="device-note" role="status" hidden></div>
+<div class="shell">
+  <nav class="nav" aria-label="Pages">
+    <div class="group">
+      <div class="group-name">Analysis</div>
+      <a href="#overview" data-view="overview">Overview</a>
+      <a href="#libraries" data-view="libraries">Libraries</a>
+      <a href="#songs" data-view="songs">Songs</a>
+    </div>
+    <div class="group">
+      <div class="group-name">For the Siansa app</div>
+      <a href="#loudness" data-view="loudness">Loudness &amp; keys</a>
+      <a href="#genres" data-view="genres">Genres</a>
+      <a href="#similar" data-view="similar">Similar music</a>
+      <a href="#blends" data-view="blends">Bad blends<span class="count" id="tab-blends"></span></a>
+    </div>
+    <div class="group">
+      <div class="group-name">Service</div>
+      <a href="#activity" data-view="activity">Activity</a>
+      <a href="#log" data-view="log">Log</a>
+      <a href="#setup" data-view="setup">Setup</a>
+    </div>
+  </nav>
 
-  <section class="card now" data-view="now" aria-label="What's happening">
-    <div>
-      <div class="what" id="now-what">Starting…</div>
-      <div class="step" id="now-step"></div>
-    </div>
-    <div class="controls">
-      <button class="primary" id="start" title="Analyse the ticked libraries: their songs are read from Navidrome and queued">Start analysis</button>
-      <button id="read" title="Read the chosen libraries from Navidrome now (it's done every 6 hours anyway)">Look for new songs</button>
-      <button id="pause">Pause</button>
-    </div>
-    <div class="libs" role="group" aria-label="Libraries to analyse"><span class="label">Libraries to analyse:</span><span id="libs" class="controls"><span class="sub">Asking Navidrome…</span></span><span class="sub" id="libs-note" role="status"></span></div>
-    <div class="libs" id="left-out" hidden></div>
-    <div class="progress" id="progress" aria-hidden="true"></div>
-    <div class="counts" id="counts"></div>
-  </section>
+  <main id="content" tabindex="-1">
+    <div class="banner" id="offline" role="alert" hidden></div>
+    <div class="banner" id="banner" role="alert" hidden><span id="banner-text"></span><button id="banner-close" aria-label="Close">✕</button></div>
+    <div class="banner warn" id="device-note" role="status" hidden></div>
 
-  <section class="card" id="detail" data-view="songs" hidden aria-label="Song">
-    <div class="detail-head">
-      <span class="title" id="d-title"></span><span class="sub" id="d-sub"></span>
-      <span style="margin-left:auto" class="controls">
-        <button id="d-again">Analyse again</button>
-        <button id="d-remove">Remove</button>
-        <button id="d-close" aria-label="Close">✕</button>
-      </span>
-    </div>
-    <audio id="player" controls preload="none" crossorigin="anonymous"></audio>
-    <div class="controls" style="margin-bottom:10px">
-      <button class="mark" id="mark" title="Tap it (or press M) where a new section starts: a drop, a breakdown, the beat coming in">Section starts here</button>
-      <label class="toggle"><input type="checkbox" id="clicks" checked> Clicks on the beats</label>
-      <label class="toggle">from <select id="click-source"><option value="grid">the steady grid</option><option value="model">the model's beats</option></select></label>
-      <label class="toggle">Click volume <input type="range" id="click-volume" min="0" max="1" step="0.05" value="0.5"></label>
-    </div>
-    <div class="marks" id="d-marks" aria-live="polite"></div>
-    <canvas id="beatview" height="120" aria-label="Beats around the playhead"></canvas>
-    <div class="legend"><span><i style="background:var(--frost)"></i>beat</span><span><i style="background:var(--amber)"></i>downbeat (bar number)</span><span><i style="background:var(--ok)"></i>phrase start (every 8 or 16 bars)</span><span><i style="background:var(--mark)"></i>your section marks</span><span id="other-legend"><i style="background:var(--faint);height:6px"></i>the model's beats</span><span><i style="background:var(--text)"></i>now</span><span>8 seconds around what's playing; tap to jump</span></div>
-    <canvas id="curve" height="170" aria-label="Tempo along the song"></canvas>
-    <div class="legend"><span><i style="background:var(--amber)"></i>Beat This! tempo</span><span><i style="background:var(--ok)"></i>BPM tag</span><span><i style="background:var(--line-strong)"></i>the ends (first and last 30 s)</span></div>
-    <div id="d-notes"></div>
-    <div class="facts" id="d-facts"></div>
-  </section>
-
-  <div class="split">
-    <section class="card" data-view="songs" aria-label="Songs">
-      <div class="tools">
-        <input type="search" class="grow" id="search" placeholder="Find a song, artist or genre" aria-label="Find">
-        <div class="seg" role="group" aria-label="Show">
-          <button data-filter="all" aria-pressed="true">All</button>
-          <button data-filter="differ" aria-pressed="false" title="Songs where a reading really disagrees: half and double speed count as the same beat">Worth a listen</button>
-          <button data-filter="done" aria-pressed="false" title="Songs analysed">Done</button>
-          <button data-filter="failed" aria-pressed="false">Failed</button>
+    <!-- Overview: how far everything is, at a glance -->
+    <section data-view="overview">
+      <div class="page-head"><h2>Overview</h2><p class="sub">How far Siansa Beats is with your music, and what it's doing now.</p></div>
+      <div class="card now">
+        <div>
+          <div class="kicker">Now</div>
+          <div class="what" id="now-what">Starting…</div>
+          <div class="step" id="now-step"></div>
         </div>
+        <div class="controls"><button id="pause">Pause</button></div>
       </div>
-      <div class="table">
-        <table>
-          <thead><tr>
-            <th>Song</th><th>Genre</th><th title="The file's BPM tag">Tag</th>
-            <th title="Beat This!: whole song (intro / outro)">Beat This!</th><th title="Beats a bar, and the share of bars that agree">Bar</th>
-            <th title="Share of beats within 4 % of the usual gap">Steady</th><th>Notes</th><th>State</th>
-          </tr></thead>
-          <tbody id="rows"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
-        </table>
+      <div class="tiles" id="tiles"></div>
+      <div class="card">
+        <div class="card-head"><h3>Recent activity</h3><a href="#activity" class="more">All activity ›</a></div>
+        <ul class="events" id="events-recent"></ul>
       </div>
-      <div class="sub" id="shown-note" hidden style="margin-top:8px"></div>
-      <div class="tools" style="margin-top:12px">
+    </section>
+
+    <!-- Libraries: what to analyse -->
+    <section data-view="libraries">
+      <div class="page-head"><h2>Libraries</h2><p class="sub">Which Navidrome libraries Siansa Beats analyses. They're read again every 6 hours for new songs; nothing is ever written to Navidrome.</p></div>
+      <div class="card">
+        <h3>Libraries to analyse</h3>
+        <div class="libs" role="group" aria-label="Libraries to analyse"><span id="libs" class="controls"><span class="sub">Asking Navidrome…</span></span></div>
+        <div class="sub" id="libs-note" role="status"></div>
+        <div class="controls row-gap">
+          <button class="primary" id="start" title="Analyse the ticked libraries: their songs are read from Navidrome and queued">Start analysis</button>
+          <button id="read" title="Read the chosen libraries from Navidrome now (it's done every 6 hours anyway)">Look for new songs</button>
+        </div>
+        <div class="libs" id="left-out" hidden></div>
+      </div>
+      <div class="card">
+        <h3>Progress</h3>
+        <div class="progress" id="progress" aria-hidden="true"></div>
+        <div class="counts" id="counts"></div>
+      </div>
+      <div class="card">
+        <h3>Start over</h3>
+        <p class="sub">Every song through the model again, for a new model or after a big change. For a big library that takes days.</p>
         <button id="all-again">Analyse every song again</button>
-        <a class="btn" id="export-csv" href="api/export.csv" download>Export CSV</a>
-        <a class="btn" id="export-json" href="api/export.json" download title="Every song's beats and sound levels (a few MB): for tuning the grid and phrases">Download data</a>
-        <a class="btn" id="export-failed" href="api/failed/export" download hidden title="The songs that couldn't be analysed, with why: the one file to send">Download failed songs</a>
       </div>
     </section>
-    <section class="card" data-view="genres" aria-label="Genres" id="genre-card">
-      <h2>Genres</h2>
-      <p class="sub">Each song's genres by vote: what its sound says (Essentia's Discogs-EffNet, 400 Discogs styles)
-        first, its own tags second. Siansa's genre radios play by this vote, and by the tags without Siansa Beats.</p>
-      <div id="genre-progress" class="sub">Loading the genres…</div>
-      <div id="genre-agree"></div>
-      <div id="genre-top" class="chips"></div>
-    </section>
-    <section class="card" data-view="blends" aria-label="Bad blends" id="bad-card">
-      <h2>Bad blends</h2>
-      <p class="sub">Song changes marked as bad in Siansa Dev, with how the app blended them. Tap a song to check its beats.</p>
-      <p><a class="btn" href="api/bad-blends/export" download title="Every bad blend with both songs' beats and sound levels: the one file to send">Download bad blends</a></p>
-      <ul class="events" id="bad"></ul>
-    </section>
-    <section class="card" data-view="now log" aria-label="Activity">
-      <h2>Activity</h2>
-      <ul class="events" id="events"></ul>
-    </section>
-    <section class="card" data-view="log" aria-label="Log">
-      <h2>Log</h2>
-      <p class="sub">Everything Siansa Beats does, as in the container's log. <strong>Debug details</strong> adds every
-        step of every song, with its times, and every request to Navidrome: turn it on to find a problem, off when it's
-        found. Passwords and tokens are never written.</p>
-      <div class="tools">
-        <label class="toggle"><input type="checkbox" id="log-debug"> Debug details</label>
-        <div class="seg" role="group" aria-label="Show lines">
-          <button data-log="debug" aria-pressed="true">All</button>
-          <button data-log="info" aria-pressed="false">Info</button>
-          <button data-log="warn" aria-pressed="false" title="Warnings and errors">Problems</button>
+
+    <!-- Songs: the table and one song -->
+    <section data-view="songs">
+      <div class="page-head"><h2>Songs</h2><p class="sub">Every song with what Siansa Beats found. Tap one to hear it with clicks on its beats.</p></div>
+      <div class="card" id="detail" hidden aria-label="Song">
+        <div class="detail-head">
+          <span class="title" id="d-title"></span><span class="sub" id="d-sub"></span>
+          <span class="controls push">
+            <button id="d-again">Analyse again</button>
+            <button id="d-remove">Remove</button>
+            <button id="d-close" aria-label="Close">✕</button>
+          </span>
         </div>
-        <a class="btn" href="api/log/download" download>Download log</a>
-        <a class="btn" href="api/debug" download title="Versions, setup (no passwords), where each part is right now, the queue and the log: the one file to send when something's stuck or wrong">Download debug report</a>
+        <audio id="player" controls preload="none" crossorigin="anonymous"></audio>
+        <div class="controls row-gap">
+          <button class="mark" id="mark" title="Tap it (or press M) where a new section starts: a drop, a breakdown, the beat coming in">Section starts here</button>
+          <label class="toggle"><input type="checkbox" id="clicks" checked> Clicks on the beats</label>
+          <label class="toggle">from <select id="click-source"><option value="grid">the steady grid</option><option value="model">the model's beats</option></select></label>
+          <label class="toggle">Click volume <input type="range" id="click-volume" min="0" max="1" step="0.05" value="0.5"></label>
+        </div>
+        <div class="marks" id="d-marks" aria-live="polite"></div>
+        <canvas id="beatview" height="120" aria-label="Beats around the playhead"></canvas>
+        <div class="legend"><span><i style="background:var(--frost)"></i>beat</span><span><i style="background:var(--amber)"></i>downbeat (bar number)</span><span><i style="background:var(--ok)"></i>phrase start</span><span><i style="background:var(--mark)"></i>your section marks</span><span id="other-legend"><i style="background:var(--faint);height:6px"></i>the model's beats</span><span><i style="background:var(--text)"></i>now</span><span>8 seconds around what's playing; tap to jump</span></div>
+        <canvas id="curve" height="170" aria-label="Tempo along the song"></canvas>
+        <div class="legend"><span><i style="background:var(--amber)"></i>Beat This! tempo</span><span><i style="background:var(--ok)"></i>BPM tag</span><span><i style="background:var(--line-strong)"></i>the ends (first and last 30 s)</span></div>
+        <div id="d-notes"></div>
+        <h4>Beats</h4>
+        <div class="facts" id="d-facts"></div>
+        <h4>Loudness, fades and key <span class="sub">for the app</span></h4>
+        <div class="facts" id="d-sound"></div>
+        <h4>Genres</h4>
+        <div class="facts" id="d-genres"></div>
       </div>
-      <pre class="log" id="log" aria-live="off">Loading…</pre>
+      <div class="card">
+        <div class="tools">
+          <input type="search" class="grow" id="search" placeholder="Find a song, artist or genre" aria-label="Find">
+          <div class="seg" role="group" aria-label="Show">
+            <button data-filter="all" aria-pressed="true">All</button>
+            <button data-filter="differ" aria-pressed="false" title="Songs where a reading really disagrees: half and double speed count as the same beat">Worth a listen</button>
+            <button data-filter="done" aria-pressed="false" title="Songs analysed">Done</button>
+            <button data-filter="failed" aria-pressed="false">Failed</button>
+          </div>
+        </div>
+        <div class="table">
+          <table>
+            <thead><tr>
+              <th>Song</th><th>Genre</th><th title="The file's BPM tag">Tag</th>
+              <th title="Beat This!: whole song (intro / outro)">Beat This!</th><th title="Beats a bar, and the share of bars that agree">Bar</th>
+              <th title="Share of beats within 4 % of the usual gap">Steady</th><th title="Integrated loudness (LUFS) and key">Loudness · key</th><th>Notes</th><th>State</th>
+            </tr></thead>
+            <tbody id="rows"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="sub" id="shown-note" hidden></div>
+        <div class="tools top-gap">
+          <a class="btn" id="export-csv" href="api/export.csv" download>Export CSV</a>
+          <a class="btn" id="export-json" href="api/export.json" download title="Every song's beats and sound levels (a few MB): for tuning the grid and phrases">Download data</a>
+          <a class="btn" id="export-failed" href="api/failed/export" download hidden title="The songs that couldn't be analysed, with why: the one file to send">Download failed songs</a>
+        </div>
+      </div>
     </section>
-  </div>
-</main>
+
+    <!-- Loudness & keys: what the Siansa plugin used to measure -->
+    <section data-view="loudness">
+      <div class="page-head"><h2>Loudness &amp; keys</h2><p class="sub">What the Siansa app levels the volume, shapes its fades and mixes in key by:
+        each song's loudness (EBU R128), how it starts and ends, and its key. Measured here from each song's file, or taken
+        from the Siansa plugin on AudioMuse-AI when it already had them.</p></div>
+      <div class="tiles" id="l-tiles"></div>
+      <div class="card" id="l-now-card" hidden><div class="kicker">Measuring now</div><div class="what" id="l-now"></div></div>
+      <div class="grid2">
+        <div class="card">
+          <h3>How loud the songs are</h3>
+          <div class="bars" id="l-lufs" aria-label="Songs by loudness"></div>
+          <div class="axis" id="l-lufs-axis"></div>
+          <p class="sub" id="l-lufs-note"></p>
+        </div>
+        <div class="card">
+          <h3>Keys</h3>
+          <div class="hbars" id="l-keys"></div>
+        </div>
+        <div class="card">
+          <h3>How songs start</h3>
+          <div class="bars" id="l-intro" aria-label="Seconds until each song is up to the fade level"></div>
+          <div class="axis" id="l-intro-axis"></div>
+          <p class="sub" id="l-intro-note"></p>
+        </div>
+        <div class="card">
+          <h3>How songs end</h3>
+          <div class="bars" id="l-outro" aria-label="Seconds of quiet before each song's end"></div>
+          <div class="axis" id="l-outro-axis"></div>
+          <p class="sub" id="l-outro-note"></p>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Couldn't be measured</h3>
+        <ul class="events" id="l-failed"></ul>
+      </div>
+    </section>
+
+    <!-- Genres -->
+    <section data-view="genres" id="genre-card">
+      <div class="page-head"><h2>Genres</h2><p class="sub">Each song's genres by vote: what its sound says (Essentia's Discogs-EffNet, 400 Discogs styles)
+        first, its own tags second. Siansa's genre radios and its genre pages go by this vote, and by the tags without Siansa Beats.</p></div>
+      <div class="card">
+        <div id="genre-progress" class="sub">Loading the genres…</div>
+        <div id="genre-agree"></div>
+      </div>
+      <div class="card">
+        <h3>Genres by songs</h3>
+        <div class="tools"><input type="search" class="grow" id="genre-find" placeholder="Find a genre" aria-label="Find a genre"></div>
+        <div id="genre-top" class="hbars"></div>
+      </div>
+    </section>
+
+    <!-- Similar music -->
+    <section data-view="similar">
+      <div class="page-head"><h2>Similar music</h2><p class="sub">Albums and artists that sound alike, for Siansa's "Similar albums" and "Fans also like".
+        Siansa Beats asks AudioMuse-AI's Siansa plugin for them for now; later it works them out from its own reading of each song.</p></div>
+      <div class="card" id="s-status"></div>
+      <div class="card">
+        <h3>Try it</h3>
+        <div class="tools"><input type="search" class="grow" id="s-find" placeholder="Find a song to start from" aria-label="Find a song"></div>
+        <ul class="picks" id="s-picks"></ul>
+        <div class="grid2" id="s-results" hidden>
+          <div><h4>Albums like <span id="s-album"></span></h4><ol class="list" id="s-albums"></ol></div>
+          <div><h4>Artists like <span id="s-artist"></span></h4><ol class="list" id="s-artists"></ol></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bad blends -->
+    <section data-view="blends" id="bad-card">
+      <div class="page-head"><h2>Bad blends</h2><p class="sub">Song changes marked as bad in Siansa Dev, with how the app blended them. Tap a song to check its beats.</p></div>
+      <div class="card">
+        <p><a class="btn" href="api/bad-blends/export" download title="Every bad blend with both songs' beats and sound levels: the one file to send">Download bad blends</a></p>
+        <ul class="events" id="bad"></ul>
+      </div>
+    </section>
+
+    <!-- Activity -->
+    <section data-view="activity">
+      <div class="page-head"><h2>Activity</h2><p class="sub">What Siansa Beats did, newest first.</p></div>
+      <div class="card"><ul class="events tall" id="events"></ul></div>
+    </section>
+
+    <!-- Log -->
+    <section data-view="log">
+      <div class="page-head"><h2>Log</h2><p class="sub">Everything Siansa Beats does, as in the container's log. <strong>Debug details</strong> adds every
+        step of every song, with its times, and every request to Navidrome and AudioMuse-AI: turn it on to find a problem, off when
+        it's found. Passwords and tokens are never written.</p></div>
+      <div class="card">
+        <div class="tools">
+          <label class="toggle"><input type="checkbox" id="log-debug"> Debug details</label>
+          <div class="seg" role="group" aria-label="Show lines">
+            <button data-log="debug" aria-pressed="true">All</button>
+            <button data-log="info" aria-pressed="false">Info</button>
+            <button data-log="warn" aria-pressed="false" title="Warnings and errors">Problems</button>
+          </div>
+          <a class="btn" href="api/log/download" download>Download log</a>
+        </div>
+        <pre class="log" id="log" aria-live="off">Loading…</pre>
+      </div>
+    </section>
+
+    <!-- Setup -->
+    <section data-view="setup">
+      <div class="page-head"><h2>Setup</h2><p class="sub">How this Siansa Beats is set up (the container's settings) and how the Siansa app connects to it.</p></div>
+      <div class="grid2">
+        <div class="card"><h3>Connections</h3><dl class="kv" id="setup-connections"></dl></div>
+        <div class="card"><h3>The model</h3><dl class="kv" id="setup-model"></dl></div>
+      </div>
+      <div class="card">
+        <h3>Connect the Siansa app</h3>
+        <ol class="steps">
+          <li>In Siansa Dev: Settings › Connections › <strong>Siansa Beats</strong>.</li>
+          <li>Address: <code id="setup-address"></code></li>
+          <li id="setup-key"></li>
+          <li>Tap <strong>Test</strong>: it says how many songs have beat grids and loudness.</li>
+        </ol>
+        <p class="sub">The app's API is described in <a href="api/v1/openapi.json" target="_blank" rel="noopener">openapi.json</a>; <a href="api/v1/capabilities" target="_blank" rel="noopener">capabilities</a> shows what it answers now.</p>
+      </div>
+      <div class="card">
+        <h3>When something's wrong</h3>
+        <p class="sub">The debug report has the versions, the setup (no passwords), where each part is right now, the queue and the log: the one file to send.</p>
+        <a class="btn" href="api/debug" download>Download debug report</a>
+      </div>
+    </section>
+  </main>
+</div>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
@@ -266,7 +466,8 @@ const css = (name) => getComputedStyle(document.documentElement).getPropertyValu
 const BUSY = ["downloading", "decoding", "ready", "analysing"];
 const SHOWN = 200;  // songs in the table at once: the search finds the rest
 let songs = [], filter = "all", selected = null, detail = null, lastCounts = "", status = null;
-let songsAsked = 0, songsTimer = null, libraries = [], picked = null;  // picked: the ticks not started yet
+let songsAsked = 0, songsTimer = null, libraries = [], picked = null;
+let genreList = [];  // the genres as the Genres page lists them (drawGenreBars)  // picked: the ticks not started yet
 
 async function api(path, options = {}) {
   const r = await fetch(path, {headers: {"Content-Type": "application/json"}, ...options});
@@ -313,6 +514,7 @@ async function refreshStatus() {
   $("pills").innerHTML = [
     `<span class="pill ${s.model_loaded ? (s.device_note ? "wait" : "ok") : "wait"}" title="${esc(s.device_note || "")}">Model ${esc(s.model)} · ${s.model_loaded ? esc(s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") + (s.float16 && s.device !== "cpu" ? " (half precision)" : "") + (s.model_load_seconds ? ` · loaded in ${fmt(s.model_load_seconds)}s` : "") : (s.device === "cpu" ? "CPU" : "GPU if there is one") + " · loads with the first song"}</span>`,
     `<span class="pill ${s.navidrome ? "ok" : "bad"}">Navidrome</span>`,
+    `<span class="pill ${(s.connections || {}).audiomuse ? "ok" : "wait"}" title="${(s.connections || {}).audiomuse ? "Asked for similar music and the plugin's loudness" : "Not set: no similar music"}">AudioMuse-AI</span>`,
     s.log_level === "debug" ? `<span class="pill wait" title="The log says every step: turn it off under Log when you're done">Debug details on</span>` : "",
     `<span class="pill">v${esc(s.version)}</span>`,
   ].filter(Boolean).join("");
@@ -330,7 +532,7 @@ async function refreshStatus() {
     $("now-what").textContent = "Paused"; $("now-step").textContent = `${queued} waiting`;
   } else {
     $("now-what").textContent = total ? (queued ? "Starting the next song…" : "All done") : "No songs yet";
-    $("now-step").textContent = total ? "" : (libraries.some((l) => l.on) ? "Reading the libraries…" : "Tick the libraries to analyse below, then Start analysis.");
+    $("now-step").innerHTML = total ? "" : (libraries.some((l) => l.on) ? "Reading the libraries…" : 'Choose the libraries to analyse under <a href="#libraries">Libraries</a>.');
   }
   $("pause").textContent = s.paused ? "Carry on" : "Pause";
   const failedCount = (s.counts || {}).failed || 0;
@@ -346,11 +548,11 @@ async function refreshStatus() {
   $("counts").innerHTML = `<span><b>${total}</b> songs</span><span><b>${done}</b> done</span><span><b>${queued + busy}</b> to go</span><span><b>${failed}</b> failed</span>` +
     (avg ? `<span>about <b>${fmt(avg)}</b> s a song in the model</span>` : "") +
     (s.regridding ? `<span>working out again: <b>${s.regridding.done}</b> of ${s.regridding.total}</span>` : "") +
-    (s.loudness ? `<span title="Loudness, fades and key, for the Siansa app"><b>${s.loudness.measured}</b> measured for loudness` +
-      (s.loudness.waiting ? ` · ${s.loudness.waiting} to go` : "") +
-      (s.loudness.measuring ? ` · now ${esc(s.loudness.measuring.artist)} – ${esc(s.loudness.measuring.title)}` : "") + `</span>` : "") +
     (s.last_error ? `<span>last error: ${esc(s.last_error)}</span>` : "");
-  $("events").innerHTML = s.events.map((e) => `<li class="${esc(e.level)}"><time>${new Date(e.at * 1000).toLocaleTimeString()}</time>${esc(e.message)}</li>`).join("") || `<li>Nothing yet.</li>`;
+  const event = (e) => `<li class="${esc(e.level)}"><time>${new Date(e.at * 1000).toLocaleTimeString()}</time>${esc(e.message)}</li>`;
+  $("events").innerHTML = s.events.map(event).join("") || `<li>Nothing yet.</li>`;
+  $("events-recent").innerHTML = s.events.slice(0, 8).map(event).join("") || `<li>Nothing yet.</li>`;
+  drawTiles(s); drawSetup(s);
   const key = JSON.stringify(c) + (s.current ? s.current.id + s.current.step : "");
   // A library is a big list: asked again at most every 15 s while songs are being analysed.
   if (key !== lastCounts && Date.now() - songsAsked > 15000) { lastCounts = key; refreshSongs(); refreshLibraries(); }
@@ -379,7 +581,7 @@ function drawRows() {
   $("shown-note").textContent = `Showing the first ${songs.length} of ${total} songs: search to find others.`;
   const shown = songs;  // found and filtered by the service
   if (!shown.length) {
-    $("rows").innerHTML = `<tr><td colspan="8" class="empty">${$("search").value.trim() || filter !== "all" ? "Nothing matches." : "No songs yet: tick the libraries to analyse above, then Start analysis."}</td></tr>`;
+    $("rows").innerHTML = `<tr><td colspan="9" class="empty">${$("search").value.trim() || filter !== "all" ? "Nothing matches." : 'No songs yet: choose the libraries to analyse under <a href="#libraries">Libraries</a>.'}</td></tr>`;
     return;
   }
   $("rows").innerHTML = shown.map((s) => {
@@ -392,6 +594,7 @@ function drawRows() {
       <td class="num"><span class="big">${fmt(r.bpm, 2)}</span><div class="sub">${fmt(r.intro_bpm)} / ${fmt(r.outro_bpm)}</div></td>
       <td class="num">${r.beats_per_bar ? r.beats_per_bar + " beats" : "–"}<div class="sub">${r.phrase_source === "sound" || r.phrase_source === "mix: sound" ? "phrases: sound" : r.phrase_source === "bar 1" ? "phrases: bar 1" : r.from_mix ? "mix: no phrases" : r.beats_per_bar ? pct(r.bar_share) : ""}</div></td>
       <td class="num">${pct(r.steady)}<div class="sub">grid ${pct(r.grid_share)}</div></td>
+      <td class="num">${soundCell(s.sound)}</td>
       <td>${(s.verdict || []).map(([level, text]) => `<span class="note ${level}">${esc(text)}</span>`).join("") || (s.error ? `<span class="note warn">${esc(s.error)}</span>` : "")}</td>
       <td><span class="state ${esc(state)}">${esc(s.state || "–")}</span>${r.model_seconds ? `<div class="sub">${fmt(r.model_seconds)} s</div>` : ""}</td>
     </tr>`;
@@ -466,7 +669,7 @@ $("read").addEventListener("click", async () => {
 // ---- one song ----
 async function openSong(id, newSong, fromHistory) {
   if (newSong && !fromHistory) history.pushState({song: id}, "", "#song=" + encodeURIComponent(id));
-  if (typeof showView === "function" && document.body.dataset.view !== "songs") showView("songs");
+  if (typeof showView === "function" && currentView !== "songs") showView("songs", true);
   selected = id;
   drawRows();
   try { detail = await api("api/songs/" + encodeURIComponent(id)); } catch (e) { banner(e.message); return; }
@@ -497,11 +700,16 @@ async function openSong(id, newSong, fromHistory) {
     ["Steady", pct(r.steady)], ["On a straight grid", `${pct(r.grid_share)} (worst ${fmt(r.grid_ms, 0)} ms)`],
     ["Beats / downbeats", r.beat_count != null ? `${r.beat_count} / ${r.downbeat_count}` : "–"],
     ["Time", r.model_seconds ? `model ${fmt(r.model_seconds)} s · decode ${fmt(r.decode_seconds)} s · download ${fmt(r.download_seconds)} s` : "–"],
-    ["Genre (vote)", byGenreSource(detail.genres, "vote").map((g) => `${styleOf(g.label)} ${g.weight.toFixed(2)}`).join(", ") || "–"],
+  ];
+  const genreFacts = [
+    ["By vote", byGenreSource(detail.genres, "vote").map((g) => `${styleOf(g.label)} ${g.weight.toFixed(2)}`).join(", ") || "–"],
     ["Its sound", byGenreSource(detail.genres, "sound").slice(0, 5).map((g) => `${styleOf(g.label)} ${g.weight.toFixed(2)}`).join(", ") || "–"],
     ["Its tags", byGenreSource(detail.genres, "tag").map((g) => g.label).join(", ") || "–"],
   ];
-  $("d-facts").innerHTML = facts.map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
+  const factCards = (list) => list.map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
+  $("d-facts").innerHTML = factCards(facts);
+  $("d-sound").innerHTML = factCards(soundFacts(detail.measure));
+  $("d-genres").innerHTML = factCards(genreFacts);
   drawCurve(); drawMarks();
 }
 function closeSong() { $("detail").hidden = true; selected = null; detail = null; $("player").pause(); drawRows(); }
@@ -509,18 +717,14 @@ function closeSong() { $("detail").hidden = true; selected = null; detail = null
 $("d-close").addEventListener("click", () => { if (history.state && history.state.song) history.back(); else closeSong(); });
 window.addEventListener("popstate", (e) => {
   const id = e.state && e.state.song;
-  if (id) openSong(id, true, true); else closeSong();
+  if (id) openSong(id, true, true); else { if (detail) closeSong(); route(); }
 });
-$("home").addEventListener("click", (e) => {
-  e.preventDefault();
-  if (history.state && history.state.song) history.pushState(null, "", "./");
-  closeSong(); window.scrollTo({top: 0, behavior: "smooth"});
-});
+
 $("d-again").addEventListener("click", async () => { if (detail) { await api(`api/songs/${encodeURIComponent(detail.id)}/analyse`, {method: "POST"}); refreshStatus(); } });
 $("d-remove").addEventListener("click", async () => {
   if (!detail) return;
   await api("api/songs/" + encodeURIComponent(detail.id), {method: "DELETE"});
-  closeSong(); if (history.state && history.state.song) history.replaceState(null, "", "./"); refreshStatus();
+  closeSong(); if (history.state && history.state.song) history.replaceState(null, "", "#songs"); refreshStatus();
 });
 
 // ---- drawing ----
@@ -528,7 +732,8 @@ $("d-remove").addEventListener("click", async () => {
 // screen's pixel ratio, and reading it back each frame made the charts grow on phones (ratio 2.6) until they went
 // white. The buffer is only reset when the size changes, as resetting it clears and reallocates it.
 // The sticky header wraps to two or three lines on a phone: a song scrolled into view lands just below it.
-function headerHeight() { document.documentElement.style.setProperty("--header-h", (document.querySelector("header").offsetHeight + 12) + "px"); }
+function headerHeight() { document.documentElement.style.setProperty("--header-h", document.querySelector("header").offsetHeight + "px"); }
+headerHeight();
 window.addEventListener("resize", headerHeight);
 function sizeCanvas(canvas) {
   if (!canvas.dataset.h) canvas.dataset.h = canvas.getAttribute("height");
@@ -710,16 +915,31 @@ refreshLibraries();
 refreshStatus();
 setInterval(refreshStatus, 2000);
 
-// ---- views ----
-function showView(view) {
-  if (!["now", "songs", "genres", "blends", "log"].includes(view)) view = "now";
-  document.body.dataset.view = view;
-  document.querySelectorAll(".tabs [data-view]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.view === view)));
-  try { localStorage.setItem("beats-view", view); } catch (e) { /* private window: not kept */ }
+// ---- pages ----
+// One page at a time, chosen in the side menu (tabs on a phone) and kept in the address (#songs, #song=<id>), so Back
+// and a bookmark work.
+const VIEWS = ["overview", "libraries", "songs", "loudness", "genres", "similar", "blends", "activity", "log", "setup"];
+let currentView = null;
+function showView(view, keepHash) {
+  if (!VIEWS.includes(view)) view = "overview";
+  currentView = view;
+  document.querySelectorAll("main > section[data-view]").forEach((sec) => sec.classList.toggle("on", sec.dataset.view === view));
+  document.querySelectorAll(".nav [data-view]").forEach((a) => {
+    if (a.dataset.view === view) { a.setAttribute("aria-current", "page"); a.scrollIntoView({block: "nearest", inline: "nearest"}); }
+    else a.removeAttribute("aria-current");
+  });
+  if (!keepHash && location.hash !== "#" + view) history.replaceState(null, "", "#" + view);
+  document.title = `${document.querySelector(`.nav [data-view="${view}"]`)?.textContent.trim() || "Overview"} · Siansa Beats`;
   if (view === "genres") refreshGenres(true);
+  if (view === "loudness") refreshLoudness();
+  if (view === "similar") drawSimilarStatus();
 }
-document.querySelectorAll(".tabs [data-view]").forEach((b) => b.addEventListener("click", () => { showView(b.dataset.view); window.scrollTo({top: 0}); }));
-{ let kept = null; try { kept = localStorage.getItem("beats-view"); } catch (e) { /* none */ } showView(location.hash.startsWith("#song=") ? "songs" : kept || "now"); }
+function route() {
+  const m = location.hash.match(/^#song=(.+)$/);
+  if (m) { showView("songs", true); if (selected !== decodeURIComponent(m[1])) { history.replaceState({song: decodeURIComponent(m[1])}, "", location.hash); openSong(decodeURIComponent(m[1]), true, true); } return; }
+  showView(location.hash.slice(1) || "overview", true);
+}
+window.addEventListener("hashchange", () => { route(); window.scrollTo({top: 0}); });
 
 // ---- genres ----
 function styleOf(label) { return (label || "").split("---").pop(); }
@@ -768,8 +988,8 @@ function drawGenres(answer, old) {
   const genresOf = {};
   list.forEach((g) => { (genresOf[g.style] = genresOf[g.style] || new Set()).add(g.genre); });
   const name = (g) => genresOf[g.style].size > 1 ? `${g.style} (${g.genre})` : g.style;
-  $("genre-top").innerHTML = list.slice(0, 60)
-    .map((g) => `<span class="chip" title="${esc(g.label)}">${esc(name(g))} <span class="sub">${g.songs}</span></span>`).join("");
+  genreList = list.map((g) => ({name: name(g), label: g.label, songs: g.songs}));
+  drawGenreBars();
 }
 refreshGenres(true);
 setInterval(refreshGenres, 10000);
@@ -805,7 +1025,140 @@ document.querySelectorAll("[data-log]").forEach((b) => b.addEventListener("click
 }));
 refreshLog();
 setInterval(refreshLog, 3000);
-{ const m = location.hash.match(/^#song=(.+)$/); if (m) { history.replaceState({song: decodeURIComponent(m[1])}, "", location.hash); openSong(decodeURIComponent(m[1]), true, true); } }
+
+
+// ---- overview ----
+const num = (n) => (n ?? 0).toLocaleString();
+function tile(href, k, v, of, s, meter) {
+  const bar = meter ? `<div class="meter">${meter.map(([cls, n]) => `<span class="${cls}" style="width:${of ? 100 * n / of : 0}%"></span>`).join("")}</div>` : "";
+  return `<a class="tile" href="${href}"><div class="k">${esc(k)}</div><div class="v">${v}${of != null ? ` <small>of ${num(of)}</small>` : ""}</div><div class="s">${s}</div>${bar}</a>`;
+}
+function drawTiles(s) {
+  const c = s.counts || {}, total = c.songs || 0, done = c.done || 0, failed = c.failed || 0;
+  const waiting = (c.queued || 0) + BUSY.reduce((n, k) => n + (c[k] || 0), 0);
+  const l = s.loudness || {}, st = s.styles || {};
+  $("tiles").innerHTML = [
+    tile("#songs", "Beats", num(done), total, `${waiting ? num(waiting) + " to go" : "all done"}${failed ? ` · ${num(failed)} failed` : ""}`, [["done", done], ["failed", failed], ["busy", waiting]]),
+    tile("#loudness", "Loudness, fades & key", num(l.measured), done, l.waiting ? `${num(l.waiting)} to go${l.measuring ? " · measuring now" : ""}` : `all measured${l.failed ? ` · ${num(l.failed)} couldn't be` : ""}`, [["done", l.measured || 0], ["failed", l.failed || 0]]),
+    tile("#genres", "Genres", st.available ? num(st.done) : "–", st.available ? st.total : null, st.available ? (st.current ? "hearing a song now" : "songs heard by the style model") : "no style model in this image", st.available ? [["done", st.done || 0], ["failed", st.failed || 0]] : null),
+    tile("#blends", "Bad blends", num(s.bad_blends), null, "marked in Siansa Dev", null),
+  ].join("");
+}
+
+// ---- setup ----
+function drawSetup(s) {
+  const yes = (v, on, off) => `<span class="${v ? "yes" : "no"}">${v ? on : off}</span>`, cn = s.connections || {};
+  $("setup-connections").innerHTML = [
+    ["Navidrome", s.navidrome ? esc(s.navidrome) : yes(false, "", "not set: NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASSWORD")],
+    ["AudioMuse-AI", yes(cn.audiomuse, "set: similar music, and the plugin's loudness", "not set (AUDIOMUSE_URL, AUDIOMUSE_TOKEN): no similar music")],
+    ["Page password", yes(cn.password, "set", "none (BEATS_PASSWORD): anyone on the network sees this page")],
+    ["Key for the app", yes(cn.api_key, "set (BEATS_API_KEY)", "none: the app uses the page password, or nothing")],
+  ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  $("setup-model").innerHTML = [
+    ["Beat tracker", `Beat This! ${esc(s.model)}`],
+    ["Runs on", s.model_loaded ? esc(s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") : esc(s.device) + " (loads with the first song)"],
+    ["Half precision", s.float16 ? "on" : "off"],
+    ["Style model", (s.styles || {}).available ? `Discogs-EffNet on the ${esc((s.styles || {}).device || "CPU")}` : "not in this image"],
+    ["Version", esc(s.version)], ["Running for", `${Math.floor((s.uptime_seconds || 0) / 3600)} h ${Math.floor((s.uptime_seconds || 0) % 3600 / 60)} min`],
+  ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  $("setup-address").textContent = location.origin + location.pathname.replace(/\/$/, "");
+  $("setup-key").innerHTML = cn.api_key ? "Key: the <code>BEATS_API_KEY</code> set on the container." : cn.password ? "Key: this page's password (or set <code>BEATS_API_KEY</code> for one of its own)." : "Key: none needed (nothing is set on the container).";
+}
+
+// ---- loudness, fades and key ----
+function soundCell(m) {
+  if (!m) return '<span class="sub">–</span>';
+  if (m.error) return `<span class="sub" title="${esc(m.error)}">couldn't</span>`;
+  return `${m.ref_lufs != null ? fmt(m.ref_lufs) + " LUFS" : "–"}<div class="sub">${esc([m.key, m.scale].filter(Boolean).join(" ")) || "no key"}${m.source === "plugin" ? " · plugin" : ""}</div>`;
+}
+const crossing = (points, db) => (points || []).find(([level]) => level === db)?.[1];
+function soundFacts(m) {
+  if (!m) return [["Not measured yet", "while the queue is empty"]];
+  if (m.error) return [["Couldn't be measured", m.error]];
+  const into = crossing(m.start, -18), out = crossing(m.end, -18);
+  return [
+    ["Loudness", m.ref_lufs != null ? `${fmt(m.ref_lufs)} LUFS` : "silent"],
+    ["Key", [m.key, m.scale].filter(Boolean).join(" ") || "–"],
+    ["Up to the fade level", into != null ? `after ${fmt(into)} s` : "–"],
+    ["Quiet before the end", out != null ? `${fmt(out)} s` : "–"],
+    ["From", m.source === "plugin" ? "the Siansa plugin on AudioMuse-AI" : "measured here"],
+    ["Measured", m.measured_at ? new Date(m.measured_at * 1000).toLocaleString() : "–"],
+  ];
+}
+function bars(id, axisId, b, unit) {
+  const max = Math.max(1, ...b.counts);
+  $(id).innerHTML = b.counts.map((n, i) => `<span style="height:${100 * n / max}%" title="${b.from + i * b.step}–${b.from + (i + 1) * b.step} ${unit}: ${num(n)} songs"></span>`).join("");
+  const end = b.from + b.counts.length * b.step;
+  $(axisId).innerHTML = `<span>${b.from} ${unit}</span><span>${(b.from + end) / 2}</span><span>${end} ${unit}</span>`;
+}
+async function refreshLoudness() {
+  let r;
+  try { r = await api("api/loudness"); } catch (e) { return; }
+  const measured = r.measured || 0;
+  $("l-tiles").innerHTML = [
+    tile("#loudness", "Measured", num(measured), (measured + (r.waiting || 0) + (r.failed || 0)) || null, r.waiting ? `${num(r.waiting)} to go` : "all songs analysed for their beats", [["done", r.sources.beats], ["plugin", r.sources.plugin], ["failed", r.failed || 0]]),
+    tile("#loudness", "Measured here", num(r.sources.beats), null, "from each song's file", null),
+    tile("#loudness", "Taken from the plugin", num(r.sources.plugin), null, r.audiomuse ? "AudioMuse-AI's Siansa plugin had them" : "AudioMuse-AI isn't set up", null),
+    tile("#loudness", "With a key", num(r.with_key), measured || null, "for blends in key", null),
+  ].join("");
+  $("l-now-card").hidden = !r.measuring;
+  if (r.measuring) $("l-now").textContent = `${r.measuring.artist} – ${r.measuring.title}`;
+  bars("l-lufs", "l-lufs-axis", r.lufs, "LUFS");
+  $("l-lufs-note").textContent = r.lufs.median != null ? `Half the songs are louder than ${fmt(r.lufs.median)} LUFS; the quietest is ${fmt(r.lufs.quietest)}, the loudest ${fmt(r.lufs.loudest)}. The app brings them all to −14 or −18.` : "Nothing measured yet.";
+  bars("l-intro", "l-intro-axis", r.intro_seconds, "s");
+  $("l-intro-note").textContent = `Seconds until a song is up to ${r.fade_db} dB below its loudness: a hard start is at 0, a slow intro later. The app starts its fade-in from there.`;
+  bars("l-outro", "l-outro-axis", r.outro_seconds, "s");
+  $("l-outro-note").textContent = `Seconds a song is quieter than ${r.fade_db} dB before its end: a long fade-out or silence. The app starts the next song before it.`;
+  const keys = Object.entries(r.keys || {}), most = Math.max(1, ...keys.map(([, n]) => n));
+  $("l-keys").innerHTML = keys.map(([k, n]) => `<div class="hbar"><span class="name">${esc(k)}</span><span class="track"><span style="width:${100 * n / most}%"></span></span><span class="n">${num(n)}</span></div>`).join("") || '<p class="sub">No keys yet.</p>';
+  $("l-failed").innerHTML = (r.failed_songs || []).map((f) => `<li><a href="#song=${encodeURIComponent(f.id)}">${esc(f.artist || "")} – ${esc(f.title || f.id)}</a><br><span class="sub">${esc(f.error)}</span></li>`).join("") || '<li class="sub">None.</li>';
+}
+setInterval(() => { if (currentView === "loudness") refreshLoudness(); }, 10000);
+
+// ---- genres as bars ----
+function drawGenreBars() {
+  const find = ($("genre-find").value || "").trim().toLowerCase();
+  const shown = genreList.filter((g) => !find || g.name.toLowerCase().includes(find) || (g.label || "").toLowerCase().includes(find));
+  const most = Math.max(1, ...genreList.map((g) => g.songs));
+  $("genre-top").innerHTML = shown.map((g) => `<div class="hbar" title="${esc(g.label)}"><span class="name">${esc(g.name)}</span><span class="track"><span style="width:${100 * g.songs / most}%"></span></span><span class="n">${num(g.songs)}</span></div>`).join("") || '<p class="sub">No genres yet.</p>';
+}
+$("genre-find").addEventListener("input", drawGenreBars);
+
+// ---- similar music ----
+function drawSimilarStatus() {
+  const on = status && (status.connections || {}).audiomuse;
+  $("s-status").innerHTML = on
+    ? '<span class="pill ok">AudioMuse-AI is set up</span> <span class="sub">Similar albums and artists are asked of its Siansa plugin.</span>'
+    : '<span class="pill wait">AudioMuse-AI isn\'t set up</span> <p class="sub">Set <code>AUDIOMUSE_URL</code> and <code>AUDIOMUSE_TOKEN</code> (one of its API tokens) on the container. Until then the app asks the plugin itself, when it can.</p>';
+}
+let similarTimer = null;
+$("s-find").addEventListener("input", () => {
+  clearTimeout(similarTimer);
+  similarTimer = setTimeout(async () => {
+    const q = $("s-find").value.trim();
+    if (!q) { $("s-picks").innerHTML = ""; return; }
+    let found = [];
+    try { found = await api("api/songs?" + new URLSearchParams({find: q, limit: 8})); } catch (e) { return; }
+    $("s-picks").innerHTML = found.map((s) => `<li><button data-similar="${esc(s.id)}" data-album="${esc(s.album)}" data-artist="${esc(s.artist)}"><b>${esc(s.title)}</b>&nbsp;<span class="sub">${esc(s.artist)} · ${esc(s.album)}</span></button></li>`).join("") || '<li class="sub">No song matches.</li>';
+  }, 250);
+});
+$("s-picks").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-similar]");
+  if (!b) return;
+  $("s-results").hidden = false;
+  $("s-album").textContent = b.dataset.album; $("s-artist").textContent = b.dataset.artist;
+  $("s-albums").innerHTML = $("s-artists").innerHTML = '<li class="sub">Asking AudioMuse-AI…</li>';
+  const list = async (kind, el, text) => {
+    try {
+      const r = await api(`api/v1/similar/${kind}?track_id=${encodeURIComponent(b.dataset.similar)}`);
+      $(el).innerHTML = r.similar.map((x) => `<li>${text(x)} <span class="sub">${fmt(x.score, 2)}</span></li>`).join("") || '<li class="sub">None found.</li>';
+    } catch (err) { $(el).innerHTML = `<li class="sub">${esc(err.message)}</li>`; }
+  };
+  list("albums", "s-albums", (x) => `${esc(x.album)} <span class="sub">${esc(x.artist)}</span>`);
+  list("artists", "s-artists", (x) => esc(x.artist));
+});
+
+route();
 </script>
 </body>
 </html>
