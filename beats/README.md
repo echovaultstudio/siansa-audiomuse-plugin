@@ -80,11 +80,22 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
 
 ## Use it
 
-The page has one view at a time, picked from the tabs under its name: **Now** (what's happening, the libraries and
-the activity), **Songs** (the table, and a song's page when one is open), **Genres**, **Bad blends** (with how many)
-and **Log**. It remembers the last one.
+The page shows one page at a time, picked from the menu on the left (a row of tabs on a phone), in three groups.
+Each page has its own address (`#songs`, `#loudness`…), so Back and bookmarks work:
 
-1. Tick the **libraries to analyse** and press **Start analysis**. It reads their songs from Navidrome and works
+| Group | Page | What's on it |
+|---|---|---|
+| Analysis | **Overview** | What's being done now, how far the beats, loudness and genres are, and the latest activity |
+| | **Libraries** | The Navidrome libraries to analyse, Start analysis, Look for new songs, and starting over |
+| | **Songs** | The table, and a song's page (its beats, loudness, fades, key and genres) when one is open |
+| For the Siansa app | **Loudness & keys** | How many songs are measured (here or taken from the plugin), how loud they are, how they start and end, their keys, and the ones that couldn't be measured |
+| | **Genres** | The style model's progress, how often it agrees with the tags, and every genre by songs |
+| | **Similar music** | Whether AudioMuse-AI is set up, and a song to try: the albums and artists like it |
+| | **Bad blends** | The song changes marked as bad in Siansa Dev |
+| Service | **Activity**, **Log** | What was done, and the container's log with Debug details |
+| | **Setup** | The connections and the model (no passwords), how to connect the app, the debug report |
+
+1. On **Libraries**, tick the libraries to analyse and press **Start analysis**. It reads their songs from Navidrome and works
    through them a song at a time; the top shows the song
    and the step (downloading, decoding, loading the model, analysing), and **Activity** what's been done, with the
    time each step took. The first song takes longer while the model loads.
@@ -131,7 +142,7 @@ and **Log**. It remembers the last one.
 4. **Export CSV** gives the table, for a spreadsheet.
 
 **The log.** Everything Siansa Beats does goes to the container's log (`docker compose logs -f siansa-beats`, or the
-app's Logs on TrueNAS) and to the **Log** card at the bottom of the page: starting up, the libraries read, each song
+app's Logs on TrueNAS) and to the **Log** page: starting up, the libraries read, each song
 done or failed, errors with their traceback. Tick **Debug details** to add every step of every song with its times and
 sizes, what the model and the grid found, and every request to Navidrome with how long it took; it's kept across
 restarts, so turn it off when the problem is found (a pill at the top says while it's on). `LOG_LEVEL=debug` turns it

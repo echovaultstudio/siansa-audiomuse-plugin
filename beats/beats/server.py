@@ -204,6 +204,7 @@ class App:
         if row is None:
             return None
         row = self.song_row(row)
+        row["measure"] = self.measure_of(song_id)
         full = self.store.result(song_id, self.config.model, with_beats=True)
         row["beats"] = full["beats"] if full else []
         row["downbeats"] = full["downbeats"] if full else []
@@ -273,6 +274,69 @@ class App:
                 "phrases": steady["phrases"] if steady else [], "downbeat_source": full.get("downbeat_source"),
                 "model_beats": full["beats"], "model_downbeats": full["downbeats"]}
 
+    def measure_of(self, song_id):
+        """One song's loudness, fades and key for its page, with the ramps as ``[[dB, seconds], …]``; None when not
+        measured yet."""
+        m = self.store.measure(song_id)
+        if not m:
+            return None
+
+        def points(blob):
+            try:
+                return [[level, round(chunk * loudness.CHUNK_SECONDS, 1)] for level, chunk in loudness.decode_ramp(blob or "")]
+            except ValueError:
+                return []
+
+        return {"ref_lufs": m["ref_lufs"], "key": m["key"], "scale": m["scale"], "key_strength": m["key_strength"],
+                "duration_ms": m["duration_ms"], "source": m["source"] or "beats", "error": m["error"],
+                "measured_at": m["measured_at"], "start": points(m["start_ramp"]), "end": points(m["end_ramp"])}
+
+    FADE_DB = -18  # the level the app fades on (its Crossfade.QUIET_DB)
+
+    def loudness_report(self):
+        """The page's loudness dashboard: how far it is, where the numbers came from, how loud the songs are, how they
+        start and end, and their keys."""
+        summary = self.store.measure_summary()
+        rows = summary["rows"]
+        counts = self.store.measure_counts(loudness.VERSION)
+        lufs = [r["ref_lufs"] for r in rows if r["ref_lufs"] is not None]
+
+        def bins(values, lo, hi, step):
+            out = [0] * int((hi - lo) / step)
+            for v in values:
+                out[min(len(out) - 1, max(0, int((v - lo) // step)))] += 1
+            return {"from": lo, "step": step, "counts": out}
+
+        def at_fade(blob):
+            """When the ramp passes the app's fade level (seconds), or None."""
+            try:
+                return next((chunk * loudness.CHUNK_SECONDS for level, chunk in loudness.decode_ramp(blob or "")
+                             if level == self.FADE_DB), None)
+            except ValueError:
+                return None
+
+        intros = [t for t in (at_fade(r["start_ramp"]) for r in rows) if t is not None]
+        outros = [t for t in (at_fade(r["end_ramp"]) for r in rows) if t is not None]
+        keys = {}
+        for r in rows:
+            if r["key"]:
+                k = f"{r['key']} {r['scale'] or ''}".strip()
+                keys[k] = keys.get(k, 0) + 1
+        lufs_sorted = sorted(lufs)
+        return {
+            **counts,
+            "measuring": dict(self.worker.measuring) if self.worker.measuring else None,
+            "sources": {"beats": sum(1 for r in rows if (r["source"] or "beats") == "beats"),
+                        "plugin": sum(1 for r in rows if r["source"] == "plugin")},
+            "with_key": sum(1 for r in rows if r["key"]),
+            "audiomuse": self.audiomuse.configured,
+            "lufs": {**bins(lufs, -30, 0, 1), "median": lufs_sorted[len(lufs_sorted) // 2] if lufs_sorted else None,
+                     "quietest": lufs_sorted[0] if lufs_sorted else None, "loudest": lufs_sorted[-1] if lufs_sorted else None},
+            "intro_seconds": bins(intros, 0, 30, 2), "outro_seconds": bins(outros, 0, 30, 2), "fade_db": self.FADE_DB,
+            "keys": dict(sorted(keys.items(), key=lambda p: -p[1])),
+            "failed_songs": summary["failed"],
+        }
+
     def status(self):
         counts = self.store.counts()
         worker = self.worker
@@ -291,6 +355,8 @@ class App:
             "next": preparing,
             "bad_blends": self.store.bad_blend_count(),
             "styles": self.styles_status(),
+            "connections": {"navidrome": self.navidrome.configured, "audiomuse": self.audiomuse.configured,
+                            "api_key": bool(self.config.api_key), "password": bool(self.config.password)},
             "loudness": {**self.store.measure_counts(loudness.VERSION),
                          "measuring": dict(worker.measuring) if worker.measuring else None},
             "regridding": dict(worker.regridding) if worker.regridding else None,
@@ -566,6 +632,8 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError:
                     return self._error(HTTPStatus.BAD_REQUEST, "limit is a number")
                 return self._json(app.genre_songs(name, limit))
+            if path == "/api/loudness":
+                return self._json(app.loudness_report())
             if path == "/api/status":
                 return self._json(app.status())
             if path == "/api/log":
