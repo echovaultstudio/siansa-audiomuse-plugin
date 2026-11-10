@@ -129,6 +129,14 @@ class FakeServer:
                                 if s["id"] in ids and s.get("plugin")]
                     return self.reply(200, {"schema_version": 1, "profiles": profiles,
                                             "pending": [i for i in ids if i not in {p["track_id"] for p in profiles}]})
+                # Only the Siansa Analysis plugin is installed here: Siansa Beats asks the dev plugin first.
+                if "/siansa_analysis/" in path and "/api/similar/" in path:
+                    if q.get("track_id") == "nope":
+                        return self.reply(404, {"error": "unknown song"})
+                    kind = path.rsplit("/", 1)[1]
+                    key = "album" if kind == "albums" else "artist"
+                    return self.reply(200, {"similar": [{key: "Deep", "artist": "House Test", "track_id": "t122",
+                                                         "score": 0.91, "asked": q}]})
                 return self.reply(404, {"error": "not found"})
 
         self.server = ThreadingHTTPServer(("127.0.0.1" if port == 0 else "0.0.0.0", port), Handler)

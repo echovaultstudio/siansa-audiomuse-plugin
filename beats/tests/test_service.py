@@ -472,7 +472,7 @@ class ServiceTest(Base):
         empty = self.call("/api/v1/capabilities")
         self.assertEqual((empty["service"], empty["api"]), ("siansa-beats", 1))
         self.assertEqual(empty["features"]["beat_grids"]["songs"], 0)
-        self.assertFalse(empty["features"]["similar"]["available"])
+        self.assertTrue(empty["features"]["similar"]["available"])  # AUDIOMUSE_URL is set
         self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
         caps = self.call("/api/v1/capabilities")
@@ -528,6 +528,21 @@ class ServiceTest(Base):
         for path in ("/api/v1/capabilities", "/api/v1/profiles", "/api/v1/genres", "/api/v1/genre", "/api/v1/genre/about",
                      "/api/v1/bad-blends"):
             self.assertIn(path, spec["paths"])
+
+    def test_v1_similar_albums_and_artists_asked_of_audiomuse(self):
+        self.start()
+        self.assertTrue(self.call("/api/v1/capabilities")["features"]["similar"]["available"])
+        albums = self.call("/api/v1/similar/albums?track_id=t140")
+        self.assertEqual((albums["source"], albums["similar"][0]["album"], albums["similar"][0]["track_id"]), ("audiomuse", "Deep", "t122"))
+        self.assertEqual(albums["similar"][0]["asked"], {"track_id": "t140"})
+        artists = self.call("/api/v1/similar/artists?artist=Ecsape&server=Home")
+        self.assertEqual(artists["similar"][0]["artist"], "House Test")
+        self.assertEqual(artists["similar"][0]["asked"], {"artist": "Ecsape", "server": "Home"})
+        for path, code in (("/api/v1/similar/albums", 400), ("/api/v1/similar/albums?artist=x", 400),
+                           ("/api/v1/similar/albums?track_id=nope", 502)):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.call(path)
+            self.assertEqual(caught.exception.code, code, path)
 
     def test_an_api_key_for_the_app(self):
         self.start(password="s3cret", api_key="k3y")
@@ -658,7 +673,8 @@ class ServiceTest(Base):
         self.assertEqual(report["versions"]["siansa_beats"], __version__)
         self.assertEqual(report["setup"]["navidrome_password"], "set")
         self.assertEqual(report["setup"]["page_password"], "set")
-        self.assertEqual(report["setup"]["unused"], ["AUDIOMUSE_URL", "AUDIOMUSE_TOKEN"])
+        self.assertEqual(report["setup"]["audiomuse_token"], "set")
+        self.assertNotIn(f'"{TOKEN}"', body.decode())
         self.assertIn("beats-model", report["threads"])
         self.assertEqual(report["status"]["counts"]["failed"], 1)
         self.assertNotIn("pagepass", body.decode())

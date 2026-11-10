@@ -8,6 +8,8 @@ that would break that is v2, next to v1. The full description is ``openapi.json`
     GET  /api/v1/genres                every style with songs voted into it, most first
     GET  /api/v1/genre?name=&limit=    the songs of a genre (by vote): {"name", "styles", "genres", "ids"}
     GET  /api/v1/genre/about?name=     a short description of a genre, from Wikipedia: {"name", "about"}
+    GET  /api/v1/similar/albums?track_id=          albums that sound like that song's album (asked of AudioMuse-AI)
+    GET  /api/v1/similar/artists?track_id=|artist= artists that sound like that one (asked of AudioMuse-AI)
     POST /api/v1/bad-blends            {"from_id", "to_id", "technique", "details"}: a song change marked as bad
     GET  /api/v1/openapi.json          this API described
 
@@ -50,7 +52,7 @@ def capabilities(app):
             "genres": {"available": bool(styles.get("available")), "styles": len(app.genre_list())},
             "genre_about": {"available": True, "source": "Wikipedia"},
             "bad_blends": {"available": True},
-            "similar": {"available": False},
+            "similar": {"available": app.audiomuse.configured, "source": "audiomuse"},
         },
         "limits": {"profile_ids": MAX_IDS, "genre_songs": 2000},
     }
@@ -103,6 +105,16 @@ def get(handler, path, query):
         if len(ids) > MAX_IDS:
             return handler._error(HTTPStatus.BAD_REQUEST, f"at most {MAX_IDS} ids at a time") or True
         return handler._json(profiles(app, ids)) or True
+    if path in ("/api/v1/similar/albums", "/api/v1/similar/artists"):
+        from .audiomuse import AudioMuseError, PASSED_ON
+
+        asked = {k: arg(k) for k in PASSED_ON if arg(k)}
+        if not asked.get("track_id") and not (path.endswith("artists") and asked.get("artist")):
+            return handler._error(HTTPStatus.BAD_REQUEST, "track_id needed (or artist, for artists)") or True
+        try:
+            return handler._json(app.audiomuse.similar(path.rsplit("/", 1)[1], asked)) or True
+        except AudioMuseError as e:
+            return handler._error(HTTPStatus.BAD_GATEWAY, str(e)) or True
     if path == "/api/v1/genres":
         return handler._json({"styles": app.styles_status(), "genres": app.genre_list()}) or True
     if path in ("/api/v1/genre", "/api/v1/genre/about"):

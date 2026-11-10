@@ -36,7 +36,8 @@ memory free while it works.
 
 3. **Fill in `.env`:**
    - `NAVIDROME_URL`, `NAVIDROME_USER`, `NAVIDROME_PASSWORD`: as you sign in to Siansa;
-   - optionally `BEATS_PASSWORD`, if others on the network shouldn't see the page (its user name is `siansa`).
+   - optionally `BEATS_PASSWORD`, if others on the network shouldn't see the page (its user name is `siansa`);
+   - optionally `AUDIOMUSE_URL` and `AUDIOMUSE_TOKEN` (one of AudioMuse-AI's API tokens), for similar albums and artists.
 
 4. **Start it:**
 
@@ -258,6 +259,7 @@ On the server, after setting it up:
 | `BEATS_THREADS` | `0` (all) | The model's CPU threads. |
 | `BEATS_CPUS` | `4` | (docker-compose) The cores the container may use. |
 | `BEATS_PASSWORD` | empty | The page and API ask for it (user `siansa`); `/api/health` stays open for Docker. |
+| `AUDIOMUSE_URL`, `AUDIOMUSE_TOKEN` | empty | AudioMuse-AI and one of its API tokens: similar albums and artists are asked of its Siansa plugin, for the app. |
 | `BEATS_API_KEY` | empty | A key for the Siansa app, so it needn't know the page's password (`Authorization: Bearer <key>`). The password works as a key too. |
 
 ## The app's API (v1)
@@ -272,6 +274,8 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 | `GET /api/v1/genres` | Every style with songs voted into it. |
 | `GET /api/v1/genre?name=&limit=` | The songs of a genre, by vote. |
 | `GET /api/v1/genre/about?name=` | A short description of a genre, from Wikipedia. |
+| `GET /api/v1/similar/albums?track_id=` | Albums that sound like that song's album, asked of AudioMuse-AI's Siansa plugin (until Siansa Beats works them out itself). |
+| `GET /api/v1/similar/artists?track_id=` or `?artist=` | Artists that sound like that one, the same way. |
 | `POST /api/v1/bad-blends` | A song change marked as bad in the app. |
 
 Songs analysed before 0.20 are measured for loudness, fades and key while the queue is empty (each is downloaded once

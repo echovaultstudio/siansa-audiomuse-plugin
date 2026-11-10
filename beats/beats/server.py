@@ -6,6 +6,7 @@ Run with ``python -m beats.server``. Set up with environment variables (see the 
     NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASSWORD   the music server (read only)
     BEATS_MODEL (final0 | small0), BEATS_DEVICE (auto | cpu | cuda | cuda:N), BEATS_FLOAT16, BEATS_THREADS
     BEATS_PASSWORD                                       optional: the page and API ask for it (user "siansa")
+    AUDIOMUSE_URL, AUDIOMUSE_TOKEN                       optional: AudioMuse-AI, asked for similar albums and artists
     BEATS_API_KEY                                        optional: a key for the Siansa app instead of the password
                                                          (``Authorization: Bearer <key>``; the password works there too)
     DATA_DIR (/data), MODELS_DIR (/models), PORT (8090)
@@ -67,6 +68,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import __version__, api_v1, grid, loudness
+from .audiomuse import AudioMuse
 from .store import Store
 from .subsonic import Subsonic, SubsonicError
 from .worker import Worker
@@ -96,8 +98,9 @@ class Config:
         self.models_dir = env.get("MODELS_DIR", "/models")
         self.port = int(env.get("PORT", "8090"))
         self.log_level = env.get("LOG_LEVEL", "info")
-        # Set but no longer used (the plugin comparison went in 0.14.0): said once in the log, so it can be removed.
-        self.unused = [k for k in ("AUDIOMUSE_URL", "AUDIOMUSE_TOKEN") if env.get(k)]
+        # AudioMuse-AI, for similar albums and artists (0.20.0; until 0.14.0 it was for comparing with the plugin).
+        self.audiomuse_url = env.get("AUDIOMUSE_URL", "")
+        self.audiomuse_token = env.get("AUDIOMUSE_TOKEN", "")
 
 
 class Kept:
@@ -160,6 +163,7 @@ class App:
         os.makedirs(config.data_dir, exist_ok=True)
         self.store = Store(os.path.join(config.data_dir, "beats.db"))
         self.navidrome = Subsonic(config.navidrome_url, config.navidrome_user, config.navidrome_password)
+        self.audiomuse = AudioMuse(config.audiomuse_url, config.audiomuse_token)
         self.tracker = tracker or analyser.BeatThis(config.model, config.device, config.models_dir, config.threads,
                                                     config.float16)
         self.style = style if style is not None else style_module.StyleModel(config.models_dir, config.style_threads, config.device)
@@ -385,8 +389,9 @@ class App:
         setup = {"navidrome_url": c.navidrome_url or None, "navidrome_user": c.navidrome_user or None,
                  "navidrome_password": "set" if c.navidrome_password else "not set", "model": c.model,
                  "device": c.device, "float16": c.float16, "threads": c.threads,
-                 "page_password": "set" if c.password else "not set", "data_dir": c.data_dir,
-                 "models_dir": c.models_dir, "port": c.port, "log_level": log.level(), "unused": c.unused}
+                 "page_password": "set" if c.password else "not set", "api_key": "set" if c.api_key else "not set",
+                 "audiomuse_url": c.audiomuse_url or None, "audiomuse_token": "set" if c.audiomuse_token else "not set", "data_dir": c.data_dir,
+                 "models_dir": c.models_dir, "port": c.port, "log_level": log.level()}
         db = os.path.join(c.data_dir, "beats.db")
         status = self.status()
         status.pop("events", None)
@@ -780,9 +785,6 @@ def main():
     if chosen:
         log.set_level(chosen)
     _log.info("Log level %s (%s)", log.level(), "chosen on the page" if chosen else "LOG_LEVEL")
-    if config.unused:
-        _log.info("%s set but no longer used (the plugin comparison went in 0.14.0): it can be removed",
-                  " and ".join(config.unused))
     app.worker.start()
     app.store.event(f"Started: model {config.model}, device {config.device}"
                     f"{' (half precision on a GPU)' if config.float16 else ''}")

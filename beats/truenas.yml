@@ -15,6 +15,9 @@ services:
       BEATS_DEVICE: "auto"
       BEATS_FLOAT16: "0"
       BEATS_PASSWORD: ""
+      BEATS_API_KEY: ""
+      AUDIOMUSE_URL: ""
+      AUDIOMUSE_TOKEN: ""
       LOG_LEVEL: "info"
       NVIDIA_VISIBLE_DEVICES: "all"
     volumes:

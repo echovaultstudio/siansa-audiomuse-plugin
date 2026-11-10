@@ -264,6 +264,145 @@
      }
     }
    }
+  },
+  "/api/v1/similar/albums": {
+   "get": {
+    "summary": "Albums that sound like a song's album (asked of AudioMuse-AI's Siansa plugin for now)",
+    "parameters": [
+     {
+      "name": "track_id",
+      "in": "query",
+      "description": "A song of the album or artist (Navidrome's id)",
+      "schema": {
+       "type": "string"
+      },
+      "required": true
+     },
+     {
+      "name": "server",
+      "in": "query",
+      "description": "The music server's name in AudioMuse-AI, when it has several",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Similar albums, most alike first",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Similar"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Something was missing or wrong: {\"error\": why}",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "The password or API key is needed"
+     },
+     "502": {
+      "description": "AudioMuse-AI isn't set up or couldn't answer: {\"error\": why}",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/similar/artists": {
+   "get": {
+    "summary": "Artists that sound like an artist (asked of AudioMuse-AI's Siansa plugin for now)",
+    "parameters": [
+     {
+      "name": "track_id",
+      "in": "query",
+      "description": "A song of the album or artist (Navidrome's id)",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "artist",
+      "in": "query",
+      "description": "The artist, by name (instead of track_id)",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "server",
+      "in": "query",
+      "description": "The music server's name in AudioMuse-AI, when it has several",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Similar artists, most alike first",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Similar"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Something was missing or wrong: {\"error\": why}",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "The password or API key is needed"
+     },
+     "502": {
+      "description": "AudioMuse-AI isn't set up or couldn't answer: {\"error\": why}",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -676,6 +815,36 @@
      },
      "details": {
       "type": "object"
+     }
+    }
+   },
+   "Similar": {
+    "type": "object",
+    "properties": {
+     "source": {
+      "type": "string",
+      "description": "Where it came from: audiomuse"
+     },
+     "similar": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "album": {
+         "type": "string"
+        },
+        "artist": {
+         "type": "string"
+        },
+        "track_id": {
+         "type": "string",
+         "description": "One of its songs"
+        },
+        "score": {
+         "type": "number"
+        }
+       }
+      }
      }
     }
    }
