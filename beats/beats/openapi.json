@@ -804,6 +804,16 @@
      "pending": {
       "type": "boolean",
       "description": "Still being looked up: ask again in a few seconds"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "found",
+       "pending",
+       "missing",
+       "failed"
+      ],
+      "description": "found; pending (ask again shortly); missing (Wikipedia has nothing on it); failed (Wikipedia couldn't be asked, tried again in half an hour)"
      }
     }
    },
