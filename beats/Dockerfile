@@ -21,7 +21,9 @@ ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
 # Downloads retry with a longer timeout: GitHub and the mirrors can be slow to answer from CI.
 ENV PIP_DEFAULT_TIMEOUT=120 PIP_RETRIES=10
 RUN pip install --index-url "$TORCH_INDEX" torch==2.3.1 torchaudio==2.3.1 \
- && pip install numpy==1.26.4 einops==0.8.0 rotary-embedding-torch==0.6.4 soxr==0.3.7 tqdm==4.66.4
+ && pip install numpy==1.26.4 einops==0.8.0 rotary-embedding-torch==0.6.4 soxr==0.3.7 tqdm==4.66.4 \
+# cryptography: what Siansa Beats has to say to other servers is kept encrypted (beats/vault.py, 0.24.0).
+ && pip install cryptography==43.0.3
 
 # Beat This! itself, at a fixed commit (version 1.1.0, 28 May 2026).
 ARG BEAT_THIS_COMMIT=b95c8ab0c58c2d9fcfd40508ae8dffbc05ac4f5c

@@ -24,7 +24,8 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 USER, PASSWORD, TOKEN = "test", "test", "token"
-USERS = {USER: PASSWORD, "second": "second"}  # Navidrome's users: both see every song
+SECOND_PASSWORD = "second-pass-9431"
+USERS = {USER: PASSWORD, "second": SECOND_PASSWORD}  # Navidrome's users: both see every song
 
 
 def file_path(song):
@@ -196,6 +197,7 @@ class FakeMediaServer:
         with open(os.path.join(folder, "catalog.json")) as f:
             self.songs = [s for s in json.load(f) if only is None or s["id"] in only] + list(extra)
         self.requests, self.token, self.logins = [], "tok-1", 0
+        self.password = PASSWORD  # a test may give it one that's told apart from the user name
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -231,7 +233,7 @@ class FakeMediaServer:
                 if self.path == "/Users/AuthenticateByName":
                     if not self.said().startswith("MediaBrowser " if fake.jellyfin else "Emby "):
                         return self.reply(400, {"error": "no client named"})
-                    if body.get("Username") != USER or body.get("Pw") != PASSWORD:
+                    if body.get("Username") != USER or body.get("Pw") != fake.password:
                         return self.reply(401, b"", "text/plain")
                     fake.logins += 1
                     return self.reply(200, {"AccessToken": fake.token, "User": {"Id": "u1", "Name": USER}})

@@ -34,10 +34,9 @@ memory free while it works.
    curl -fsSLO $base/docker-compose.yml && curl -fsSL $base/.env.example -o .env
    ```
 
-3. **Fill in `.env`:**
-   - `NAVIDROME_URL`, `NAVIDROME_USER`, `NAVIDROME_PASSWORD`: as you sign in to Siansa;
-   - optionally `BEATS_PASSWORD`, if others on the network shouldn't see the page (its user name is `siansa`);
-   - optionally `AUDIOMUSE_URL` and `AUDIOMUSE_TOKEN` (one of AudioMuse-AI's API tokens), for similar albums and artists.
+3. **`.env` needs nothing filled in.** No password goes in it or in the YAML (0.24.0): once it runs, open the page
+   and under **Setup** add your music server (as you sign in to Siansa), and if you like AudioMuse-AI (for similar
+   albums and artists), a password for the page and a key for the app.
 
 4. **Start it:**
 
@@ -99,9 +98,9 @@ Each page has its own address (`#songs`, `#loudness`…), so Back and bookmarks 
 
 ### Several music servers, and several users of one
 
-Siansa Beats reads **Navidrome, Emby and Jellyfin**, as many as you have (0.23.0). The one in the container's settings
-(`NAVIDROME_URL`…) is the first; add the others under **Setup › Music servers**: its kind, a name, its address, a user
-name and password. It's only kept once it answers and takes the login (**Test** asks without adding). Then tick its
+Siansa Beats reads **Navidrome, Emby and Jellyfin**, as many as you have (0.23.0). Add each under
+**Setup › Music servers**: its kind, a name, its address, a user name and password. **Edit** changes one (its name, or
+with its password its address, user or sign-in). It's only kept once it answers and takes the login (**Test** asks without adding). Then tick its
 libraries under **Libraries**.
 
 - **A song two servers have is analysed once.** When a server's library is read, each song is looked for among the
@@ -120,9 +119,8 @@ libraries under **Libraries**.
 - **The default server** is read first and is the one the Siansa app is answered for when it doesn't name one (an app
   from before 0.23, or the plugin). **Make default** changes it.
 - **Removing a server** forgets the songs only it had; songs another server has too stay, analysed.
-- Passwords added on the page are kept in the data folder (`beats.db`) and never shown, logged or put in the debug
-  report. Emby and Jellyfin are logged in to with the user name and password; the token they give is sent in a header,
-  never in an address. Nothing is ever written to a server.
+- No password is kept as it's typed (see "Secrets" below), and none is ever shown, logged or put in the debug
+  report. Emby's and Jellyfin's token is sent in a header, never in an address. Nothing is ever written to a server.
 - Similar albums and artists are still asked of AudioMuse-AI, by the ids of the server AudioMuse-AI knows.
 
 1. On **Libraries**, tick the libraries to analyse and press **Start analysis**. It reads their songs from Navidrome and works
@@ -298,7 +296,6 @@ On the server, after setting it up:
 
 | Variable | Default | |
 |---|---|---|
-| `NAVIDROME_URL`, `NAVIDROME_USER`, `NAVIDROME_PASSWORD` | | The first music server (Navidrome), read only. The password never leaves the container: requests carry a salted token. More servers (Emby and Jellyfin too) and more users are added on the page, under Setup. |
 | `STYLE_THREADS` | `2` | The style model's CPU threads. |
 | `LOG_LEVEL` | `info` | `debug`: every step of every song in the log, from the start. The page's **Debug details** switch changes it while running and wins over this. |
 | `BEATS_MODEL` | `final0` | `small0` is smaller and faster, a little less exact. Both are in the image. |
@@ -306,9 +303,36 @@ On the server, after setting it up:
 | `BEATS_FLOAT16` | `0` | `1`: half precision on a GPU. |
 | `BEATS_THREADS` | `0` (all) | The model's CPU threads. |
 | `BEATS_CPUS` | `4` | (docker-compose) The cores the container may use. |
-| `BEATS_PASSWORD` | empty | The page and API ask for it (user `siansa`); `/api/health` stays open for Docker. |
-| `AUDIOMUSE_URL`, `AUDIOMUSE_TOKEN` | empty | AudioMuse-AI and one of its API tokens: similar albums and artists are asked of its Siansa plugin, for the app. |
-| `BEATS_API_KEY` | empty | A key for the Siansa app, so it needn't know the page's password (`Authorization: Bearer <key>`). The password works as a key too. |
+| `BEATS_SECRET_KEY` | empty | The key the kept secrets are encrypted with, to keep it out of the data folder. Without it, a key file (`secret.key`) is made there. Changing it means entering the servers' passwords and AudioMuse-AI's token again. |
+| `BEATS_RESET_ACCESS` | empty | `yes`: takes the page's password and the app's key away at the start, when the password is forgotten. Take it off again afterwards. |
+
+The music servers, AudioMuse-AI, the page's password and the app's key are **not** settings of the container: they're
+set on the page, under Setup.
+
+### Secrets
+
+No secret is kept as plain text, and none belongs in the YAML (0.24.0).
+
+| Secret | How it's kept |
+|---|---|
+| The page's password | **Hashed** (scrypt, salted). It can't be read back, only checked. |
+| The app's key | **Hashed** (SHA-256 of a random key). It's shown once, when you make it under Setup › Access. |
+| Emby's and Jellyfin's password | **Not kept.** It's used once to sign in; the sign-in token the server gives is kept, encrypted. If the server stops taking it (you signed its devices out), Edit the server and enter the password again. |
+| Navidrome's password, AudioMuse-AI's token | **Encrypted.** They can't be hashed: Siansa Beats has to say them to those servers each time, and a hash can't be said in their place. |
+
+What's encrypted is locked with a key that isn't in the database: `BEATS_SECRET_KEY` from the container when you set
+one, else the file `secret.key` in the data folder, readable by Siansa Beats alone. A copy or backup of `beats.db`
+without the key gives nothing away. Someone who has the whole data folder, key file included, can decrypt them, so
+set `BEATS_SECRET_KEY` (in the container's settings, or a Docker secret) to keep the key apart from the data. If the
+key is lost, the servers show "enter its password again".
+
+**Coming from 0.23 or before:** `NAVIDROME_URL`, `NAVIDROME_USER`, `NAVIDROME_PASSWORD`, `AUDIOMUSE_URL`,
+`AUDIOMUSE_TOKEN`, `BEATS_PASSWORD` and `BEATS_API_KEY` are taken over once at the first start of 0.24 (hashed or
+encrypted) and never read again. Setup says which are still in your YAML: delete those lines. Nothing is analysed
+again, and the app keeps its key.
+
+A key for the app needs the page to have a password (without one the page is open and the app needs no key), and
+goes when the password is removed.
 
 ## The app's API (v1)
 
@@ -332,8 +356,8 @@ from the capabilities' `servers` (each with its `kind`, `url` and `user`, to tel
 (`capabilities`, `genres`) are of its songs. Without `server` the default one is meant. (`similar/…` passes its `server`
 on to AudioMuse-AI, whose own name for a server it is.)
 
-Songs analysed before 0.20 get their loudness, fades and key while the queue is empty: with `AUDIOMUSE_URL` and
-`AUDIOMUSE_TOKEN` set, whatever AudioMuse-AI's Siansa plugin already measured is taken from it (nothing to download),
+Songs analysed before 0.20 get their loudness, fades and key while the queue is empty: with AudioMuse-AI connected
+(Setup), whatever AudioMuse-AI's Siansa plugin already measured is taken from it (nothing to download),
 and the rest are downloaded once more and measured here. New songs are measured on the way.
 
 ## The page's API

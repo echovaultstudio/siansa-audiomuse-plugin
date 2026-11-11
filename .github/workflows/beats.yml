@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v7
       # -P (not -I) below: the tests need the user site, where numpy and scipy are installed.
       - name: numpy, for the style model's input and the loudness
-        run: python3 -m pip install --break-system-packages --user numpy==1.26.4 || python3 -m pip install --user numpy
+        run: python3 -m pip install --break-system-packages --user numpy==1.26.4 cryptography==43.0.3 || python3 -m pip install --user numpy cryptography
       - name: Tempo, bars and the comparison
         run: cd beats && python3 -P tests/test_grid.py
       - name: Bars, phrases, where the beat locks in, and each end's sound
@@ -46,6 +46,8 @@ jobs:
         run: cd beats && python3 -P tests/test_service.py
       - name: Several servers (fake Emby and Jellyfin), and finding a song on two of them
         run: cd beats && python3 -P tests/test_match.py && python3 -P tests/test_servers.py
+      - name: No secret as plain text (hashed, encrypted or not kept), set on the page
+        run: cd beats && python3 -P tests/test_secrets.py
       - name: The page's script parses
         run: cd beats && python3 -P tests/test_page_script.py
 
@@ -77,7 +79,7 @@ jobs:
           sparse-checkout: scripts/servers
       - name: numpy and ffmpeg (for making the test library)
         run: |
-          python3 -m pip install --quiet --break-system-packages --user numpy==1.26.4 imageio-ffmpeg==0.6.0
+          python3 -m pip install --quiet --break-system-packages --user numpy==1.26.4 imageio-ffmpeg==0.6.0 cryptography==43.0.3
           echo "FFMPEG=$(python3 -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" >> "$GITHUB_ENV"
       - name: Start Navidrome, Emby and Jellyfin with the test library
         env:
@@ -144,6 +146,7 @@ jobs:
           python3 -I beats/tests/fakes.py songs 4533 > fake.log 2>&1 &
           sleep 2 && cat fake.log
 
+      # With the container's settings of before 0.24: taken over once, as an install that's updated does.
       - name: Start the service
         run: |
           docker run -d --name beats --network host \

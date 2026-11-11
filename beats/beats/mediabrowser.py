@@ -39,6 +39,13 @@ class MediaBrowser:
         self.label = "Jellyfin" if jellyfin else "Emby"
         self.timeout = timeout
         self._login = None  # (user id, token)
+        # Called with (user id, token) after each sign-in, so the token is kept and the password needn't be (0.24).
+        self.on_login = None
+
+    def signed_in(self, user_id, token):
+        """Carries on with a sign-in kept from before: no password is needed while the server takes its token."""
+        self._login = (user_id, token) if user_id and token else None
+        return self
 
     @property
     def configured(self):
@@ -83,12 +90,18 @@ class MediaBrowser:
         if not self.configured:
             raise ServerError(f"{self.label} isn't set up")
         if self._login is None or again:
+            if not self.password:
+                # Signed in with a kept token (the password isn't kept) that the server no longer takes.
+                raise ServerError(f"{self.label} no longer takes the saved sign-in: enter the password again "
+                                  "(Setup › Music servers › Edit)")
             answer = self._json("/Users/AuthenticateByName", body={"Username": self.user, "Pw": self.password}) or {}
             token, user_id = answer.get("AccessToken"), (answer.get("User") or {}).get("Id")
             if not token or not user_id:
                 raise ServerError(f"{self.label} refused the login")
             self._login = (user_id, token)
             _log.info("Logged in to %s as %s", self.label, self.user)
+            if self.on_login:
+                self.on_login(user_id, token)
         return self._login
 
     def _as_user(self, call):
@@ -112,7 +125,10 @@ class MediaBrowser:
         info = self._json("/System/Info/Public") or {}
         if not info.get("Version"):
             raise ServerError(f"That address doesn't look like {self.label}")
-        self._session(again=True)  # the login is checked too
+        if self.password:
+            self._session(again=True)  # the login is checked too
+        else:  # a kept sign-in: checked by asking for something only a signed-in user gets
+            self.libraries()
         return {"version": info.get("Version"), "type": (info.get("ProductName") or self.label)}
 
     def libraries(self):

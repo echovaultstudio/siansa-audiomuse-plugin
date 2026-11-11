@@ -190,6 +190,7 @@ canvas { width: 100%; display: block; border-radius: 10px; background: var(--rai
 label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0.9rem; color: var(--muted); }
 .banner { border: 1px solid var(--bad); color: var(--bad); border-radius: 12px; padding: 10px 14px; display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
 .banner[hidden], .btn[hidden] { display: none; }
+[hidden] { display: none !important; }  /* a button's or a card's own display would show it all the same */
 .banner span { flex: 1; }
 .banner button { padding: 2px 10px; border-color: currentColor; color: inherit; }
 .banner.warn { border-color: var(--warn); color: var(--warn); }
@@ -228,6 +229,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 .form label.wide { grid-column: 1 / -1; }
 .form input, .form select { width: 100%; border-radius: 10px; padding: 9px 12px; }
 @media (max-width: 600px) { .form { grid-template-columns: minmax(0, 1fr); } }
+#key-text { overflow-wrap: anywhere; user-select: all; }
 .picks { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 4px; }
 .picks button { width: 100%; justify-content: flex-start; border-radius: 10px; text-align: left; }
 .list { margin: 0; padding-left: 22px; font-size: 0.9rem; } .list li { margin: 4px 0; }
@@ -502,7 +504,12 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 
     <!-- Setup -->
     <section data-view="setup">
-      <div class="page-head"><h2>Setup</h2><p class="sub">How this Siansa Beats is set up (the container's settings) and how the Siansa app connects to it.</p></div>
+      <div class="page-head"><h2>Setup</h2><p class="sub">What Siansa Beats connects to, who may open it, and how the Siansa app connects to it. All of it is set here: nothing secret goes in the container's YAML.</p></div>
+      <div class="card" id="left-card" hidden>
+        <h3>You can tidy the container's settings</h3>
+        <p class="sub">These are still in the container's YAML and are no longer read: <strong id="left-names"></strong>. They were taken over
+          once (hashed or encrypted) and are set on this page since, so you can delete those lines.</p>
+      </div>
       <div class="card" id="servers-card">
         <h3>Music servers</h3>
         <p class="sub">Navidrome, Emby and Jellyfin, as many as you have, and more than one user of the same server (each
@@ -510,7 +517,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
           The default server is the one the Siansa app is answered for when it doesn't say which it plays from.</p>
         <ul class="servers" id="servers"></ul>
         <details id="server-add">
-          <summary class="btn" role="button">Add a server or a user</summary>
+          <summary class="btn" role="button" id="sf-title">Add a server or a user</summary>
           <form id="server-form" autocomplete="off">
             <div class="form">
               <label>Kind<select id="sf-kind"><option value="navidrome">Navidrome</option><option value="emby">Emby</option><option value="jellyfin">Jellyfin</option></select></label>
@@ -522,17 +529,58 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
             <div class="controls">
               <button type="submit" class="primary" id="sf-add">Add</button>
               <button type="button" id="sf-test">Test</button>
+              <button type="button" id="sf-cancel" hidden>Cancel</button>
               <span class="sub" id="sf-note" role="status"></span>
             </div>
-            <p class="sub">The password is kept in Siansa Beats' data folder and never shown, logged or put in a report.
-              Siansa Beats only reads from the server.</p>
+            <p class="sub">No password is kept as you type it. Emby's and Jellyfin's is used once to sign in and not kept:
+              only the sign-in the server gives is, encrypted. Navidrome's has to be said to Navidrome each time, so it's
+              kept encrypted. None is ever shown, logged or put in a report, and Siansa Beats only reads from the server.</p>
           </form>
         </details>
       </div>
       <div class="grid2">
-        <div class="card"><h3>Connections</h3><dl class="kv" id="setup-connections"></dl></div>
-        <div class="card"><h3>The model</h3><dl class="kv" id="setup-model"></dl></div>
+        <div class="card" id="audiomuse-card">
+          <h3>AudioMuse-AI</h3>
+          <p class="sub">Asked for similar albums and artists, and for the loudness its Siansa plugin already measured. <span id="am-state"></span></p>
+          <form id="am-form" autocomplete="off">
+            <div class="form">
+              <label class="wide">Address <input type="url" id="am-url" placeholder="http://192.168.1.10:8000"></label>
+              <label class="wide">API token <input type="password" id="am-token" autocomplete="new-password" placeholder="One of AudioMuse-AI's API tokens"></label>
+            </div>
+            <div class="controls">
+              <button type="submit" class="primary" id="am-save">Connect</button>
+              <button type="button" id="am-test">Test</button>
+              <button type="button" id="am-remove" hidden>Disconnect</button>
+            </div>
+            <p class="sub" id="am-note" role="status"></p>
+            <p class="sub">The token is kept encrypted and never shown again.</p>
+          </form>
+        </div>
+        <div class="card" id="access-card">
+          <h3>Access</h3>
+          <dl class="kv" id="setup-connections"></dl>
+          <form id="pw-form" autocomplete="off">
+            <div class="form">
+              <label class="wide">Page password <input type="password" id="pw-new" autocomplete="new-password" minlength="8" placeholder="8 characters or more"></label>
+            </div>
+            <div class="controls">
+              <button type="submit" id="pw-set">Set password</button>
+              <button type="button" id="pw-remove" hidden>Remove password</button>
+              <button type="button" id="key-new">Make a key for the app</button>
+              <button type="button" id="key-remove" hidden>Remove key</button>
+            </div>
+            <p class="sub" id="pw-note" role="status"></p>
+            <div id="key-shown" hidden>
+              <p class="sub">The app's key, shown this once (only its hash is kept). Copy it into Siansa now:</p>
+              <div class="controls"><code id="key-text"></code><button type="button" id="key-copy">Copy</button></div>
+            </div>
+            <p class="sub">Only a hash of the password and of the key is kept: neither can be read back. Your browser asks for
+              the password (user name <code>siansa</code>). Forgotten it? Start the container once with
+              <code>BEATS_RESET_ACCESS=yes</code>.</p>
+          </form>
+        </div>
       </div>
+      <div class="card"><h3>The model</h3><dl class="kv" id="setup-model"></dl></div>
       <div class="card">
         <h3>Connect the Siansa app</h3>
         <ol class="steps">
@@ -571,7 +619,7 @@ try { server = localStorage.getItem("beats-server") || null; } catch (e) { /* pr
 // A request about a server's songs names it; the servers themselves, the log and similar music (whose ?server= is
 // AudioMuse-AI's own name for one) don't.
 function forServer(path) {
-  if (!server || !path.startsWith("api/") || /^api\/(servers|log|health|debug|v1\/similar)/.test(path)) return path;
+  if (!server || !path.startsWith("api/") || /^api\/(servers|audiomuse|access|log|health|debug|v1\/similar)/.test(path)) return path;
   return path + (path.includes("?") ? "&" : "?") + "server=" + encodeURIComponent(server);
 }
 async function api(path, options = {}) {
@@ -1044,15 +1092,15 @@ function drawServers(s) {
   $("server-switch").hidden = list.length < 2;
   $("server").innerHTML = list.map((x) => `<option value="${esc(x.id)}"${x.id === s.server ? " selected" : ""}>${esc(x.name)}${x.default ? " (default)" : ""}</option>`).join("");
   $("servers").innerHTML = list.map((x) => `<li>
-    <div class="who"><b>${esc(x.name)}</b>${x.default ? '<span class="tag">default</span>' : ""}${x.env ? '<span class="tag plain" title="NAVIDROME_URL, NAVIDROME_USER and NAVIDROME_PASSWORD on the container">set on the container</span>' : ""}
+    <div class="who"><b>${esc(x.name)}</b>${x.default ? '<span class="tag">default</span>' : ""}${x.signed_in ? "" : '<span class="tag" title="Its saved sign-in can no longer be read or used">enter its password again</span>'}
       <div class="sub">${esc(KIND[x.kind] || x.kind)} · ${esc(x.url)} · user ${esc(x.user)}</div>
       <div class="sub">${num(x.songs)} songs here · ${x.libraries.length ? `${x.libraries.length} ${x.libraries.length === 1 ? "library" : "libraries"} chosen` : "no library chosen yet"}</div></div>
     <div class="acts">
       <button data-libraries="${esc(x.id)}">Libraries</button>
       ${x.default ? "" : `<button data-default="${esc(x.id)}" title="Read first, and the one the app is answered for when it names none">Make default</button>`}
-      <button data-rename="${esc(x.id)}" data-name="${esc(x.name)}">Rename</button>
-      ${x.env ? "" : `<button data-remove-server="${esc(x.id)}" data-name="${esc(x.name)}" data-songs="${x.songs}">Remove</button>`}
-    </div></li>`).join("") || '<li class="sub">None yet: set NAVIDROME_URL, NAVIDROME_USER and NAVIDROME_PASSWORD on the container, or add one here.</li>';
+      <button data-edit="${esc(x.id)}">Edit</button>
+      <button data-remove-server="${esc(x.id)}" data-name="${esc(x.name)}" data-songs="${x.songs}">Remove</button>
+    </div></li>`).join("") || '<li class="sub">None yet: add your music server below.</li>';
 }
 function chooseServer(id) {
   server = id || null;
@@ -1071,11 +1119,7 @@ $("servers").addEventListener("click", async (e) => {
   try {
     if (b.dataset.libraries) { chooseServer(b.dataset.libraries); location.hash = "#libraries"; return; }
     if (b.dataset.default) await api(`api/servers/${encodeURIComponent(b.dataset.default)}/default`, {method: "POST"});
-    if (b.dataset.rename) {
-      const name = prompt("Its name", b.dataset.name);
-      if (!name || name.trim() === b.dataset.name) return;
-      await api(`api/servers/${encodeURIComponent(b.dataset.rename)}`, {method: "POST", body: JSON.stringify({name})});
-    }
+    if (b.dataset.edit) { editServer(b.dataset.edit); return; }
     if (b.dataset.removeServer) {
       if (!confirm(`Remove ${b.dataset.name} from Siansa Beats? Songs only it has (of its ${b.dataset.songs}) go with their beats; songs another server has too stay. Nothing changes on the server.`)) return;
       await api(`api/servers/${encodeURIComponent(b.dataset.removeServer)}`, {method: "DELETE"});
@@ -1086,6 +1130,21 @@ $("servers").addEventListener("click", async (e) => {
   serversDrawn = ""; statusLoop();
 });
 const serverFields = () => ({kind: $("sf-kind").value, name: $("sf-name").value.trim(), url: $("sf-url").value.trim(), user: $("sf-user").value.trim(), password: $("sf-password").value});
+// The same form changes a server: its name, or with its password its address, user or sign-in.
+let editing = null;
+function editServer(id) {
+  const x = ((status || {}).servers || []).find((v) => v.id === id);
+  editing = x ? id : null;
+  $("server-form").reset();
+  $("sf-title").textContent = x ? `Edit ${x.name}` : "Add a server or a user";
+  $("sf-add").textContent = x ? "Save" : "Add";
+  $("sf-kind").disabled = !!x; $("sf-test").hidden = !!x; $("sf-cancel").hidden = !x;
+  $("sf-password").required = !x;
+  $("sf-password").placeholder = x ? "Only to change the address or user, or to sign in again" : "";
+  $("sf-note").textContent = "";
+  if (x) { $("sf-kind").value = x.kind; $("sf-name").value = x.name; $("sf-url").value = x.url; $("sf-user").value = x.user; $("server-add").open = true; $("sf-name").focus(); }
+}
+$("sf-cancel").addEventListener("click", () => { editServer(null); $("server-add").open = false; });
 $("sf-test").addEventListener("click", async () => {
   $("sf-note").textContent = "Asking…";
   try {
@@ -1097,6 +1156,11 @@ $("server-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("sf-add").disabled = true; $("sf-note").textContent = "Asking the server…";
   try {
+    if (editing) {
+      await api(`api/servers/${encodeURIComponent(editing)}`, {method: "POST", body: JSON.stringify(serverFields())});
+      editServer(null); $("server-add").open = false; banner(null); serversDrawn = ""; statusLoop();
+      return;
+    }
     const added = await api("api/servers", {method: "POST", body: JSON.stringify(serverFields())});
     $("server-form").reset(); $("sf-note").textContent = ""; $("server-add").open = false; banner(null);
     // Next: which of its libraries to analyse.
@@ -1112,8 +1176,8 @@ function statusRows(s) {
   const where = s.model_loaded ? (s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") + (s.float16 && s.device !== "cpu" ? ", half precision" : "") : (s.device === "cpu" ? "CPU" : "the GPU if there is one");
   const servers = (s.servers || []).map((x) => ["ok", x.name, `${x.url} · ${num(x.songs)} songs${x.default && s.servers.length > 1 ? " · default" : ""}`]);
   return [
-    ...(servers.length ? servers : [["bad", "Music server", "None set: NAVIDROME_URL, NAVIDROME_USER and NAVIDROME_PASSWORD, or add one under Setup"]]),
-    [cn.audiomuse ? "ok" : "wait", "AudioMuse-AI", cn.audiomuse ? "Asked for similar music, and the loudness its plugin measured" : "Not set (AUDIOMUSE_URL, AUDIOMUSE_TOKEN): no similar music"],
+    ...(servers.length ? servers : [["bad", "Music server", "None yet: add one under Setup"]]),
+    [cn.audiomuse ? "ok" : "wait", "AudioMuse-AI", cn.audiomuse ? "Asked for similar music, and the loudness its plugin measured" : "Not connected (Setup): no similar music"],
     [s.model_loaded ? (s.device_note ? "wait" : "ok") : "wait", `Beat This! ${s.model}`, s.model_loaded ? `On the ${where}` + (s.model_load_seconds ? `, loaded in ${fmt(s.model_load_seconds)} s` : "") + (s.device_note ? `. ${s.device_note}` : "") : `Loads with the first song, on ${where}`],
     [(s.styles || {}).available ? "ok" : "wait", "Style model", (s.styles || {}).available ? "Votes each song's genres from its sound" : "Not in this image: genres are the songs' tags"],
     ["ok", "The Siansa app", cn.api_key ? "Connects with BEATS_API_KEY" : cn.password ? "Connects with this page's password" : "Connects without a key"],
@@ -1297,10 +1361,20 @@ function drawTiles(s) {
 function drawSetup(s) {
   const yes = (v, on, off) => `<span class="${v ? "yes" : "no"}">${v ? on : off}</span>`, cn = s.connections || {};
   $("setup-connections").innerHTML = [
-    ["AudioMuse-AI", yes(cn.audiomuse, "set: similar music, and the plugin's loudness", "not set (AUDIOMUSE_URL, AUDIOMUSE_TOKEN): no similar music")],
-    ["Page password", yes(cn.password, "set", "none (BEATS_PASSWORD): anyone on the network sees this page")],
-    ["Key for the app", yes(cn.api_key, "set (BEATS_API_KEY)", "none: the app uses the page password, or nothing")],
+    ["Page password", yes(cn.password, "set", "none: anyone on your network can open this page")],
+    ["Key for the app", yes(cn.api_key, "set", cn.password ? "none: the app uses the page password" : "none")],
+    ["Kept secrets", `encrypted with a key ${cn.secret_key === "container" ? "from the container (BEATS_SECRET_KEY)" : "in the data folder (secret.key)"}`],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  $("pw-set").textContent = cn.password ? "Change password" : "Set password";
+  $("pw-remove").hidden = !cn.password; $("key-remove").hidden = !cn.api_key;
+  $("key-new").textContent = cn.api_key ? "Make a new key" : "Make a key for the app";
+  $("key-new").disabled = !cn.password; $("key-new").title = cn.password ? "" : "Set the page's password first: without one the page is open and the app needs no key";
+  $("am-state").innerHTML = cn.audiomuse ? `Connected to <strong>${esc(cn.audiomuse_url)}</strong>${cn.audiomuse_token ? "" : " (no token)"}.` : "Not connected.";
+  $("am-remove").hidden = !cn.audiomuse; $("am-save").textContent = cn.audiomuse ? "Save" : "Connect";
+  if (cn.audiomuse && !$("am-url").value && document.activeElement !== $("am-url")) $("am-url").value = cn.audiomuse_url;
+  $("am-token").placeholder = cn.audiomuse_token ? "Kept: leave empty to keep it" : "One of AudioMuse-AI's API tokens";
+  const left = cn.left_in_container || [];
+  $("left-card").hidden = !left.length; $("left-names").textContent = left.join(", ");
   $("setup-model").innerHTML = [
     ["Beat tracker", `Beat This! ${esc(s.model)}`],
     ["Runs on", s.model_loaded ? esc(s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") : esc(s.device) + " (loads with the first song)"],
@@ -1309,8 +1383,59 @@ function drawSetup(s) {
     ["Version", esc(s.version)], ["Running for", `${Math.floor((s.uptime_seconds || 0) / 3600)} h ${Math.floor((s.uptime_seconds || 0) % 3600 / 60)} min`],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
   $("setup-address").textContent = location.origin + location.pathname.replace(/\/$/, "");
-  $("setup-key").innerHTML = cn.api_key ? "Key: the <code>BEATS_API_KEY</code> set on the container." : cn.password ? "Key: this page's password (or set <code>BEATS_API_KEY</code> for one of its own)." : "Key: none needed (nothing is set on the container).";
+  $("setup-key").innerHTML = cn.api_key ? "Key: the app's key made under Access (make a new one there if you no longer have it)." : cn.password ? "Key: this page's password (or make the app a key of its own under Access)." : "Key: none needed (no password is set).";
 }
+
+// ---- AudioMuse-AI and access, set here (0.24.0) ----
+const amFields = () => ({url: $("am-url").value.trim(), token: $("am-token").value});
+$("am-test").addEventListener("click", async () => {
+  $("am-note").textContent = "Asking…";
+  try { const r = await api("api/audiomuse/test", {method: "POST", body: JSON.stringify(amFields())}); $("am-note").textContent = `It answers and takes the token (its ${r.plugin} plugin).`; }
+  catch (err) { $("am-note").textContent = err.message; }
+});
+$("am-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!amFields().url) { $("am-note").textContent = "An address is needed."; return; }
+  $("am-note").textContent = "Asking AudioMuse-AI…";
+  try { const r = await api("api/audiomuse", {method: "POST", body: JSON.stringify(amFields())}); $("am-token").value = ""; $("am-note").textContent = `Connected (its ${r.plugin} plugin).`; statusLoop(); }
+  catch (err) { $("am-note").textContent = err.message; }
+});
+$("am-remove").addEventListener("click", async () => {
+  if (!confirm("Disconnect AudioMuse-AI? Siansa gets no similar albums and artists from Siansa Beats until it's connected again.")) return;
+  try { await api("api/audiomuse", {method: "DELETE"}); $("am-url").value = ""; $("am-token").value = ""; $("am-note").textContent = "Disconnected."; statusLoop(); }
+  catch (err) { $("am-note").textContent = err.message; }
+});
+$("pw-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const password = $("pw-new").value;
+  if (password.length < 8) { $("pw-note").textContent = "At least 8 characters."; return; }
+  try {
+    await api("api/access/password", {method: "POST", body: JSON.stringify({password})});
+    $("pw-new").value = ""; $("pw-note").textContent = "Set. Your browser asks for it now (user name siansa).";
+    statusLoop();
+  } catch (err) { $("pw-note").textContent = err.message; }
+});
+$("pw-remove").addEventListener("click", async () => {
+  if (!confirm("Remove the page's password? Anyone on your network can then open this page and use its API. The app's key goes with it.")) return;
+  try { await api("api/access/password", {method: "DELETE"}); $("key-shown").hidden = true; $("pw-note").textContent = "Removed."; statusLoop(); }
+  catch (err) { $("pw-note").textContent = err.message; }
+});
+$("key-new").addEventListener("click", async () => {
+  if (status && status.connections.api_key && !confirm("Make a new key? The one the app has now stops working until you give it the new one.")) return;
+  try {
+    const r = await api("api/access/key", {method: "POST"});
+    $("key-text").textContent = r.key; $("key-shown").hidden = false; $("pw-note").textContent = ""; statusLoop();
+  } catch (err) { $("pw-note").textContent = err.message; }
+});
+$("key-copy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("key-text").textContent); $("key-copy").textContent = "Copied"; }
+  catch (e) { const r = document.createRange(); r.selectNodeContents($("key-text")); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+});
+$("key-remove").addEventListener("click", async () => {
+  if (!confirm("Remove the app's key? The app then needs the page's password, or nothing when there's none.")) return;
+  try { await api("api/access/key", {method: "DELETE"}); $("key-shown").hidden = true; $("pw-note").textContent = "Key removed."; statusLoop(); }
+  catch (err) { $("pw-note").textContent = err.message; }
+});
 
 // ---- loudness, fades and key ----
 function soundCell(m) {
@@ -1382,7 +1507,7 @@ function drawSimilarStatus() {
   const on = status && (status.connections || {}).audiomuse;
   $("s-status").innerHTML = on
     ? '<span class="pill ok">AudioMuse-AI is set up</span> <span class="sub">Similar albums and artists are asked of its Siansa plugin.</span>'
-    : '<span class="pill wait">AudioMuse-AI isn\'t set up</span> <p class="sub">Set <code>AUDIOMUSE_URL</code> and <code>AUDIOMUSE_TOKEN</code> (one of its API tokens) on the container. Until then the app asks the plugin itself, when it can.</p>';
+    : '<span class="pill wait">AudioMuse-AI isn\'t set up</span> <p class="sub">Connect it under <a href="#setup">Setup › AudioMuse-AI</a> with its address and one of its API tokens. Until then the app asks the plugin itself, when it can.</p>';
 }
 let similarTimer = null;
 $("s-find").addEventListener("input", () => {

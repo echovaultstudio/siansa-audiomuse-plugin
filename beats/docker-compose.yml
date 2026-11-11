@@ -1,5 +1,6 @@
 # Siansa Beats: copy this and the .env next to it on the Docker server, then `docker compose up -d`.
-# The page is then at http://<that server>:8090. See README.md.
+# The page is then at http://<that server>:8090: add your music server there, under Setup. No password goes in here
+# (0.24.0): the servers, AudioMuse-AI, the page's password and the app's key are set on the page. See README.md.
 services:
   beats:
     image: ghcr.io/echovaultstudio/siansa-beats:latest
@@ -8,16 +9,10 @@ services:
     ports:
       - "8090:8090"
     environment:
-      NAVIDROME_URL: ${NAVIDROME_URL}
-      NAVIDROME_USER: ${NAVIDROME_USER}
-      NAVIDROME_PASSWORD: ${NAVIDROME_PASSWORD}
       BEATS_MODEL: ${BEATS_MODEL:-final0}
       BEATS_THREADS: ${BEATS_THREADS:-0}
-      BEATS_PASSWORD: ${BEATS_PASSWORD:-}
-      # A key for the Siansa app instead of the password, and AudioMuse-AI for similar albums and artists (optional).
-      BEATS_API_KEY: ${BEATS_API_KEY:-}
-      AUDIOMUSE_URL: ${AUDIOMUSE_URL:-}
-      AUDIOMUSE_TOKEN: ${AUDIOMUSE_TOKEN:-}
+      # Optional: the key the kept secrets are encrypted with, to keep it out of the data volume (else a key file there).
+      BEATS_SECRET_KEY: ${BEATS_SECRET_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - beats-data:/data
