@@ -7,7 +7,7 @@ one, so the model (the GPU) rarely waits for the network.
 
 Each song's style comes from its sound too (:mod:`beats.style`, when the image has the model): for a new song from
 the samples already decoded, for songs analysed before from a third thread that downloads them again while the queue
-is empty. Their genres are then voted (:mod:`beats.genres`) from the sound and their tags.
+is empty. Those styles are the songs' genres (:mod:`beats.genres`).
 
 Each song's loudness, fades (:mod:`beats.loudness`) and key (:mod:`beats.key`) are measured on the way too, from the
 file already downloaded; songs analysed before 0.20 get them from a fourth thread while the queue is empty.
@@ -71,8 +71,7 @@ class Worker:
         self.importer = None
         self.style = style  # beats.style.StyleModel, or None
         self.styling = None  # {"id", "title", "artist", "since"}: a song analysed before, getting its styles
-        self.genre_report = None  # beats.genres.agreement of the last vote
-        self.on_voted = None  # called after every song is voted again (the server keeps its genre list ready)
+        self.genre_report = None  # beats.genres.agreement: how often the sound agrees with the tags
         self._taxonomy = None
         # The music servers (beats.servers.Servers), or one client for the container's own (the tests' way).
         self.servers = navidrome if hasattr(navidrome, "client") else _OneServer(navidrome)
@@ -289,7 +288,7 @@ class Worker:
             self.store.set_setting(f"paths_read:{default}", True)  # its songs' paths are kept now
         self.store.set_setting("library_read_at", time.time())
         self.store.event(f"Read the libraries in {time.monotonic() - started:.0f}s")
-        self.revote()  # their tags may have changed
+        self.compare_with_tags()  # their tags may have changed
         self.wake()
         return {"songs": total, "queued": len(queued)}
 
@@ -379,10 +378,10 @@ class Worker:
             self.wake()
         return len(stale)
 
-    # ---- genres: styles from the sound, and the vote ----
+    # ---- genres: styles from the sound ----
 
     def taxonomy(self):
-        """The style model's 400 styles to vote on, or ``None`` without the model."""
+        """The style model's 400 styles, findable by name, or ``None`` without the model."""
         if self._taxonomy is None and self.style is not None and self.style.available:
             from . import style as style_module
 
@@ -390,8 +389,7 @@ class Worker:
         return self._taxonomy
 
     def _style(self, song, samples, rate):
-        """Gives a song its styles from ``samples``, and votes its genres. Never fails the song: a song without styles
-        is voted on its tags."""
+        """Gives a song its styles from ``samples``: its genres (:mod:`beats.genres`). Never fails the song."""
         if self.style is None or not self.style.available:
             return
         first = not self.style.loaded
@@ -412,31 +410,18 @@ class Worker:
             _log.warning("%s – %s: couldn't hear its style: %s", song.get("artist"), song.get("title"), e,
                          exc_info=not isinstance(e, RuntimeError))
             self.store.set_genres(song["id"], "sound-failed", [str(e)[:200] or e.__class__.__name__])
-        self.revote([song["id"]])
 
-    def revote(self, song_ids=None):
-        """Votes the genres of ``song_ids`` (every song when ``None``) from their sound and tags; works out how often
-        the sound agrees with the tags when voting them all. The number voted."""
+    def compare_with_tags(self):
+        """Works out how often the songs' sound agrees with their tags (:func:`beats.genres.agreement`, shown on the
+        page; the tags play no part in a song's genres). The number of songs with styles."""
         taxonomy = self.taxonomy()
         if taxonomy is None:
             return 0
-        rows = self.store.genre_rows(song_ids)
-        ids = list(rows) if song_ids is None else [i for i in song_ids if i in rows]
-        votes, report = {}, []
-        for song_id in ids:
-            by = rows.get(song_id, {})
-            sound = dict(by.get("sound", []))
-            tags = [label for label, _ in by.get("tag", [])]
-            votes[song_id] = genres.vote(taxonomy, sound, tags)
-            if song_ids is None and sound:
-                report.append((sorted(sound.items(), key=lambda p: -p[1]),
-                               _merge(taxonomy.match(t) for t in tags)))
-        self.store.replace_votes(votes)
-        if song_ids is None:
-            self.genre_report = genres.agreement(report)
-            if self.on_voted:  # every song voted again: the kept genre list is worked out again now
-                self.on_voted()
-        return len(votes)
+        rows = self.store.genre_rows()
+        report = [(by["sound"], _merge(taxonomy.match(label) for label, _ in by.get("tag", [])))
+                  for by in rows.values() if by.get("sound")]
+        self.genre_report = genres.agreement(report)
+        return len(report)
 
     def _style_loop(self):
         """Gives the songs analysed before the style model their styles, one at a time, while the queue is empty."""
@@ -449,7 +434,7 @@ class Worker:
             waiting = self.store.songs_without_style(limit=20)
             if not waiting:
                 if done_since_report:
-                    self.revote()
+                    self.compare_with_tags()
                     done_since_report = 0
                 self._stop.wait(60.0)
                 continue
@@ -459,7 +444,7 @@ class Worker:
                 self._style_again(song_id)
                 done_since_report += 1
                 if done_since_report >= STYLE_REPORT_EVERY:
-                    self.revote()
+                    self.compare_with_tags()
                     done_since_report = 0
 
     def _style_again(self, song_id):

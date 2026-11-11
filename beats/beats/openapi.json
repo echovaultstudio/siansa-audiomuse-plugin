@@ -108,7 +108,7 @@
     },
     "/api/v1/genres": {
       "get": {
-        "summary": "Every style with songs voted into it, most songs first",
+        "summary": "Every style with songs in its genre by their sound, most songs first",
         "responses": {
           "200": {
             "description": "The styles",
@@ -133,7 +133,7 @@
     },
     "/api/v1/genre": {
       "get": {
-        "summary": "The songs of a genre, by vote",
+        "summary": "The songs of a genre by their sound, the ones that sound most like it first: all of them, or a random limit of them",
         "parameters": [
           {
             "name": "name",
@@ -149,9 +149,7 @@
             "in": "query",
             "schema": {
               "type": "integer",
-              "minimum": 1,
-              "maximum": 2000,
-              "default": 300
+              "minimum": 1
             }
           },
           {

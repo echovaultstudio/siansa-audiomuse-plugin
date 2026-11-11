@@ -5,8 +5,8 @@ that would break that is v2, next to v1. The full description is ``openapi.json`
 
     GET  /api/v1/capabilities          what this Siansa Beats can do now, and how far it is (the app's DJ check)
     GET  /api/v1/profiles?ids=a,b      loudness, fades, key and the beat grid at both ends of up to 500 songs
-    GET  /api/v1/genres                every style with songs voted into it, most first
-    GET  /api/v1/genre?name=&limit=    the songs of a genre (by vote): {"name", "styles", "genres", "ids"}
+    GET  /api/v1/genres                every style with songs in its genre by their sound, most first
+    GET  /api/v1/genre?name=&limit=    the songs of a genre, by their sound (all without limit): {"name", "styles", "genres", "ids", "songs"}
     GET  /api/v1/genre/about?name=     a short description of a genre, from Wikipedia: {"name", "about"}
     GET  /api/v1/similar/albums?track_id=          albums that sound like that song's album (asked of AudioMuse-AI)
     GET  /api/v1/similar/artists?track_id=|artist= artists that sound like that one (asked of AudioMuse-AI)
@@ -79,7 +79,7 @@ def capabilities(app, server=None):
                       "steering": app.words.steers},
             "servers": {"available": True, "kinds": ["navidrome", "emby", "jellyfin"]},
         },
-        "limits": {"profile_ids": MAX_IDS, "genre_songs": 2000},
+        "limits": {"profile_ids": MAX_IDS, "genre_songs": None},
     }
 
 
@@ -157,7 +157,7 @@ def get(handler, path, query, server=None):
         if path.endswith("/about"):
             return handler._json(app.genre_about(name)) or True
         try:
-            limit = max(1, min(2000, int(arg("limit", "300") or 300)))
+            limit = max(1, int(arg("limit"))) if arg("limit") else None  # none: every song of the genre
         except ValueError:
             return handler._error(HTTPStatus.BAD_REQUEST, "limit is a number") or True
         return handler._json(app.genre_songs(name, limit, server)) or True

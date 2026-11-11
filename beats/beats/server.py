@@ -61,8 +61,8 @@ id or name: the default server's without it.
     GET  /api/bad-blends              the song changes marked as bad in Siansa Dev, newest first
     GET  /api/bad-blends/export       all of them with both songs' beats, sound levels and results, as a file
     GET  /api/failed/export           the songs that couldn't be analysed, with why, as a file
-    GET  /api/genres                  the style model's progress and agreement with the tags, and every style voted
-    GET  /api/genre?name=&limit=      the songs a radio for a genre plays (by vote): {"ids", "styles", "genres"}
+    GET  /api/genres                  the style model's progress and agreement with the tags, and every style heard
+    GET  /api/genre?name=&limit=      the songs of a genre, by their sound: {"ids", "styles", "genres", "songs"}
     POST /api/bad-blends              {"from_id", "to_id", "technique", "details"}: one more (from the app, through
                                       the Siansa Beats (dev) plugin)
     DELETE /api/bad-blends/<n>        takes one away
@@ -216,11 +216,10 @@ class App:
         self.worker = Worker(self.store, self.servers, self.tracker, decode or analyser.decode,
                              config.data_dir, config.model, measure, self.style, sound, self.hearer)
         self.started = time.time()
-        # Answers the page and the app ask for often, kept ready: the genre list changes only when songs are voted,
-        # the styles' counts with each song heard (the page asks every 2 s).
+        # Answers the page and the app ask for often, kept ready: the genre list and the styles' counts change with
+        # each song heard (the page asks every 2 s).
         # One of each for every server looked at (its songs alone); with one server, for all the songs.
         self._kept, self._kept_lock = {}, threading.Lock()
-        self.worker.on_voted = lambda: [k.refresh() for (name, _), k in list(self._kept.items()) if name == "genres"]
         from . import about as about_module
 
         self.about = about_module.Keeper(self.store, self.about_names)
@@ -610,7 +609,7 @@ class App:
         return out
 
     def about_names(self):
-        """Every genre the app may show a page for: the voted ones as the app names them, then the songs' tags."""
+        """Every genre the app may show a page for: the sound's as the app names them, then the songs' tags."""
         names, seen = [], set()
         for name in [g["name"] for g in self.genre_list()] + self.store.tag_genres():
             if name and name.lower() not in seen:
@@ -631,7 +630,7 @@ class App:
         return {"name": name, "about": found, "pending": pending, "status": status}
 
     def genre_list(self, server=None):
-        """Every style with songs (of ``server``'s) voted into it, most first, kept ready (:class:`Kept`): ``[{"label",
+        """Every style with songs (of ``server``'s) in its genre by their sound, most first, kept ready (:class:`Kept`): ``[{"label",
         "genre", "style", "songs", "name", "libraries"}]``; ``libraries``: the songs in each of the server's libraries,
         by its id."""
         server = server or self.servers.default_id
@@ -639,8 +638,8 @@ class App:
                          lambda: self.store.genre_changes).get()
 
     def _genre_list(self, server, only):
-        counts = self.store.vote_counts(genres_module.RADIO_MIN, only)
-        by_library = self.store.vote_counts_by_library(genres_module.RADIO_MIN, server)
+        counts = self.store.heard_counts(genres_module.HEARD_MIN, only)
+        by_library = self.store.heard_counts_by_library(genres_module.HEARD_MIN, server)
         ranked = sorted(counts.items(), key=lambda p: -p[1])
         named = {}
         for label, _ in ranked:
@@ -655,21 +654,28 @@ class App:
                         "libraries": by_library.get(label, {})})
         return out
 
-    def genre_songs(self, name, limit=300, server=None):
-        """The songs a radio for the genre ``name`` plays (a tag as the app shows it: "Trance", "Electronic /
-        Trance"), by vote: ``{"name", "styles", "genres", "ids"}``, the ids ``server``'s own for the songs it has.
-        Nothing when the style model isn't there or the name matches none of its styles, so the app falls back to the
-        tags."""
+    def genre_songs(self, name, limit=None, server=None):
+        """The songs of the genre ``name`` (a tag as the app shows it: "Trance", "Electronic / Trance") by their sound
+        (:mod:`beats.genres`), the ones that sound most like it first: ``{"name", "styles", "genres", "ids", "songs"}``,
+        the ids ``server``'s own for the songs it has; ``songs``: how many there are, of which ``ids`` is a random
+        ``limit`` when there are more. Nothing when the style model isn't there or the name matches none of its
+        styles, so the app falls back to the tags."""
         taxonomy = self.worker.taxonomy()
         if taxonomy is None:
-            return {"name": name, "styles": [], "genres": [], "ids": [], "why": "no style model in this image"}
+            return {"name": name, "styles": [], "genres": [], "ids": [], "songs": 0, "why": "no style model in this image"}
         styles, families = genres_module.target(taxonomy, name)
         labels = set(styles)
         for f in families:
             labels |= set(taxonomy.by_genre.get(genres_module.key(f), []))
-        ids = self.store.songs_voted(labels, genres_module.RADIO_MIN, limit, server or self.servers.default_id)
-        return {"name": name, "styles": sorted(styles), "genres": sorted(families), "ids": ids,
-                "why": None if labels else "no style of that name"}
+        ids = self.store.songs_heard(labels, genres_module.HEARD_MIN, None, server or self.servers.default_id)
+        songs = len(ids)
+        if limit is not None and songs > limit:
+            import random
+
+            keep = set(random.sample(range(songs), limit))
+            ids = [i for n, i in enumerate(ids) if n in keep]  # still the ones that sound most like it first
+        return {"name": name, "styles": sorted(styles), "genres": sorted(families), "ids": ids, "songs": songs,
+                "by": "sound", "why": None if labels else "no style of that name"}
 
     def debug_report(self):
         """Everything that helps find out why something's wrong, in one file: versions, the setup (addresses, never
@@ -722,7 +728,7 @@ class App:
 
     def csv(self, find=None, show="all", server=None):
         out = io.StringIO()
-        columns = ["artist", "title", "album", "genres", "voted_genres", "sound_top", "tag_bpm", "bpm",
+        columns = ["artist", "title", "album", "genres", "sound_genres", "sound_top", "tag_bpm", "bpm",
                    "main_share", "bpm_fit", "grid_bpm", "on_grid", "grid_drift", "downbeat_source", "phrase_first_ms", "phrase_bars", "phrase_count",
                    "phrase_big", "phrase_big_on",
                    "intro_bpm", "outro_bpm", "steady", "grid_share", "beats_per_bar", "bar_share", "first_downbeat_ms",
@@ -735,7 +741,8 @@ class App:
             for g in row["genres"]:
                 by.setdefault(g["source"], []).append(g)
             w.writerow([row["artist"], row["title"], row["album"], " / ".join(g["label"] for g in by.get("tag", [])),
-                        " / ".join(f"{g['label'].partition('---')[2]} {g['weight']:.2f}" for g in by.get("vote", [])),
+                        " / ".join(f"{l.partition('---')[2]} {v:.2f}" for l, v in genres_module.heard(
+                            [(g["label"], g["weight"]) for g in by.get("sound", [])])),
                         " / ".join(f"{g['label'].partition('---')[2]} {g['weight']:.2f}" for g in by.get("sound", [])[:3]),
                         row["tag_bpm"], _round(r.get("bpm")),
                         _round(r.get("main_share"), 3), _round(r.get("bpm_fit")), _round(r.get("grid_bpm")),
@@ -1252,15 +1259,17 @@ def main():
             app.worker.regrid()
         except Exception:
             _log.exception("Working out older results again went wrong")
-        try:  # every song's genres voted again: the vote's rules or the tags may have changed
-            voted = app.worker.revote()
-            if voted:
-                report = app.worker.genre_report or {}
-                app.store.event(f"Voted the genres of {voted} songs" + (
-                    f" · the sound agrees with the tags' genre on {report['family'] * 100:.0f} % of {report['songs']}"
-                    if report.get("family") is not None else ""))
+        try:  # genres are the sound's alone from 0.28: the ones voted with the tags go
+            gone = app.store.drop_votes()
+            if gone:
+                app.store.event(f"Genres now come from each song's sound alone: removed {gone} genres voted with the tags")
+            compared = app.worker.compare_with_tags()
+            report = app.worker.genre_report or {}
+            if compared and report.get("family") is not None:
+                app.store.event(f"The sound agrees with the tags' genre on {report['family'] * 100:.0f} % of "
+                                f"{report['songs']} songs with both")
         except Exception:
-            _log.exception("Voting the genres went wrong")
+            _log.exception("Tidying the genres went wrong")
 
     threading.Thread(target=background, name="start", daemon=True).start()
     server = make_server(app)

@@ -133,7 +133,7 @@ def about(store, name, get=fetch, now=time.time):
 
 
 class Keeper:
-    """Every genre's description, fetched in the background a genre at a time and kept: the voted genres and the songs'
+    """Every genre's description, fetched in the background a genre at a time and kept: the sound's genres and the songs'
     tags, the most songs first. ``names()`` gives them; :meth:`fetch_all` starts a round now (the page's button), and
     one runs by itself every :data:`ROUND_SECONDS`."""
 

@@ -1,23 +1,20 @@
-"""A song's genres by vote: what its sound says (:mod:`beats.style`, Essentia's Discogs-EffNet) first, its own genre
-tags second (partly set by hand, partly guessed by tools from the album), and room for more sources later (Last.fm).
+"""A song's genres: what its sound says (:mod:`beats.style`, Essentia's Discogs-EffNet), and nothing else.
 
-Every genre is one of the model's 400 Discogs styles (``Electronic---Progressive Trance``), so tags are matched onto
-them: "Drum And Bass", "drum & bass" and "DnB" are all ``Electronic---Drum n Bass``, "Electronic / Trance" names a
-genre and a style. The vote for each style is its sound score (0 to 1), plus :data:`TAG_STYLE` when a tag names that
-style, plus :data:`TAG_GENRE` when a tag names its genre (the family). A tag the sound doesn't hear at all still counts,
-less than the sound: a song without sound scores is voted on its tags alone. Kept as the ``vote`` rows of the genres
-table, so a radio asks for a genre with one query.
+Every genre is one of the model's 400 Discogs styles (``Electronic---Progressive Trance``). A song is in a genre when
+its sound scores that style :data:`HEARD_MIN` or more, and always in the one it scores highest; there is no limit on
+how many genres a song is in, nor on how many songs a genre has. The songs' own genre tags play no part (before 0.28
+they were voted together with the sound): they stay what Siansa shows on an album's or an artist's page.
+
+Names are still matched onto the styles, for what a radio is asked for: "Drum And Bass", "drum & bass" and "DnB" are
+all ``Electronic---Drum n Bass``, "Electronic / Trance" names a genre and a style. The tags are matched the same way
+only to report how often the sound agrees with them (:func:`agreement`).
 
 Plain Python.
 """
 
 import re
 
-TAG_STYLE = 0.35  # a tag naming the style
-TAG_GENRE = 0.10  # a tag naming its genre (Electronic, Rock…)
-VOTE_MIN = 0.15  # a style below this (sound and tags together) isn't one of the song's genres…
-VOTE_KEEP = 5  # …and a song keeps at most this many
-RADIO_MIN = 0.30  # a song is in a genre's radio from this vote on
+HEARD_MIN = 0.15  # a song is in a style's genre when its sound scores it this or more (and always in its best one)
 
 # Other names for the same thing, after normalising (lower case, "&" as "and", only letters and digits).
 ALIASES = {
@@ -63,7 +60,7 @@ class Taxonomy:
 
     def match(self, tag):
         """``(styles, genres)``: the labels a tag names as a style, and the genres (families) it names. A style name
-        under two genres (Electro: Electronic and Hip Hop) gives both: :func:`vote` picks one."""
+        under two genres (Electro: Electronic and Hip Hop) gives both."""
         styles, genres = set(), set()
         for part in parts(tag):
             k = key(part)
@@ -74,55 +71,11 @@ class Taxonomy:
         return styles, genres
 
 
-def vote(taxonomy, sound, tags):
-    """``[(label, score)]``: the song's genres, best first, at most :data:`VOTE_KEEP`, each at least :data:`VOTE_MIN`
-    (but always the best one, when there's any vote at all). ``sound``: ``{label: score}`` from the model (may be
-    empty); ``tags``: the song's genre tags as they are."""
-    scores = {label: float(v) for label, v in (sound or {}).items()}
-    tag_styles, tag_genres, shared = set(), set(), []
-    for tag in tags or []:
-        s, g = taxonomy.match(tag)
-        tag_genres |= g
-        for part in parts(tag):  # each name once: a style named under two genres counts for one of them
-            named = s & set(taxonomy.by_style.get(key(part), []))
-            if len(named) > 1:
-                shared.append(named)
-            else:
-                tag_styles |= named
-    for named in shared:
-        tag_styles.add(_likeliest(taxonomy, named, scores, tag_genres))
-    for label in tag_styles:
-        scores[label] = scores.get(label, 0.0) + TAG_STYLE
-    if tag_genres:
-        for label in list(scores):
-            if label.partition("---")[0] in tag_genres:
-                scores[label] += TAG_GENRE
-    ranked = sorted(((l, round(v, 4)) for l, v in scores.items() if v > 0), key=lambda p: -p[1])
-    if not ranked:
-        return []
-    kept = [p for p in ranked[:VOTE_KEEP] if p[1] >= VOTE_MIN]
-    return kept or ranked[:1]
-
-
-def _likeliest(taxonomy, labels, sound, tag_genres):
-    """Of one style name under several genres, the one meant: the one the song's sound hears most, else the one in a
-    genre its tags name, else the one in the genre with the most styles (Electronic)."""
-    heard = [l for l in labels if sound.get(l, 0.0) > 0]
-    if heard:
-        return max(heard, key=lambda l: sound[l])
-    tagged = [l for l in labels if l.partition("---")[0] in tag_genres]
-    if tagged:
-        return sorted(tagged)[0]
-    return max(sorted(labels), key=lambda l: taxonomy.genre_size(l.partition("---")[0]))
-
-
-def family(voted):
-    """The genre (Electronic, Rock…) a song's vote leans to most, or ``None``."""
-    totals = {}
-    for label, score in voted or []:
-        g = label.partition("---")[0]
-        totals[g] = totals.get(g, 0.0) + score
-    return max(totals, key=totals.get) if totals else None
+def heard(ranked, minimum=HEARD_MIN):
+    """The genres of a song whose sound gave ``ranked`` (``[(label, score)]``, best first): every style at
+    ``minimum`` or more, and always the best one."""
+    ranked = sorted(ranked or [], key=lambda p: -p[1])
+    return [p for i, p in enumerate(ranked) if p[1] >= minimum or p[1] == ranked[0][1]]
 
 
 def target(taxonomy, name):

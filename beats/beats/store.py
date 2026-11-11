@@ -3,9 +3,9 @@
 Tables:
 
 - ``songs``: each song from the chosen Navidrome libraries, with its BPM tag and its library (``folder``);
-- ``genres``: a song's genres, each with where it came from (``source``): ``tag`` (its own tags), ``sound`` (the
-  styles :mod:`beats.style` hears, with their scores; ``sound-failed`` when its sound couldn't be read) and ``vote``
-  (:mod:`beats.genres`: what the song's genres are, for the radios);
+- ``genres``: a song's genres, each with where it came from (``source``): ``tag`` (its own tags) and ``sound`` (the
+  styles :mod:`beats.style` hears, with their scores: the song's genres, :mod:`beats.genres`; ``sound-failed`` when its
+  sound couldn't be read);
 - ``jobs``: each song's place in the queue and what's happening to it;
 - ``results``: Beat This!'s readings, one row per song and model, with every beat and downbeat;
 - ``events``: what the service did, for the page's activity list;
@@ -412,7 +412,7 @@ class Store:
                 weight = weights[i] if weights else 1.0
                 self.db.execute("INSERT OR REPLACE INTO genres VALUES (?,?,?,?)", (song_id, source, label, weight))
 
-    # ---- genres by vote (beats.genres): the sound's styles, the tags, and the vote of both ----
+    # ---- genres (beats.genres): the styles each song's sound has, and its tags beside them ----
 
     def songs_without_style(self, limit=50):
         """Songs of the chosen libraries whose sound hasn't been given styles yet (nor failed to): the next ones for
@@ -435,12 +435,12 @@ class Store:
         return {"done": by.get("sound", 0), "failed": by.get("sound-failed", 0), "total": total}
 
     def tag_genres(self, limit=300):
-        """The songs' own genre tags, most songs first: ``["Hard Rock", …]`` (the genres Siansa shows without a vote)."""
+        """The songs' own genre tags, most songs first: ``["Hard Rock", …]`` (the genres Siansa shows without Siansa Beats)."""
         return [r["label"] for r in self._rows(
             "SELECT label, COUNT(*) AS n FROM genres WHERE source='tag' GROUP BY label ORDER BY n DESC LIMIT ?", (limit,))]
 
     def genre_rows(self, song_ids=None, sources=("sound", "tag")):
-        """``{song_id: {source: [(label, weight)]}}`` of ``song_ids`` (every song when ``None``), for voting."""
+        """``{song_id: {source: [(label, weight)]}}`` of ``song_ids`` (every song when ``None``)."""
         out = {}
         marks = ", ".join("?" for _ in sources)
         where, args = f"source IN ({marks})", list(sources)
@@ -453,53 +453,58 @@ class Store:
             out.setdefault(r["song_id"], {}).setdefault(r["source"], []).append((r["label"], r["weight"]))
         return out
 
-    def replace_votes(self, votes):
-        """Writes each song's ``vote`` rows (``{song_id: [(label, score)]}``) in one go."""
-        self.genre_changes += 1
-        with self._write():
-            for song_id, voted in votes.items():
-                self.db.execute("DELETE FROM genres WHERE song_id=? AND source='vote'", (song_id,))
-                self.db.executemany("INSERT OR REPLACE INTO genres VALUES (?, 'vote', ?, ?)",
-                                    [(song_id, label, score) for label, score in voted])
+    # A song is in a style's genre when its sound scores it ``minimum`` or more, and always in its best one.
+    HEARD = ("g.source='sound' AND (g.weight >= ? OR NOT EXISTS (SELECT 1 FROM genres b WHERE b.song_id = g.song_id "
+             "AND b.source='sound' AND b.weight > g.weight))")
 
-    def vote_counts(self, minimum, server=None):
-        """``{label: songs}``: how many songs (``server``'s only, when given) have each style in their vote at
-        ``minimum`` or more."""
+    def drop_votes(self):
+        """Removes the genres voted from sound and tags together (before 0.28). How many rows went."""
+        with self._write():
+            gone = self.db.execute("DELETE FROM genres WHERE source='vote'").rowcount
+        if gone:
+            self.genre_changes += 1
+        return gone
+
+    def heard_counts(self, minimum, server=None):
+        """``{label: songs}``: how many songs (``server``'s only, when given) are in each style's genre by their
+        sound."""
         if server is None:
             return {r["label"]: r["n"] for r in self._rows(
-                "SELECT label, COUNT(*) AS n FROM genres WHERE source='vote' AND weight >= ? GROUP BY label", (minimum,))}
-        # The server's songs first, then each one's votes (CROSS JOIN keeps that order: five times quicker than the
-        # votes first on a big library).
+                f"SELECT g.label, COUNT(*) AS n FROM genres g WHERE {self.HEARD} GROUP BY g.label", (minimum,))}
+        # The server's songs first, then each one's styles (CROSS JOIN keeps that order: five times quicker than the
+        # styles first on a big library).
         return {r["label"]: r["n"] for r in self._rows(
-            "SELECT g.label, COUNT(*) AS n FROM links l CROSS JOIN genres g ON g.song_id = l.song_id AND g.source='vote' "
-            "WHERE l.server = ? AND g.weight >= ? GROUP BY g.label", (server, minimum))}
+            "SELECT g.label, COUNT(*) AS n FROM links l CROSS JOIN genres g ON g.song_id = l.song_id "
+            f"WHERE l.server = ? AND {self.HEARD} GROUP BY g.label", (server, minimum))}
 
-    def vote_counts_by_library(self, minimum, server=MAIN):
-        """``{label: {library: songs}}``: :meth:`vote_counts` split by the library the songs are in on ``server``, so
+    def heard_counts_by_library(self, minimum, server=MAIN):
+        """``{label: {library: songs}}``: :meth:`heard_counts` split by the library the songs are in on ``server``, so
         the app can leave out a genre whose songs are all in libraries it hides."""
         out = {}
         for r in self._rows(
                 "SELECT g.label, COALESCE(l.folder, '') AS folder, COUNT(*) AS n FROM links l CROSS JOIN genres g "
-                "ON g.song_id = l.song_id AND g.source='vote' WHERE l.server = ? AND g.weight >= ? "
-                "GROUP BY g.label, l.folder", (server, minimum)):
+                f"ON g.song_id = l.song_id WHERE l.server = ? AND {self.HEARD} GROUP BY g.label, l.folder",
+                (server, minimum)):
             out.setdefault(r["label"], {})[str(r["folder"])] = r["n"]
         return out
 
-    def songs_voted(self, labels, minimum, limit, server=None):
-        """Song ids (random order) with any of ``labels`` in their vote at ``minimum`` or more, at most ``limit``: the
-        ids here, or ``server``'s own for the songs it has."""
+    def songs_heard(self, labels, minimum, limit=None, server=None):
+        """Every song id in the genre of any of ``labels`` by their sound, the ones that sound most like it first (the
+        first ``limit`` when given): the ids here, or ``server``'s own for the songs it has."""
         labels = list(labels)
         if not labels:
             return []
         marks = ", ".join("?" for _ in labels)
         if server is None:
-            return [r["song_id"] for r in self._rows(
-                f"SELECT DISTINCT song_id FROM genres WHERE source='vote' AND weight >= ? AND label IN ({marks}) "
-                "ORDER BY RANDOM() LIMIT ?", (minimum, *labels, limit))]
-        return [r["item_id"] for r in self._rows(
-            "SELECT DISTINCT l.item_id FROM genres g JOIN links l ON l.song_id = g.song_id AND l.server = ? "
-            f"WHERE g.source='vote' AND g.weight >= ? AND g.label IN ({marks}) ORDER BY RANDOM() LIMIT ?",
-            (server, minimum, *labels, limit))]
+            rows = self._rows(
+                f"SELECT g.song_id AS id, MAX(g.weight) AS w FROM genres g WHERE {self.HEARD} "
+                f"AND g.label IN ({marks}) GROUP BY g.song_id", (minimum, *labels))
+        else:
+            rows = self._rows(
+                "SELECT l.item_id AS id, MAX(g.weight) AS w FROM genres g JOIN links l ON l.song_id = g.song_id "
+                f"AND l.server = ? WHERE {self.HEARD} AND g.label IN ({marks}) GROUP BY l.item_id",
+                (server, minimum, *labels))
+        return [r["id"] for r in sorted(rows, key=lambda r: -r["w"])][:limit]
 
     def genres(self, song_id):
         return self._rows("SELECT source, label, weight FROM genres WHERE song_id=? ORDER BY source, weight DESC, label",

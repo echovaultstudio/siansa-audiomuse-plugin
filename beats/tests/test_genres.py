@@ -1,5 +1,5 @@
-"""Genres by vote (beats/genres.py) and the style model's sound (beats/style.py): the mel bands, the patches, and the
-vote of the sound with the tags."""
+"""Genres (beats/genres.py) and the style model's sound (beats/style.py): the mel bands, the patches, and which
+genres a song is in by its sound."""
 
 import os
 import sys
@@ -28,43 +28,27 @@ class TaxonomyTest(unittest.TestCase):
         self.assertEqual(self.t.match("Opera"), (set(), set()))
 
 
-class VoteTest(unittest.TestCase):
+class GenresTest(unittest.TestCase):
     def setUp(self):
         self.t = genres.Taxonomy(LABELS)
 
-    def test_the_sound_leads_and_tags_confirm(self):
-        sound = {"Electronic---Progressive Trance": 0.62, "Electronic---Trance": 0.41, "Electronic---House": 0.08}
-        voted = genres.vote(self.t, sound, ["Electronic / Trance"])
-        self.assertEqual(voted[0][0], "Electronic---Trance")  # 0.41 + 0.35 + 0.10
-        self.assertEqual(voted[1][0], "Electronic---Progressive Trance")  # 0.62 + 0.10
-        self.assertAlmostEqual(dict(voted)["Electronic---House"], 0.18)  # 0.08 + 0.10: kept, low
-        self.assertEqual(genres.family(voted), "Electronic")
+    def test_a_song_is_in_every_genre_its_sound_scores_enough(self):
+        ranked = [("Electronic---Progressive Trance", 0.62), ("Electronic---Trance", 0.41), ("Electronic---House", 0.15),
+                  ("Electronic---Techno", 0.149), ("Pop---Ballad", 0.02)]
+        self.assertEqual(genres.heard(ranked), ranked[:3])
+        self.assertEqual(genres.heard(list(reversed(ranked))), ranked[:3])  # in any order
+        # No limit on how many: the vote kept five.
+        many = [(label, 0.3) for label in LABELS]
+        self.assertEqual(len(genres.heard(many)), len(LABELS))
 
-    def test_a_wrong_tag_loses_to_the_sound(self):
-        # Tagged Rock by its album, but every patch hears drum and bass.
-        voted = genres.vote(self.t, {"Electronic---Drum n Bass": 0.81}, ["Punk"])
-        self.assertEqual(voted[0][0], "Electronic---Drum n Bass")
-        self.assertEqual(dict(voted)["Rock---Punk"], 0.35)
+    def test_a_song_is_always_in_its_best_genre(self):
+        self.assertEqual(genres.heard([("Pop---Ballad", 0.05), ("Rock---Punk", 0.03)]), [("Pop---Ballad", 0.05)])
+        self.assertEqual(genres.heard([]), [])
+        self.assertEqual(genres.heard(None), [])
 
-    def test_without_sound_the_tags_vote(self):
-        self.assertEqual(genres.vote(self.t, {}, ["Deep House"]), [("Electronic---Deep House", 0.35)])
-        self.assertEqual(genres.vote(self.t, {}, ["Opera"]), [])
-        self.assertEqual(genres.vote(self.t, None, None), [])
-
-    def test_a_song_keeps_a_few_genres_and_always_its_best(self):
-        sound = {label: 0.3 for label in LABELS}
-        self.assertEqual(len(genres.vote(self.t, sound, [])), genres.VOTE_KEEP)
-        self.assertEqual(genres.vote(self.t, {"Pop---Ballad": 0.05}, []), [("Pop---Ballad", 0.05)])
-
-    def test_a_style_name_under_two_genres_counts_once(self):
-        # 0.16.0 gave an "Electro" tag to Hip Hop's Electro too: 1035 songs of hip hop electro.
-        alone = dict(genres.vote(self.t, {}, ["Electro"]))
-        self.assertEqual(alone, {"Electronic---Electro": 0.35})  # Electronic: the genre with the most styles
-        heard = dict(genres.vote(self.t, {"Hip Hop---Electro": 0.4}, ["Electro"]))
-        self.assertAlmostEqual(heard["Hip Hop---Electro"], 0.75)  # its sound says hip hop
-        self.assertNotIn("Electronic---Electro", heard)
-        named = dict(genres.vote(self.t, {}, ["Hip Hop / Electro"]))
-        self.assertEqual(set(named), {"Hip Hop---Electro"})
+    def test_the_tags_play_no_part(self):
+        for name in ("vote", "TAG_STYLE", "TAG_GENRE", "VOTE_MIN", "VOTE_KEEP", "RADIO_MIN", "family"):
+            self.assertFalse(hasattr(genres, name), name)
 
     def test_a_radio_plays_the_most_precise_genre_named(self):
         self.assertEqual(genres.target(self.t, "Electronic / Trance"), ({"Electronic---Trance"}, set()))

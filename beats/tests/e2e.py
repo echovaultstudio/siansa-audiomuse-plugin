@@ -134,13 +134,13 @@ def checks(base, catalog, problems):
     if not any("Siansa Beats" in m and "on port" in m for m in lines) or not any("BPM" in m for m in lines):
         problems.append(f"the log lacks the start or the songs ({len(lines)} lines)")
     # The style model, in the real image: each song heard (the test songs are clicks and tones, so their styles are
-    # whatever the model makes of them: only that each has some, and the vote and a radio work).
+    # whatever the model makes of them: only that each has some, and the genres and a radio work).
     styles = call(base, "/api/status")["styles"]
     if not styles.get("available") or styles.get("done", 0) < len(catalog) - 1:
         problems.append(f"the style model didn't hear every song: {styles}")
     listed = call(base, "/api/genres")["genres"]
     if not listed:
-        problems.append("no genres were voted")
+        problems.append("no genres came from the songs' sound")
     else:
         top = listed[0]["style"]
         if not call(base, "/api/genre?name=" + urllib.parse.quote(top))["ids"]:

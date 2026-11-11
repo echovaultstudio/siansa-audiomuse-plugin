@@ -438,8 +438,8 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 
     <!-- Genres -->
     <section data-view="genres" id="genre-card">
-      <div class="page-head"><h2>Genres</h2><p class="sub">Each song's genres by vote: what its sound says (Essentia's Discogs-EffNet, 400 Discogs styles)
-        first, its own tags second. Siansa's genre radios and its genre pages go by this vote, and by the tags without Siansa Beats.</p></div>
+      <div class="page-head"><h2>Genres</h2><p class="sub">Each song's genres from its sound alone (Essentia's Discogs-EffNet, 400 Discogs styles): a song is in every
+        style it scores 0.15 or more, and always in its best one. Siansa's genre list, genre pages and genre radios go by this; its tags are shown beside it and play no part.</p></div>
       <div class="card">
         <div id="genre-progress" class="sub">Loading the genres…</div>
         <div id="genre-agree"></div>
@@ -901,8 +901,8 @@ async function openSong(id, newSong, fromHistory) {
     ["Time", r.model_seconds ? `model ${fmt(r.model_seconds)} s · decode ${fmt(r.decode_seconds)} s · download ${fmt(r.download_seconds)} s` : "–"],
   ];
   const genreFacts = [
-    ["By vote", byGenreSource(detail.genres, "vote").map((g) => `${styleOf(g.label)} ${g.weight.toFixed(2)}`).join(", ") || "–"],
-    ["Its sound", byGenreSource(detail.genres, "sound").slice(0, 5).map((g) => `${styleOf(g.label)} ${g.weight.toFixed(2)}`).join(", ") || "–"],
+    ["Its genres", heardGenres(detail.genres).map((g) => `${styleOf(g.label)} ${g.weight.toFixed(2)}`).join(", ") || "–"],
+    ["All its sound said", byGenreSource(detail.genres, "sound").map((g) => `${styleOf(g.label)} ${g.weight.toFixed(2)}`).join(", ") || "–"],
     ["Its tags", byGenreSource(detail.genres, "tag").map((g) => g.label).join(", ") || "–"],
   ];
   const factCards = (list) => list.map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
@@ -1223,7 +1223,7 @@ function statusRows(s) {
     ...(servers.length ? servers : [["bad", "Music server", "None yet: add one under Setup"]]),
     [cn.audiomuse ? "ok" : "wait", "AudioMuse-AI", cn.audiomuse ? "What it worked out about each song is taken over" : "Not connected (Setup): nothing new is taken over"],
     [s.model_loaded ? (s.device_note ? "wait" : "ok") : "wait", `Beat This! ${s.model}`, s.model_loaded ? `On the ${where}` + (s.model_load_seconds ? `, loaded in ${fmt(s.model_load_seconds)} s` : "") + (s.device_note ? `. ${s.device_note}` : "") : `Loads with the first song, on ${where}`],
-    [(s.styles || {}).available ? "ok" : "wait", "Style model", (s.styles || {}).available ? "Votes each song's genres from its sound" : "Not in this image: genres are the songs' tags"],
+    [(s.styles || {}).available ? "ok" : "wait", "Style model", (s.styles || {}).available ? "Gives each song its genres from its sound" : "Not in this image: genres are the songs' tags"],
     ["ok", "The Siansa app", cn.api_key ? "Connects with BEATS_API_KEY" : cn.password ? "Connects with this page's password" : "Connects without a key"],
     s.log_level === "debug" ? ["wait", "Debug details on", "The log says every step: turn it off under Log when you're done"] : null,
   ].filter(Boolean);
@@ -1289,10 +1289,15 @@ window.addEventListener("hashchange", () => { route(); window.scrollTo({top: 0})
 // ---- genres ----
 function styleOf(label) { return (label || "").split("---").pop(); }
 function byGenreSource(list, source) { return (list || []).filter((g) => g.source === source); }
+// A song's genres: every style its sound scores 0.15 or more, and always its best one (beats/genres.py).
+function heardGenres(list) {
+  const sound = byGenreSource(list, "sound").slice().sort((a, b) => b.weight - a.weight);
+  return sound.filter((g) => g.weight >= 0.15 || g.weight === sound[0].weight);
+}
 function genreChips(list) {
-  const vote = byGenreSource(list, "vote"), tags = byGenreSource(list, "tag");
-  const tip = (g) => `${g.label} · vote ${g.weight.toFixed(2)}`;
-  if (vote.length) return vote.slice(0, 2).map((g) => `<span class="chip" title="${esc(tip(g))}">${esc(styleOf(g.label))}</span>`).join("");
+  const heard = heardGenres(list), tags = byGenreSource(list, "tag");
+  const tip = (g) => `${g.label} · its sound ${g.weight.toFixed(2)}`;
+  if (heard.length) return heard.slice(0, 2).map((g) => `<span class="chip" title="${esc(tip(g))}">${esc(styleOf(g.label))}</span>`).join("");
   return tags.map((g) => `<span class="chip" title="from its tags">${esc(g.label)}</span>`).join("") || '<span class="sub">–</span>';
 }
 let genresShownAt = 0;

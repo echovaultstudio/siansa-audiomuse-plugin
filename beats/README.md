@@ -256,24 +256,25 @@ to judge how long a library will. The table shows the first 200 songs, the searc
 CSV** and **Download data** take the songs it finds (every song when nothing is searched: for a big library the data
 is large).
 
-**Genres by vote.** Each song's genres come from a vote, for Siansa's genre radios:
+**Genres from the sound.** Each song's genres come from its sound alone, for Siansa's genre list (Search › Genres),
+genre pages and genre radios:
 
-- **its sound first**: Essentia's Discogs-EffNet (the Music Technology Group, UPF) hears the song and scores each of
-  400 Discogs styles, from Progressive Trance and Deep House to Punk and Boom Bap. It runs on the GPU when there is one
-  (through the PyTorch Beat This! uses; the model is small, so Beat This! hardly notices), else on the CPU (ONNX
-  Runtime, `STYLE_THREADS`, 2 by default); `BEATS_DEVICE=cpu` keeps both on the CPU. New songs are heard on
-  their way through the queue; songs analysed before are downloaded once more and heard while the queue is empty;
-- **its tags second**: "Electronic / Trance", "Drum And Bass" and "DnB" are matched onto the same styles. A tag
-  naming a style adds 0.35 to it, one naming a genre (Electronic, Rock) 0.10 to each of its styles; so a tag tips a
-  close call, and a wrong tag (an album tag on a remix) loses to what every bar of the song sounds like. A song
-  without a sound score is voted on its tags alone;
-- a song keeps up to 5 styles of 0.15 or more, and is in a genre's radio from 0.30.
+- Essentia's Discogs-EffNet (the Music Technology Group, UPF) hears the song and scores each of 400 Discogs styles,
+  from Progressive Trance and Deep House to Punk and Boom Bap. It runs on the GPU when there is one (through the
+  PyTorch Beat This! uses; the model is small, so Beat This! hardly notices), else on the CPU (ONNX Runtime,
+  `STYLE_THREADS`, 2 by default); `BEATS_DEVICE=cpu` keeps both on the CPU. New songs are heard on their way through
+  the queue; songs analysed before are downloaded once more and heard while the queue is empty;
+- **a song is in a genre when its sound scores that style 0.15 or more, and always in the one it scores highest.**
+  There's no limit on how many genres a song is in, and a genre gives all its songs, the ones that sound most like it
+  first;
+- the songs' own genre tags play no part (before 0.28 they were voted together with the sound; those votes are
+  removed on the first start). Siansa still shows the tags where they belong: on an album's and an artist's page.
 
-The **Genres** card says how far it is, where the model runs, how often the sound agrees with the tags (the tagged genre, and the tagged
-style in the sound's top 3), and the styles with the most songs. A song's page shows its vote, what its sound said
-and its tags; the table's genre column and the CSV (`voted_genres`, `sound_top`) the vote. Last.fm's tags can join
-the vote later. The model is under CC BY-NC-ND 4.0 (free for non-commercial use, unchanged), downloaded while the
-image is built; how often it's right on your music is what the agreement says, and what you hear.
+The **Genres** card says how far it is, where the model runs, how often the sound agrees with the tags (the tagged
+genre, and the tagged style in the sound's top 3: for your information only), and the styles with the most songs. A
+song's page shows its genres, everything its sound said and its tags; the table's genre column and the CSV
+(`sound_genres`, `sound_top`) its genres. The model is under CC BY-NC-ND 4.0 (free for non-commercial use,
+unchanged), downloaded while the image is built; how often it's right on your music is what you hear.
 
 ## Test it
 
@@ -394,9 +395,9 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 |---|---|
 | `GET /api/v1/capabilities` | What this Siansa Beats can do now and how far it is: songs analysed, measured for loudness, the style model. |
 | `GET /api/v1/profiles?ids=a,b` | Up to 500 songs: loudness (`ref_lufs`), fades (`start_ramp`, `end_ramp`), key and scale, and the beat grid at each end. Songs with nothing yet are `pending`. |
-| `GET /api/v1/genres` | Every style with songs voted into it. |
-| `GET /api/v1/genre?name=&limit=` | The songs of a genre, by vote. |
-| `GET /api/v1/genre/about?name=` | A short description of a genre, from Wikipedia. Every genre's (the voted ones and the songs' tags) is fetched in the background every 6 hours and kept; one not fetched yet waits up to 3 s and then answers `"pending": true`, to ask again shortly. |
+| `GET /api/v1/genres` | Every style with songs in its genre by their sound, most songs first. |
+| `GET /api/v1/genre?name=&limit=` | The songs of a genre, by their sound, the ones that sound most like it first: all of them (`songs` says how many), or a random `limit` of them. |
+| `GET /api/v1/genre/about?name=` | A short description of a genre, from Wikipedia. Every genre's (the sound's and the songs' tags) is fetched in the background every 6 hours and kept; one not fetched yet waits up to 3 s and then answers `"pending": true`, to ask again shortly. |
 | `GET /api/v1/similar/albums?track_id=` | Albums that sound like that song's album (`source`: `beats`, from the songs' sound here; `audiomuse` when the song's sound isn't here yet and AudioMuse-AI's Siansa plugin answered). |
 | `GET /api/v1/similar/artists?track_id=` or `?artist=` | Artists that sound like that one, the same way. |
 | `GET /api/v1/audiomuse/api/similar_tracks?item_id=&n=` | Songs that sound like a song, as AudioMuse-AI answers it (`mood_similarity=true`: only in its mood; `mood=&centroid_index=`: around a mood centre). |
