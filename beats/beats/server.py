@@ -278,6 +278,11 @@ class App:
 
         threading.Thread(target=loop, name="lastfm-relay", daemon=True).start()
 
+    def default_listener(self):
+        """Whose listening shows when no one is asked for: the first one with a name (the app's), else the first."""
+        users = self.listens.users()
+        return next((u["user"] for u in users if u["user"]), users[0]["user"] if users else "")
+
     def listening(self, user=None, year=None, month=None, tz=None):
         """The listening page: the listeners, and one's numbers for a month, a year or all time (the first listener's
         without one)."""
@@ -303,6 +308,19 @@ class App:
         answer["playing"] = [pictured(r, face=True) for r in answer["playing"]]
         answer["new_artists"] = [pictured(r, cover=False, face=True) for r in answer["new_artists"]]
         return answer
+
+    def listening_artist(self, user, name, tz=None):
+        """One artist's page in ``user``'s listening, with the pictures each row shows; None when never listened to."""
+        if user is None:  # opened straight from its address: the same person Listening shows first
+            user = self.default_listener()
+        found = self.listens.artist(user, name, tz)
+        if not found:
+            return None
+        found["face"] = self.art.song_for("artist", found["song"], found["artist"])
+        for kind in ("songs", "albums", "recent"):
+            found[kind] = [dict(r, cover=self.art.song_for("cover", r.get("song"), r.get("artist"), r.get("album")))
+                           for r in found[kind]]
+        return found
 
     def sound_status(self, server=None):
         """How much of ``server``'s music has its sound here, and how the pull from AudioMuse-AI is going."""
@@ -1004,6 +1022,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(app.listening(user, number("year"), month, (query.get("tz") or [None])[0]))
             if path == "/api/listens/import":
                 return self._json(dict(app.listens.importing))
+            if path == "/api/listens/artist":  # one artist in a listener's history: its own page
+                name = (query.get("name") or [""])[0].strip()
+                if not name:
+                    return self._error(HTTPStatus.BAD_REQUEST, "name needed: the artist")
+                found = app.listening_artist((query.get("user") or [None])[0], name, (query.get("tz") or [None])[0])
+                return self._json(found) if found else self._error(HTTPStatus.NOT_FOUND, f"No listens of {name}")
             m = re.fullmatch(r"/api/art/(cover|artist)/([^/]+)", path)
             if m:  # a song's cover, or its artist's picture, from the music server (kept here once fetched)
                 size = (query.get("size") or ["300"])[0]

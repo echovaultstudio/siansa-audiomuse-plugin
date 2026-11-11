@@ -643,6 +643,63 @@ class Listens:
             "all": {"listens": len(every), "first": every[0] if every else None, "last": every[-1] if every else None},
         }
 
+    def artist(self, user, name, tz_name=None, most=20):
+        """Everything the page shows of one artist in ``user``'s listening, all time: ``None`` when they never
+        listened to it. Names are compared as :func:`key` does ("AC/DC" is "ac dc")."""
+        akey = key(name)
+        if not akey:
+            return None
+        rows = self.store._rows("SELECT at, artist, tkey, title, album, duration, song_id FROM listens WHERE user=? "
+                                "AND akey=? ORDER BY at", (user, akey))
+        if not rows:
+            return None
+        tz = zone(tz_name)
+        local = lambda at: datetime.datetime.fromtimestamp(at, tz)  # noqa: E731
+        lengths = {r["tkey"]: r["duration"] for r in rows if r["duration"]}
+        library = {r["id"]: r["duration"] for r in self.store._rows(
+            "SELECT id, duration FROM songs WHERE id IN (SELECT DISTINCT song_id FROM listens WHERE user=? AND akey=? "
+            "AND song_id IS NOT NULL)", (user, akey))}
+        seconds = guessed = 0
+        years, hours, days = Counter(), [0] * 24, set()
+        for r in rows:
+            length = r["duration"] or lengths.get(r["tkey"]) or library.get(r["song_id"])
+            if not length:
+                length, guessed = TYPICAL_SECONDS, guessed + 1
+            seconds += length
+            d = local(r["at"])
+            years[d.year] += 1
+            hours[d.hour] += 1
+            days.add(d.date())
+        # Its place among the listener's artists, all time.
+        ahead = self.store._rows("SELECT COUNT(*) AS n FROM (SELECT akey, COUNT(*) AS c FROM listens WHERE user=? "
+                                 "GROUP BY akey HAVING c > ?)", (user, len(rows)))[0]["n"]
+        everything = self.count(user)
+        songs = self.store._rows(
+            "SELECT title, album, COUNT(*) AS listens, MAX(at) AS last, MAX(song_id) AS song_id FROM listens "
+            "WHERE user=? AND akey=? GROUP BY tkey ORDER BY listens DESC, last DESC LIMIT ?", (user, akey, most))
+        albums = self.store._rows(
+            "SELECT album, COUNT(*) AS listens, MAX(at) AS last, MAX(song_id) AS song_id, COUNT(DISTINCT tkey) AS songs "
+            "FROM listens WHERE user=? AND akey=? AND album IS NOT NULL GROUP BY album COLLATE NOCASE "
+            "ORDER BY listens DESC, last DESC LIMIT ?", (user, akey, most))
+        busiest = max(years.items(), key=lambda p: p[1])
+        first, last = rows[0], rows[-1]
+        return {
+            "user": user, "artist": last["artist"], "song": next((r["song_id"] for r in reversed(rows) if r["song_id"]), None),
+            "totals": {"listens": len(rows), "seconds": seconds, "guessed": guessed, "songs": len({r["tkey"] for r in rows}),
+                       "albums": len({(r["album"] or "").casefold() for r in rows if r["album"]}), "days": len(days),
+                       "share": round(len(rows) / everything * 100, 1) if everything else 0, "rank": ahead + 1},
+            "first": {"at": first["at"], "title": first["title"]}, "last": {"at": last["at"], "title": last["title"]},
+            "busiest_year": {"year": busiest[0], "listens": busiest[1]},
+            "years": [{"year": y, "listens": years[y]} for y in range(min(years), max(years) + 1)],
+            "hours": hours,
+            "songs": [{"title": r["title"], "album": r["album"], "artist": last["artist"], "listens": r["listens"],
+                       "song": r["song_id"]} for r in songs],
+            "albums": [{"album": r["album"], "artist": last["artist"], "listens": r["listens"], "songs": r["songs"],
+                        "song": r["song_id"]} for r in albums],
+            "recent": [{"at": r["at"], "title": r["title"], "album": r["album"], "artist": r["artist"], "song": r["song_id"]}
+                       for r in list(reversed(rows))[:10]],
+        }
+
     # ---- on to Last.fm ----
 
     def _relays(self):

@@ -198,7 +198,7 @@ class Subsonic:
         artist = song.get("artistId") or next((a.get("id") for a in song.get("artists") or [] if a.get("id")), None)
         if not artist:
             return None
-        # Navidrome fetches an artist's photo from its agents (Last.fm, Spotify…) only when asked about the artist; until
+        # Navidrome fetches an artist's photo from its agents (such as Last.fm) only when asked about the artist; until
         # then its picture is the star stand-in (the owner, 11 Nov: Rammstein, Sleep Token showed none). Asking about it
         # first is what Siansa does too; the photo's own address is the fallback when Navidrome still has the stand-in.
         try:
