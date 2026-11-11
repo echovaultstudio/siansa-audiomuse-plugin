@@ -74,17 +74,24 @@ class MediaBrowser:
                 raise _Refused() from None
             if e.code == 401:
                 raise ServerError(f"{self.label} refused the user name or password") from None
-            raise ServerError(f"{path.split('?')[0]}: HTTP {e.code}") from None
+            sent = ""
+            try:
+                sent = f" ({what_it_sent(e, e.read(2048))})"
+            except OSError:
+                pass
+            raise ServerError(f"{path.split('?')[0]}: HTTP {e.code}{sent}") from None
         except (urllib.error.URLError, OSError) as e:
             raise ServerError(why_not(self.label, getattr(e, "reason", e))) from None
 
     def _json(self, path, token=None, body=None):
         started = time.monotonic()
         with self._open(path, token, body) as response:
+            raw = response.read()
             try:
-                answer = json.loads(response.read().decode("utf-8-sig") or "null")
+                answer = json.loads(raw.decode("utf-8-sig") or "null")
             except ValueError:
-                raise ServerError(f"That address doesn't look like {self.label}") from None
+                # What did answer, so the wrong port can be told from a proxy's page (0.24.2).
+                raise ServerError(f"That address doesn't look like {self.label}: it sent {what_it_sent(response, raw)}") from None
         _log.debug("%s %s: ok in %.2fs", self.label, path.split("?")[0], time.monotonic() - started)
         return answer
 
@@ -126,21 +133,26 @@ class MediaBrowser:
     def ping(self):
         """What the server is: ``{"version", "type"}``, once it answers and takes the sign-in. Emby set up behind
         ``/emby`` answers there only: that's tried too, and :attr:`url` is then the one that answered."""
-        info, problem = None, None
+        info, problem, tried = None, None, []
         for base in dict.fromkeys([self.url, self.url + "/emby"] if not self.url.endswith("/emby") else [self.url]):
             was, self.url = self.url, base
             try:
                 info = self._json("/System/Info/Public") or {}
+                if not (isinstance(info, dict) and info.get("Version")):
+                    tried.append(f"{base}/System/Info/Public answered, but not with a server's version")
             except ServerError as e:
                 problem, info = problem or e, None
+                tried.append(f"{base}{e}" if str(e).startswith("/") else f"{base}: {e}")
             if isinstance(info, dict) and info.get("Version"):
                 break
             self.url = was
         if not isinstance(info, dict) or not info.get("Version"):
             if problem and not str(problem).startswith(("/", "That address")):
                 raise problem  # nothing answers there at all: said as it is
+            # Something answers, but not as this server: what it said is given, so the cause can be seen (0.24.2: an
+            # Emby reached through its proxy's address but not by IP and port, with nothing to say why).
             raise ServerError(f"No {self.label} answers at {self.url}: is it {self.label}'s own address and port, "
-                              "like http://192.168.1.10:8096?")
+                              f"like http://192.168.1.10:8096? What answered: {'; '.join(tried)}")
         product = str(info.get("ProductName") or "")
         other = "Emby" if self.jellyfin else "Jellyfin"
         if other.lower() in product.lower():
@@ -216,6 +228,15 @@ class MediaBrowser:
         _log.debug("%s stream %s: %.1f MB (%s) in %.2fs", self.label, song_id, size / 1e6, kind or "no type",
                    time.monotonic() - started)
         return size
+
+
+def what_it_sent(response, raw):
+    """What a server that isn't the one asked for sent, in a few words: its kind, who it says it is, how it starts."""
+    headers = response.headers
+    kind = (headers.get("Content-Type") or "no content type").split(";")[0]
+    who = headers.get("Server")
+    start = " ".join((raw or b"")[:300].decode("utf-8", "replace").split())[:80]
+    return kind + (f" from {who}" if who else "") + (f', starting "{start}"' if start else ", empty")
 
 
 def why_not(label, reason):

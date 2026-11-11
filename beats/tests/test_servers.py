@@ -328,6 +328,9 @@ class ServersTest(Service):
         code, why = refused({**fields, "url": self.fake.url})
         self.assertEqual(code, 502)
         self.assertIn("No Emby answers at", why)
+        # What did answer is said (0.24.2): which address, how, and how its answer starts.
+        self.assertIn(f"What answered: {self.fake.url}/System/Info/Public: HTTP ", why)
+        self.assertIn(f"; {self.fake.url}/emby/System/Info/Public: HTTP ", why)
         code, why = refused({**fields, "url": "http://127.0.0.1:1"})
         self.assertEqual(code, 502)
         self.assertIn("Nothing answers at that address and port", why)
