@@ -54,6 +54,9 @@ class FakeServer:
         self.requests = []
         self.search_all = True  # whether search3 finds every song for an empty query (else: album by album)
         self.native = True  # whether Navidrome's own API answers (else only Subsonic's made-up paths)
+        # AudioMuse-AI's export for apps (/api/sync): {song id: its track, as AudioMuse-AI gives it}; None: it has none.
+        self.sync = None
+        self.played = {}  # song id -> plays, for Navidrome's own API's play counts
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -86,13 +89,33 @@ class FakeServer:
                     if len(self.requestline) > 4094:  # as AudioMuse-AI's web server (gunicorn's limit_request_line)
                         return self.reply(400, {"error": "Request Line is too large"})
                     return self.plugin(url.path, q)
+                if url.path == "/api/sync":
+                    if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+                        return self.reply(401, {"error": "login needed"})
+                    if fake.sync is None:
+                        return self.reply(404, {"error": "not found"})
+                    if len(self.requestline) > 4094:
+                        return self.reply(400, {"error": "Request Line is too large"})
+                    tracks = [fake.sync[i] for i in sorted(fake.sync)]
+                    if "ids" in q:
+                        tracks = [t for t in tracks if t["id"] in q["ids"].split(",")]
+                    total, limit, page = len(tracks), int(q.get("limit", 500)), int(q.get("page", 1))
+                    tracks = tracks[(page - 1) * limit:page * limit]
+                    if q.get("fields") == "index":
+                        tracks = [{"id": t["id"], "fp": t["fp"]} for t in tracks]
+                    more = page * limit < total and "ids" not in q
+                    return self.reply(200, {"tracks": tracks, "total_tracks": total, "has_more": more,
+                                            "next_page": page + 1 if more else None, "provider_type": "navidrome"})
                 if url.path == "/api/song" and fake.native:
                     if self.headers.get("X-ND-Authorization") not in [f"Bearer nd-{u}" for u in USERS]:
                         return self.reply(401, {"error": "login needed"})
                     rows = [s for s in fake.songs if "library_id" not in q or str(s.get("library", "1")) == q["library_id"]]
+                    if q.get("_sort") == "play_count":
+                        rows = sorted(rows, key=lambda s: -fake.played.get(s["id"], 0))
                     rows = rows[int(q.get("_start", 0)):int(q.get("_end", len(rows)))]
                     return self.reply(200, [{"id": s["id"], "libraryId": int(s.get("library", "1")),
-                                             "libraryPath": "/music", "path": file_path(s)} for s in rows])
+                                             "libraryPath": "/music", "path": file_path(s),
+                                             "playCount": fake.played.get(s["id"], 0)} for s in rows])
                 if not url.path.startswith("/rest/"):
                     return self.reply(404, {"error": "not found"})
                 if q.get("t") != hashlib.md5((USERS.get(q.get("u"), "\0") + q.get("s", "")).encode()).hexdigest() \

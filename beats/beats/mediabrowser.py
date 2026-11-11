@@ -189,6 +189,15 @@ class MediaBrowser:
                 return songs
             start += page
 
+    def most_played(self, limit=20):
+        """The ids of the songs this user has played most, the most played first."""
+        def items(user_id, token):
+            return (self._json(self._items_path(user_id, IncludeItemTypes="Audio", Recursive="true", Filters="IsPlayed",
+                                                SortBy="PlayCount", SortOrder="Descending", Limit=limit), token)
+                    or {}).get("Items") or []
+
+        return [str(e["Id"]) for e in self._as_user(items) if e.get("Id")]
+
     def song(self, song_id):
         def one(user_id, token):
             item = urllib.parse.quote(str(song_id), safe="")

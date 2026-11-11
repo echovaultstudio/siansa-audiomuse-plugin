@@ -128,7 +128,28 @@ background, and the page shows which library is being read and how far.
 - **Removing a server** forgets the songs only it had; songs another server has too stay, analysed.
 - No password is kept as it's typed (see "Secrets" below), and none is ever shown, logged or put in the debug
   report. Emby's and Jellyfin's token is sent in a header, never in an address. Nothing is ever written to a server.
-- Similar albums and artists are still asked of AudioMuse-AI, by the ids of the server AudioMuse-AI knows.
+- What songs sound like (below) is answered for each server in its own ids.
+
+### What songs sound like (0.25)
+
+Siansa asks for songs like a song, a path from one song to another, a blend of songs, mood radios, "your sound",
+similar albums and artists, and each song's tempo, key, moods and energy. Until 0.25 it asked AudioMuse-AI for all of
+that; Siansa Beats now answers them itself, from what AudioMuse-AI has already worked out about each song:
+
+1. Under **Setup › AudioMuse-AI**, connect AudioMuse-AI (its address and one of its API tokens). Its Siansa plugin is
+   no longer needed: Siansa Beats reads AudioMuse-AI's own export for apps (`/api/sync`).
+2. Everything it has analysed is **taken over** straight away (a few minutes for a big library), and what's new or
+   changed every 6 hours after, or when you press **Take over what's new**. Nothing is analysed twice. The card says
+   how many songs' sound is here, and how many of AudioMuse-AI's songs aren't in the libraries chosen here.
+3. In Siansa, the answers then come from Siansa Beats; AudioMuse-AI needn't be set up in the app for them.
+
+AudioMuse-AI still has to run for now: it's what listens to **new** songs, and the search by words ("text to search",
+the vibes' sliders) is still its own. Both move into Siansa Beats next.
+
+The answers follow AudioMuse-AI's own rules and defaults (cosine distance between its MusiCNN vectors, at most three
+songs by one artist, the same recording never twice), so the two can be compared. The mood centres
+(`beats/mood_centroids.json`) and the method for similar albums and artists come from AudioMuse-AI and its Siansa
+plugin (AGPL-3.0, as this repository).
 
 1. On **Libraries**, tick the libraries to analyse and press **Start analysis**. It reads their songs from Navidrome and works
    through them a song at a time; the top shows the song
@@ -353,8 +374,14 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 | `GET /api/v1/genres` | Every style with songs voted into it. |
 | `GET /api/v1/genre?name=&limit=` | The songs of a genre, by vote. |
 | `GET /api/v1/genre/about?name=` | A short description of a genre, from Wikipedia. Every genre's (the voted ones and the songs' tags) is fetched in the background every 6 hours and kept; one not fetched yet waits up to 3 s and then answers `"pending": true`, to ask again shortly. |
-| `GET /api/v1/similar/albums?track_id=` | Albums that sound like that song's album, asked of AudioMuse-AI's Siansa plugin (until Siansa Beats works them out itself). |
+| `GET /api/v1/similar/albums?track_id=` | Albums that sound like that song's album (`source`: `beats`, from the songs' sound here; `audiomuse` when the song's sound isn't here yet and AudioMuse-AI's Siansa plugin answered). |
 | `GET /api/v1/similar/artists?track_id=` or `?artist=` | Artists that sound like that one, the same way. |
+| `GET /api/v1/audiomuse/api/similar_tracks?item_id=&n=` | Songs that sound like a song, as AudioMuse-AI answers it (`mood_similarity=true`: only in its mood; `mood=&centroid_index=`: around a mood centre). |
+| `GET /api/v1/audiomuse/api/find_path?start_song_id=&end_song_id=&max_steps=` | A path of exactly `max_steps` songs from one song to the other (an end can be `start_mood` / `end_mood`). |
+| `POST /api/v1/audiomuse/api/alchemy` | `{"items": [{"id", "op": "ADD" or "SUBTRACT", "type": "song"}], "n"}`: songs near the ones to blend, away from the ones to avoid. |
+| `GET /api/v1/audiomuse/api/mood_centroids` | AudioMuse-AI's mood centres, each with its tags. |
+| `POST /api/v1/audiomuse/api/sonic_fingerprint/generate` | `{"n"}`: songs near what this server's user has played most (or near `ids`, when given). |
+| `GET /api/v1/audiomuse/api/sync?ids=` | Up to 500 songs' tempo, key, moods, genres and energy, without the vectors. |
 | `POST /api/v1/bad-blends` | A song change marked as bad in the app. |
 
 With several music servers, every one of these takes `?server=`: the id (or name) of the server the app plays from,
@@ -362,6 +389,10 @@ from the capabilities' `servers` (each with its `kind`, `url` and `user`, to tel
 (`profiles`, `bad-blends`) are understood from any server; ids answered (`genre`) are that server's own, and the counts
 (`capabilities`, `genres`) are of its songs. Without `server` the default one is meant. (`similar/…` passes its `server`
 on to AudioMuse-AI, whose own name for a server it is.)
+
+The paths under `/api/v1/audiomuse/` are AudioMuse-AI's own, with its parameters and its answers' layout, so an app
+that asks AudioMuse-AI can ask Siansa Beats instead by changing the address alone. The capabilities' `sound` says
+which of them are answered (`answers`) and for how many songs.
 
 Songs analysed before 0.20 get their loudness, fades and key while the queue is empty: with AudioMuse-AI connected
 (Setup), whatever AudioMuse-AI's Siansa plugin already measured is taken from it (nothing to download),

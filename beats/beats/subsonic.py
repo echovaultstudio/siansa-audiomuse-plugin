@@ -154,6 +154,25 @@ class Subsonic:
                 return out
             start += page
 
+    def most_played(self, limit=20):
+        """The ids of the songs this user has played most, the most played first (Navidrome's own API)."""
+        if not self.configured:
+            raise ServerError("Navidrome isn't set up")
+        if not self._native_token:
+            answer = self._native("/auth/login", body={"username": self.user, "password": self.password})
+            self._native_token = (answer or {}).get("token")
+            if not self._native_token:
+                raise ServerError("/auth/login: no token")
+        query = {"_start": 0, "_end": limit, "_sort": "play_count", "_order": "DESC"}
+        try:
+            rows = self._native("/api/song?" + urllib.parse.urlencode(query), self._native_token)
+        except ServerError:
+            self._native_token = None
+            raise
+        if not isinstance(rows, list):
+            raise ServerError("/api/song: not a list")
+        return [str(r["id"]) for r in rows if r.get("id") and (r.get("playCount") or 0) > 0]
+
     def _songs_by_album(self, library, page=500):
         songs, offset = [], 0
         while True:

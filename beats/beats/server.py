@@ -93,7 +93,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import gzip
 
 from . import __version__, api_v1, grid, loudness
-from .audiomuse import AudioMuse
+from .audiomuse import AudioMuse, AudioMuseError
 from .servers import KINDS, MAIN, Servers, folders_key
 from .store import Store
 from .vault import Vault
@@ -218,6 +218,30 @@ class App:
         self.about = about_module.Keeper(self.store, self.about_names)
         # What the Siansa plugin already measured needn't be downloaded again (asked of whichever AudioMuse-AI is set).
         self.worker.importer = lambda ids: self.audiomuse.profiles(ids)
+        # What songs sound like (0.25): taken over from AudioMuse-AI's export, and answered from here.
+        from .pull import Puller
+        from .sound import Sound
+
+        self.sound = Sound(self.store)
+        self.puller = Puller(self.store, lambda: self.audiomuse)
+
+    PULL_EVERY = 6 * 3600  # AudioMuse-AI's new songs are taken over this often
+
+    def pull_now_and_then(self):
+        """Pulls from AudioMuse-AI a minute after the start and every :data:`PULL_EVERY` after (while it's connected)."""
+        def loop():
+            time.sleep(60)
+            while True:
+                if self.audiomuse.configured:
+                    self.puller.start()
+                time.sleep(self.PULL_EVERY)
+
+        threading.Thread(target=loop, name="sound-pull-timer", daemon=True).start()
+
+    def sound_status(self, server=None):
+        """How much of ``server``'s music has its sound here, and how the pull from AudioMuse-AI is going."""
+        counts = self.store.sound_counts(self.only(server))
+        return {**counts, "pull": dict(self.puller.state), "audiomuse": self.audiomuse.configured}
 
     # ---- connections and access, set on the page (0.24.0) ----
 
@@ -291,11 +315,20 @@ class App:
             raise ValueError("The address starts with http:// or https://")
         token = str(token or "") or (self.vault.open(saved.get("token")) if saved.get("url") == url else "")
         client = AudioMuse(url, token)
-        plugin = client.check()
+        try:
+            plugin = client.check()
+        except AudioMuseError as e:
+            # No Siansa plugin there: its export for apps is all that's needed since 0.25. A refused token is still said.
+            if "plugin" not in str(e):
+                raise
+            client.sync_check()
+            plugin = "export"
         if not check_only:
             self.store.set_setting("audiomuse", {"url": url, "token": self.vault.seal(token)})
             self.audiomuse = client
-            self.store.event(f"AudioMuse-AI connected ({plugin} plugin)")
+            self.store.event(f"AudioMuse-AI connected ({plugin} plugin)" if plugin != "export"
+                             else "AudioMuse-AI connected (its export for apps; no Siansa plugin there)")
+            self.puller.start()  # what it has analysed is taken over straight away
         return plugin
 
     @property
@@ -518,6 +551,7 @@ class App:
                          "measuring": dict(worker.measuring) if worker.measuring else None},
             "regridding": dict(worker.regridding) if worker.regridding else None,
             "reading": dict(worker.reading) if worker.reading else None,
+            "sound": self.sound_status(server),
             "libraries": {"chosen": self.store.setting(folders_key(server)) or [],
                           "read_at": self.store.setting("library_read_at")},
             # The server these numbers are of, and all of them (for the page's switch).
@@ -944,6 +978,11 @@ class Handler(BaseHTTPRequestHandler):
                 except AudioMuseError as e:
                     return self._error(HTTPStatus.BAD_GATEWAY, str(e))
                 return self._json({"plugin": plugin, "url": app.audiomuse.url or None})
+            if path == "/api/sound/pull":  # everything again with {"everything": true}
+                if not app.audiomuse.configured:
+                    return self._error(HTTPStatus.BAD_REQUEST, "Connect AudioMuse-AI first (Setup › AudioMuse-AI)")
+                started = app.puller.start(bool(body.get("everything")))
+                return self._json({"started": started, "pull": dict(app.puller.state)})
             if path == "/api/access/password":
                 try:
                     app.set_password(body.get("password"))
@@ -1179,6 +1218,7 @@ def main():
     _log.info("Log level %s (%s)", log.level(), "chosen on the page" if chosen else "LOG_LEVEL")
     app.worker.start()
     app.about.start()
+    app.pull_now_and_then()
     app.store.event(f"Started: model {config.model}, device {config.device}"
                     f"{' (half precision on a GPU)' if config.float16 else ''}")
     if not app.servers.all():

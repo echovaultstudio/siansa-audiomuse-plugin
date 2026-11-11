@@ -45,6 +45,7 @@ def capabilities(app, server=None):
     styles = app.styles_status(server)
     measured = app.store.measure_counts(loudness.VERSION, only)
     shown = app.servers.get(server) or {}
+    sound = app.store.sound_counts(only)
     return {
         "service": "siansa-beats",
         "version": __version__,
@@ -65,7 +66,12 @@ def capabilities(app, server=None):
             "genres": {"available": bool(styles.get("available")), "styles": len(app.genre_list(server))},
             "genre_about": {"available": True, "source": "Wikipedia"},
             "bad_blends": {"available": True},
-            "similar": {"available": app.audiomuse.configured, "source": "audiomuse"},
+            # Similar albums and artists: from the songs' sound here once it's known (0.25), else asked of AudioMuse-AI.
+            "similar": {"available": bool(sound["sound"]) or app.audiomuse.configured,
+                        "source": "beats" if sound["sound"] else "audiomuse"},
+            # What songs sound like, answered as AudioMuse-AI answers it, under /api/v1/audiomuse/… (0.25).
+            "sound": {"available": bool(sound["sound"]), "songs": sound["sound"], "of": sound["songs"],
+                      "answers": list(SOUND_ANSWERS) if sound["sound"] else [], "prefix": AUDIOMUSE},
             "servers": {"available": True, "kinds": ["navidrome", "emby", "jellyfin"]},
         },
         "limits": {"profile_ids": MAX_IDS, "genre_songs": 2000},
@@ -122,12 +128,17 @@ def get(handler, path, query, server=None):
         if len(ids) > MAX_IDS:
             return handler._error(HTTPStatus.BAD_REQUEST, f"at most {MAX_IDS} ids at a time") or True
         return handler._json(profiles(app, ids, server)) or True
+    if path.startswith(AUDIOMUSE + "/"):
+        return sound_get(handler, path[len(AUDIOMUSE):], arg, server)
     if path in ("/api/v1/similar/albums", "/api/v1/similar/artists"):
         from .audiomuse import AudioMuseError, PASSED_ON
 
         asked = {k: arg(k) for k in PASSED_ON if arg(k)}
         if not asked.get("track_id") and not (path.endswith("artists") and asked.get("artist")):
             return handler._error(HTTPStatus.BAD_REQUEST, "track_id needed (or artist, for artists)") or True
+        own = similar_here(app, path.rsplit("/", 1)[1], asked, server)
+        if own is not None:
+            return handler._json(own) or True
         try:
             return handler._json(app.audiomuse.similar(path.rsplit("/", 1)[1], asked)) or True
         except AudioMuseError as e:
@@ -150,11 +161,166 @@ def get(handler, path, query, server=None):
 
 def post(handler, path, body, server=None):
     """Answers a POST of ``/api/v1/…``; False when it isn't one of its paths."""
+    if path.startswith(AUDIOMUSE + "/"):
+        return sound_post(handler, path[len(AUDIOMUSE):], body, server)
     if path == "/api/v1/bad-blends":
         answer, problem = add_bad_blend(handler.app, body, server)
         if problem:
             return handler._error(HTTPStatus.BAD_REQUEST, problem) or True
         return handler._json(answer) or True
+    return False
+
+
+# ---- what songs sound like, answered as AudioMuse-AI answers it (0.25) ----
+
+AUDIOMUSE = "/api/v1/audiomuse"
+# AudioMuse-AI's paths answered here, under AUDIOMUSE: the app asks them of Siansa Beats as it asks AudioMuse-AI.
+SOUND_ANSWERS = ("/api/similar_tracks", "/api/mood_centroids", "/api/find_path", "/api/alchemy",
+                 "/api/sonic_fingerprint/generate", "/api/sync")
+
+
+def _of_server(app, songs, server):
+    """An answer's songs (``item_id``: this service's ids) with ``server``'s own ids, without songs it doesn't have."""
+    server = server or app.servers.default_id
+    ids = app.store.item_ids([s["item_id"] for s in songs], server)
+    return [{**s, "item_id": ids[s["item_id"]]} for s in songs if s["item_id"] in ids]
+
+
+def _here(app, song_id, server):
+    return app.store.resolve([song_id], server).get(song_id)
+
+
+def similar_here(app, kind, asked, server):
+    """Similar albums or artists from the songs' sound here, in the plugin's layout; None when the sound of the song
+    (or artist) asked about isn't known here, so AudioMuse-AI is asked instead."""
+    from .sound import Unknown
+
+    song_id = _here(app, asked["track_id"], server) if asked.get("track_id") else None
+    try:
+        if kind == "albums":
+            name, artist, found = app.sound.similar_albums(song_id)
+            extra = {"name": name, "artist": artist, "track_id": asked.get("track_id")}
+        else:
+            name, found = app.sound.similar_artists(song_id, asked.get("artist"))
+            extra = {"name": name, "artist_asked": name}
+    except Unknown:
+        return None
+    # Nothing found: AudioMuse-AI is asked when it can be, and always while no song's sound is here at all (then
+    # the answer is why not, as before 0.25, not an empty list).
+    if not found and (app.audiomuse.configured or not app.sound.count()):
+        return None
+    try:
+        limit = max(1, min(50, int(asked.get("limit") or 20)))
+    except ValueError:
+        limit = 20
+    ids = app.store.item_ids([c["track_id"] for c in found], server or app.servers.default_id)
+    similar = [{**c, "track_id": ids[c["track_id"]]} for c in found if c["track_id"] in ids][:limit]
+    return {"schema_version": SCHEMA_VERSION, "similar": similar, "source": "beats", **extra}
+
+
+def features(app, ids, server):
+    """The analysis of the songs ``ids`` as AudioMuse-AI's ``/api/sync`` gives it, without the vectors."""
+    here = app.store.resolve(ids, server)
+    rows = app.store.sound_rows(here.values())
+    tracks = []
+    for asked in ids:
+        r = rows.get(here.get(asked))
+        if r is None:
+            continue
+        tracks.append({"id": asked, "title": r["title"], "artist": r["artist"], "album_artist": r["album_artist"],
+                       "album": r["album"], "year": r["year"], "tempo": r["tempo"], "key": r["key"],
+                       "scale": r["scale"], "mood_vector": r["moods"], "energy": r["energy"],
+                       "other_features": r["other"], "fp": r["fp"]})
+    return {"tracks": tracks, "total_tracks": len(tracks), "has_more": False, "next_page": None,
+            "provider_type": (app.servers.get(server or app.servers.default_id) or {}).get("kind")}
+
+
+def sound_get(handler, path, arg, server):
+    """AudioMuse-AI's GET ``path`` answered from the songs' sound here."""
+    from .sound import Unknown
+
+    app, only = handler.app, handler.app.only(server)
+
+    def number(name, default):
+        try:
+            return int(arg(name) or default)
+        except ValueError:
+            return default
+
+    try:
+        if path == "/api/mood_centroids":
+            return handler._json(app.sound.centre_list()) or True
+        if path == "/api/similar_tracks":
+            n = number("n", 50)
+            if arg("mood") and arg("centroid_index"):
+                return handler._json(_of_server(app, app.sound.mood(arg("mood"), number("centroid_index", 0), n, only),
+                                                server)) or True
+            song_id = _here(app, arg("item_id"), server)
+            if not song_id:
+                return handler._error(HTTPStatus.NOT_FOUND, "Siansa Beats doesn't know this song") or True
+            same_mood = arg("mood_similarity").lower() == "true"
+            return handler._json(_of_server(app, app.sound.similar(song_id, n, same_mood, only), server)) or True
+        if path == "/api/find_path":
+            ends = []
+            for song, mood in (("start_song_id", "start_mood"), ("end_song_id", "end_mood")):
+                if arg(song):
+                    song_id = _here(app, arg(song), server)
+                    if not song_id:
+                        return handler._error(HTTPStatus.NOT_FOUND, "Siansa Beats doesn't know this song") or True
+                    ends.append(song_id)
+                elif arg(mood):
+                    ends.append(app.sound.centre(arg(mood)))
+                else:
+                    return handler._error(HTTPStatus.BAD_REQUEST, f"{song} or {mood} needed") or True
+            found = _of_server(app, app.sound.path(ends[0], ends[1], number("max_steps", 25), only), server)
+            return handler._json({"path": found, "total_distance": None}) or True
+        if path == "/api/sync":
+            ids = [i for i in dict.fromkeys(p.strip() for p in arg("ids").split(",")) if i]
+            if not ids or len(ids) > 500:
+                return handler._error(HTTPStatus.BAD_REQUEST, "ids needed: 1 to 500 songs") or True
+            return handler._json(features(app, ids, server)) or True
+    except Unknown as e:
+        return handler._error(HTTPStatus.NOT_FOUND, str(e)) or True
+    return False
+
+
+def sound_post(handler, path, body, server):
+    """AudioMuse-AI's POST ``path`` answered from the songs' sound here."""
+    from .sound import Unknown
+    from .subsonic import ServerError
+
+    app, only = handler.app, handler.app.only(server)
+    try:
+        n = int(body.get("n") or 50)
+    except (TypeError, ValueError):
+        n = 50
+    try:
+        if path == "/api/alchemy":
+            items = [i for i in body.get("items") or [] if isinstance(i, dict) and i.get("id")
+                     and (i.get("type") or "song") == "song"]
+            asked = [str(i["id"]) for i in items]
+            here = app.store.resolve(asked, server)
+            add = [here[str(i["id"])] for i in items if str(i.get("op") or "ADD").upper() == "ADD" and str(i["id"]) in here]
+            avoid = [here[str(i["id"])] for i in items if str(i.get("op") or "").upper() == "SUBTRACT" and str(i["id"]) in here]
+            if not add:
+                return handler._error(HTTPStatus.BAD_REQUEST, "items needed: songs to blend ({id, op: ADD})") or True
+            return handler._json({"results": _of_server(app, app.sound.blend(add, avoid, n, only), server)}) or True
+        if path == "/api/sonic_fingerprint/generate":
+            # The most played songs: the ones the caller names, else the ones this server's user here has played most.
+            asked = [str(i) for i in body.get("ids") or []]
+            if not asked:
+                name = server or app.servers.default_id
+                try:
+                    asked = app.servers.client(name).most_played(20)
+                except ServerError as e:
+                    return handler._error(HTTPStatus.BAD_GATEWAY, f"The most played songs couldn't be read: {e}") or True
+            here = app.store.resolve(asked, server)
+            played = [here[i] for i in asked if i in here]
+            if not played:
+                return handler._json([]) or True
+            return handler._json(_of_server(app, app.sound.yours(played, n, only), server)) or True
+    except Unknown as e:
+        return handler._error(HTTPStatus.NOT_FOUND, str(e)) or True
     return False
 
 

@@ -74,6 +74,11 @@ CREATE TABLE IF NOT EXISTS bad_blends (
 CREATE TABLE IF NOT EXISTS links (
     server TEXT, item_id TEXT, song_id TEXT, folder TEXT, PRIMARY KEY (server, item_id)
 );
+-- The sound of each song as AudioMuse-AI's models hear it (0.25): pulled from AudioMuse-AI, later made here.
+CREATE TABLE IF NOT EXISTS sound (
+    song_id TEXT PRIMARY KEY, musicnn BLOB, clap BLOB, tempo REAL, key TEXT, scale TEXT, moods TEXT, other TEXT,
+    energy REAL, album_artist TEXT, year INTEGER, fp TEXT, source TEXT, at REAL
+);
 CREATE INDEX IF NOT EXISTS links_by_song ON links (song_id, server);
 CREATE INDEX IF NOT EXISTS links_by_server ON links (server, song_id);
 CREATE INDEX IF NOT EXISTS links_by_item ON links (item_id);
@@ -104,6 +109,7 @@ class Store:
         self.path = path
         self.lock = threading.RLock()
         self.genre_changes = 0  # counts every change to the genres table, so kept answers know when they're old
+        self.sound_changes = 0  # the same for the sound table: the vectors in memory are read again when it moves
         self.measure_changes = 0  # the same for the loudness measures
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
@@ -183,6 +189,56 @@ class Store:
             return [dict(r) for r in reader.execute(sql, args).fetchall()]
         finally:
             self._readers.put(reader)
+
+    # ---- the sound of songs (0.25) ----
+
+    SOUND_FIELDS = ("musicnn", "clap", "tempo", "key", "scale", "moods", "other", "energy", "album_artist", "year", "fp")
+
+    def save_sound(self, rows, source="audiomuse"):
+        """Keeps the sound of songs: each row ``{"song_id", …SOUND_FIELDS}`` (vectors as float32 bytes). The number kept."""
+        now = time.time()
+        with self._write():
+            self.db.executemany(
+                "INSERT OR REPLACE INTO sound (song_id, " + ", ".join(self.SOUND_FIELDS) + ", source, at) VALUES (?"
+                + ", ?" * len(self.SOUND_FIELDS) + ", ?, ?)",
+                [(r["song_id"], *(r.get(f) for f in self.SOUND_FIELDS), source, now) for r in rows])
+        self.sound_changes += 1
+        return len(rows)
+
+    def sound_prints(self):
+        """``{song id: fp}``: what AudioMuse-AI's analysis of each song looked like when it was pulled."""
+        return {r["song_id"]: r["fp"] for r in self._rows("SELECT song_id, fp FROM sound")}
+
+    def sound_vectors(self, column="musicnn"):
+        """Every song with a ``column`` vector, with what's said of it in an answer: rows of ``{"song_id", "vector"
+        (bytes), "title", "artist", "album", "album_artist", "other"}``, by song id."""
+        if column not in ("musicnn", "clap"):
+            raise ValueError(column)
+        return self._rows(f"SELECT o.song_id, o.{column} AS vector, s.title, s.artist, s.album, o.album_artist, o.other "
+                          f"FROM sound o JOIN songs s ON s.id=o.song_id WHERE o.{column} IS NOT NULL ORDER BY o.song_id")
+
+    def sound_rows(self, song_ids):
+        """``{song id: its sound without the vectors}`` of the songs among ``song_ids`` that have one."""
+        out, ids = {}, list(dict.fromkeys(song_ids))
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            for r in self._rows("SELECT o.song_id, o.tempo, o.key, o.scale, o.moods, o.other, o.energy, o.album_artist, "
+                                "o.year, o.fp, s.title, s.artist, s.album FROM sound o JOIN songs s ON s.id=o.song_id "
+                                f"WHERE o.song_id IN ({', '.join('?' for _ in chunk)})", chunk):
+                out[r["song_id"]] = r
+        return out
+
+    def sound_counts(self, server=None):
+        """``{"songs", "sound", "words"}``: ``server``'s songs, how many have their sound, how many the vector the
+        search by words needs."""
+        of, args = self._of(server)
+        row = self._rows("SELECT COUNT(*) AS songs, COUNT(o.musicnn) AS sound, COUNT(o.clap) AS words FROM songs s "
+                         f"LEFT JOIN sound o ON o.song_id=s.id WHERE 1=1{of}", args)[0]
+        return row
+
+    def server_song_ids(self, server):
+        """The ids here of the songs ``server`` has."""
+        return {r["song_id"] for r in self._rows("SELECT DISTINCT song_id FROM links WHERE server=?", (server,))}
 
     # ---- songs and genres ----
 
@@ -426,7 +482,7 @@ class Store:
         return [r["id"] for r in self._rows("SELECT id FROM songs")]
 
     GONE_WITH_A_SONG = (("songs", "id"), ("genres", "song_id"), ("jobs", "song_id"), ("results", "song_id"),
-                        ("marks", "song_id"), ("measures", "song_id"), ("links", "song_id"))
+                        ("marks", "song_id"), ("measures", "song_id"), ("links", "song_id"), ("sound", "song_id"))
 
     def remove(self, song_id):
         self.genre_changes += 1

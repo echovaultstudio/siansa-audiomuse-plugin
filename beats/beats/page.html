@@ -461,7 +461,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
     <!-- Similar music -->
     <section data-view="similar">
       <div class="page-head"><h2>Similar music</h2><p class="sub">Albums and artists that sound alike, for Siansa's "Similar albums" and "Fans also like".
-        Siansa Beats asks AudioMuse-AI's Siansa plugin for them for now; later it works them out from its own reading of each song.</p></div>
+        Siansa Beats works them out from how each song sounds, as taken over from AudioMuse-AI.</p></div>
       <div class="card" id="s-status"></div>
       <div class="card">
         <h3>Try it</h3>
@@ -547,7 +547,9 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       <div class="grid2">
         <div class="card" id="audiomuse-card">
           <h3>AudioMuse-AI</h3>
-          <p class="sub">Asked for similar albums and artists, and for the loudness its Siansa plugin already measured. <span id="am-state"></span></p>
+          <p class="sub">What it has worked out about each song (how it sounds, its moods, tempo and key) is taken over
+            from it, so nothing is analysed twice; Siansa Beats then answers similar songs, albums and artists, song paths,
+            blends and moods itself. <span id="am-state"></span></p>
           <form id="am-form" autocomplete="off">
             <div class="form">
               <label class="wide">Address <input type="url" id="am-url" placeholder="http://192.168.1.10:8000"></label>
@@ -561,6 +563,13 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
             <p class="sub" id="am-note" role="status"></p>
             <p class="sub">The token is kept encrypted and never shown again.</p>
           </form>
+          <div id="pull-box" hidden>
+            <p class="sub" id="pull-state" role="status"></p>
+            <div class="controls">
+              <button type="button" id="pull-now">Take over what's new</button>
+              <button type="button" id="pull-all" title="Asks AudioMuse-AI for every song again, not only new and changed ones">Take over everything again</button>
+            </div>
+          </div>
         </div>
         <div class="card" id="access-card">
           <h3>Access</h3>
@@ -1212,7 +1221,7 @@ function statusRows(s) {
   const servers = (s.servers || []).map((x) => ["ok", x.name, `${x.url} · ${num(x.songs)} songs${x.default && s.servers.length > 1 ? " · default" : ""}`]);
   return [
     ...(servers.length ? servers : [["bad", "Music server", "None yet: add one under Setup"]]),
-    [cn.audiomuse ? "ok" : "wait", "AudioMuse-AI", cn.audiomuse ? "Asked for similar music, and the loudness its plugin measured" : "Not connected (Setup): no similar music"],
+    [cn.audiomuse ? "ok" : "wait", "AudioMuse-AI", cn.audiomuse ? "What it worked out about each song is taken over" : "Not connected (Setup): nothing new is taken over"],
     [s.model_loaded ? (s.device_note ? "wait" : "ok") : "wait", `Beat This! ${s.model}`, s.model_loaded ? `On the ${where}` + (s.model_load_seconds ? `, loaded in ${fmt(s.model_load_seconds)} s` : "") + (s.device_note ? `. ${s.device_note}` : "") : `Loads with the first song, on ${where}`],
     [(s.styles || {}).available ? "ok" : "wait", "Style model", (s.styles || {}).available ? "Votes each song's genres from its sound" : "Not in this image: genres are the songs' tags"],
     ["ok", "The Siansa app", cn.api_key ? "Connects with BEATS_API_KEY" : cn.password ? "Connects with this page's password" : "Connects without a key"],
@@ -1408,6 +1417,7 @@ function drawSetup(s) {
   $("am-remove").hidden = !cn.audiomuse; $("am-save").textContent = cn.audiomuse ? "Save" : "Connect";
   if (cn.audiomuse && !$("am-url").value && document.activeElement !== $("am-url")) $("am-url").value = cn.audiomuse_url;
   $("am-token").placeholder = cn.audiomuse_token ? "Kept: leave empty to keep it" : "One of AudioMuse-AI's API tokens";
+  drawPull(status.sound);
   const left = cn.left_in_container || [];
   $("left-card").hidden = !left.length; $("left-names").textContent = left.join(", ");
   $("setup-model").innerHTML = [
@@ -1421,18 +1431,40 @@ function drawSetup(s) {
   $("setup-key").innerHTML = cn.api_key ? "Key: the app's key made under Access (make a new one there if you no longer have it)." : cn.password ? "Key: this page's password (or make the app a key of its own under Access)." : "Key: none needed (no password is set).";
 }
 
+// ---- what AudioMuse-AI has worked out, taken over (0.25) ----
+function drawPull(sound) {
+  $("pull-box").hidden = !sound || !sound.audiomuse;
+  if (!sound) return;
+  const p = sound.pull || {};
+  const have = `The sound of ${num(sound.sound)} of ${num(sound.songs)} songs is here`;
+  let text;
+  if (p.running) text = p.total ? `Taking over from AudioMuse-AI: ${num(p.done || 0)} of ${num(p.total)} songs…` : "Asking AudioMuse-AI what it has…";
+  else if (p.error) text = `${have}. The last try failed: ${p.error}`;
+  else if (p.finished) text = `${have}. Last taken over ${new Date(p.finished * 1000).toLocaleString()}: ${num(p.kept || 0)} new or changed` +
+    (p.unknown ? `, ${num(p.unknown)} of AudioMuse-AI's songs aren't in the libraries chosen here` : "") + ".";
+  else text = `${have}. Nothing taken over yet.`;
+  $("pull-state").textContent = text;
+  $("pull-now").disabled = $("pull-all").disabled = !!p.running;
+}
+async function pull(everything) {
+  try { await api("api/sound/pull", {method: "POST", body: JSON.stringify({everything})}); statusLoop(); }
+  catch (e) { $("pull-state").textContent = e.message; }
+}
+$("pull-now").addEventListener("click", () => pull(false));
+$("pull-all").addEventListener("click", () => { if (confirm("Ask AudioMuse-AI for every song again? This takes a few minutes for a big library.")) pull(true); });
+
 // ---- AudioMuse-AI and access, set here (0.24.0) ----
 const amFields = () => ({url: $("am-url").value.trim(), token: $("am-token").value});
 $("am-test").addEventListener("click", async () => {
   $("am-note").textContent = "Asking…";
-  try { const r = await api("api/audiomuse/test", {method: "POST", body: JSON.stringify(amFields())}); $("am-note").textContent = `It answers and takes the token (its ${r.plugin} plugin).`; }
+  try { const r = await api("api/audiomuse/test", {method: "POST", body: JSON.stringify(amFields())}); $("am-note").textContent = `It answers and takes the token (${r.plugin === "export" ? "its export for apps; no Siansa plugin there, and none is needed" : "its " + r.plugin + " plugin"}).`; }
   catch (err) { $("am-note").textContent = err.message; }
 });
 $("am-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!amFields().url) { $("am-note").textContent = "An address is needed."; return; }
   $("am-note").textContent = "Asking AudioMuse-AI…";
-  try { const r = await api("api/audiomuse", {method: "POST", body: JSON.stringify(amFields())}); $("am-token").value = ""; $("am-note").textContent = `Connected (its ${r.plugin} plugin).`; statusLoop(); }
+  try { const r = await api("api/audiomuse", {method: "POST", body: JSON.stringify(amFields())}); $("am-token").value = ""; $("am-note").textContent = `Connected (${r.plugin === "export" ? "its export for apps; no Siansa plugin there, and none is needed" : "its " + r.plugin + " plugin"}).`; statusLoop(); }
   catch (err) { $("am-note").textContent = err.message; }
 });
 $("am-remove").addEventListener("click", async () => {
@@ -1541,7 +1573,7 @@ $("about-fetch").addEventListener("click", async () => {
 function drawSimilarStatus() {
   const on = status && (status.connections || {}).audiomuse;
   $("s-status").innerHTML = on
-    ? '<span class="pill ok">AudioMuse-AI is set up</span> <span class="sub">Similar albums and artists are asked of its Siansa plugin.</span>'
+    ? '<span class="pill ok">AudioMuse-AI is set up</span> <span class="sub">Similar albums and artists come from the songs\' sound taken over from it (Setup › AudioMuse-AI); for a song whose sound isn\'t here yet, its Siansa plugin is asked.</span>'
     : '<span class="pill wait">AudioMuse-AI isn\'t set up</span> <p class="sub">Connect it under <a href="#setup">Setup › AudioMuse-AI</a> with its address and one of its API tokens. Until then the app asks the plugin itself, when it can.</p>';
 }
 let similarTimer = null;
