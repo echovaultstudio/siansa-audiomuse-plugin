@@ -152,7 +152,7 @@ def main(servers, library_path):
         check(read == {"songs": len(wanted), "queued": 0}, f"{kind}: its songs are found here, none queued: {read}")
         said = [e["message"] for e in call("/api/status")["events"] if added["name"] in e["message"] and "Library" in e["message"]]
         check(any(f"{len(wanted)} by their file" in e for e in said), f"{kind}: all found by their files: {said[:1]}")
-        mine = [s for f in libraries for s in make_client(kind, url, USER, PASSWORD).all_songs(f["id"])]
+        mine = [s for f in libraries for s in app.servers.client(added["id"]).all_songs(f["id"])]  # the kept sign-in
         profiles = call(f"/api/v1/profiles?server={added['id']}&ids=" + ",".join(s["id"] for s in mine))
         check(len(profiles["profiles"]) == len(wanted) and not profiles["pending"],
               f"{kind}: the app gets every song's profile by {kind}'s own ids ({len(profiles['profiles'])})")

@@ -40,6 +40,10 @@ class MediaBrowser:
         self.kind = "jellyfin" if jellyfin else "emby"
         self.label = "Jellyfin" if jellyfin else "Emby"
         self.timeout = timeout
+        # The device this sign-in is as. Jellyfin keeps one sign-in a device and user: a new one under the same name
+        # ends the one before, so a check of a server (its Test button) signs in as another device than the kept
+        # sign-in, which would stop working otherwise (0.25, found by the real-server checks).
+        self.device = "siansa-beats"
         self._login = None  # (user id, token)
         # Called with (user id, token) after each sign-in, so the token is kept and the password needn't be (0.24).
         self.on_login = None
@@ -57,7 +61,7 @@ class MediaBrowser:
 
     def _headers(self, token):
         who = (f'{"MediaBrowser" if self.jellyfin else "Emby"} Client="Siansa Beats", Device="Siansa Beats", '
-               f'DeviceId="siansa-beats", Version="{__version__}"') + (f', Token="{token}"' if token else "")
+               f'DeviceId="{self.device}", Version="{__version__}"') + (f', Token="{token}"' if token else "")
         if self.jellyfin:
             return {"Authorization": who}
         return {"X-Emby-Authorization": who, **({"X-Emby-Token": token} if token else {})}
