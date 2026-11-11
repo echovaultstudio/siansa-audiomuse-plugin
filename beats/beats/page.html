@@ -82,7 +82,10 @@ main > section.on { display: grid; gap: 16px; }
   .page-name { display: block; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .page-name::before { content: "·"; margin-right: 8px; color: var(--faint); }
   h1 { white-space: nowrap; }
-  .nav { position: fixed; z-index: 30; top: 0; left: 0; bottom: 0; width: min(300px, 84vw); height: auto; padding: 12px 12px 24px;
+  /* As tall as the screen and scrolling inside: the desktop's align-self: start made it as tall as its links, so on a
+     phone the last ones (Log, Setup) were below the screen and out of reach (the owner, 11 Nov). */
+  .nav { position: fixed; z-index: 30; top: 0; left: 0; bottom: 0; width: min(300px, 84vw); align-self: auto;
+    height: 100vh; height: 100dvh; overflow-y: auto; overscroll-behavior: contain; padding: 12px 12px 24px;
     background: var(--raised); border-right: 1px solid var(--line); transform: translateX(-102%); transition: transform 0.22s ease;
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.45); }
   body.menu-open .nav { transform: none; }
