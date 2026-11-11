@@ -218,6 +218,7 @@ class FakeMediaServer:
                  under_emby=False):
         self.folder, self.jellyfin, self.paths, self.root = folder, jellyfin, paths, root
         self.under_emby = under_emby  # an Emby set up to answer under /emby only (a reverse proxy's way)
+        self.forbids = False  # whether it turns every request away (HTTP 403), as Emby does a caller it takes for remote
         self.prefix = "j-" if jellyfin else "e-"
         with open(os.path.join(folder, "catalog.json")) as f:
             self.songs = [s for s in json.load(f) if only is None or s["id"] in only] + list(extra)
@@ -284,6 +285,8 @@ class FakeMediaServer:
                 return e
 
             def do_GET(self):
+                if fake.forbids:  # an Emby that lets in local addresses only, asked from elsewhere
+                    return self.reply(403, b"Forbidden", "text/plain", {"Server": "UPnP/1.0 DLNADOC/1.50"})
                 if not self.unprefixed():
                     return self.reply(404, b"<html>Not found</html>", "text/html")
                 url = urllib.parse.urlparse(self.path)

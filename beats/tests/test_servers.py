@@ -331,6 +331,14 @@ class ServersTest(Service):
         # What did answer is said (0.24.2): which address, how, and how its answer starts.
         self.assertIn(f"What answered: {self.fake.url}/System/Info/Public: HTTP ", why)
         self.assertIn(f"; {self.fake.url}/emby/System/Info/Public: HTTP ", why)
+        # An Emby that lets in local addresses only (the owner's, 11 Nov): Siansa Beats' container isn't one to it.
+        emby.forbids = True
+        code, why = refused({**fields, "url": emby.url})
+        emby.forbids = False
+        self.assertEqual(code, 502)
+        self.assertIn("refuses Siansa Beats (HTTP 403, before any sign-in)", why)
+        self.assertIn("LAN networks", why)
+        self.assertIn('HTTP 403 (text/plain from UPnP/1.0 DLNADOC/1.50, starting "Forbidden")', why)
         code, why = refused({**fields, "url": "http://127.0.0.1:1"})
         self.assertEqual(code, 502)
         self.assertIn("Nothing answers at that address and port", why)

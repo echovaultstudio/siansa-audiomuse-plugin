@@ -153,6 +153,15 @@ class MediaBrowser:
         if not isinstance(info, dict) or not info.get("Version"):
             if problem and not str(problem).startswith(("/", "That address")):
                 raise problem  # nothing answers there at all: said as it is
+            if any(": HTTP 403" in t for t in tried):
+                # The server itself turns this container away before any sign-in (the owner's Emby, 11 Nov: the app
+                # on the same network got in, Siansa Beats got "Forbidden" for a page that needs no login).
+                raise ServerError(
+                    f"{self.label} answers at {self.url} but refuses Siansa Beats (HTTP 403, before any sign-in). "
+                    f"It lets in only addresses it counts as local: in {self.label}'s settings under Network, add "
+                    "this container's network to the LAN networks (Docker's is usually 172.16.0.0/12) or allow "
+                    f"remote connections; or use the address {self.label} is reached at through your proxy. "
+                    f"What answered: {'; '.join(tried)}")
             # Something answers, but not as this server: what it said is given, so the cause can be seen (0.24.2: an
             # Emby reached through its proxy's address but not by IP and port, with nothing to say why).
             raise ServerError(f"No {self.label} answers at {self.url}: is it {self.label}'s own address and port, "
