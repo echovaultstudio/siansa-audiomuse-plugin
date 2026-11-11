@@ -154,6 +154,25 @@ class Subsonic:
                 return out
             start += page
 
+    def most_played(self, limit=20):
+        """The ids of the songs this user has played most, the most played first (Navidrome's own API)."""
+        if not self.configured:
+            raise ServerError("Navidrome isn't set up")
+        if not self._native_token:
+            answer = self._native("/auth/login", body={"username": self.user, "password": self.password})
+            self._native_token = (answer or {}).get("token")
+            if not self._native_token:
+                raise ServerError("/auth/login: no token")
+        query = {"_start": 0, "_end": limit, "_sort": "play_count", "_order": "DESC"}
+        try:
+            rows = self._native("/api/song?" + urllib.parse.urlencode(query), self._native_token)
+        except ServerError:
+            self._native_token = None
+            raise
+        if not isinstance(rows, list):
+            raise ServerError("/api/song: not a list")
+        return [str(r["id"]) for r in rows if r.get("id") and (r.get("playCount") or 0) > 0]
+
     def _songs_by_album(self, library, page=500):
         songs, offset = [], 0
         while True:
@@ -168,6 +187,32 @@ class Subsonic:
 
     def song(self, song_id):
         return song_from(self._get("getSong", id=song_id).get("song") or {})
+
+    def picture(self, song_id, of="cover", size=300):
+        """``(bytes, content type)`` of the song's cover (``of="cover"``) or its artist's picture (``"artist"``), about
+        ``size`` px; None when the server has none. Navidrome answers a picture it doesn't have with its stand-in (a
+        blue disc, a star) as an ordinary picture, marked "don't keep" and without a version: that isn't a picture."""
+        song = self._get("getSong", id=song_id).get("song") or {}
+        if of == "artist":
+            artist = song.get("artistId") or next((a.get("id") for a in song.get("artists") or [] if a.get("id")), None)
+            cover = f"ar-{artist}" if artist else None
+        else:
+            cover = song.get("coverArt") or song.get("albumId") or song_id
+        if not cover:
+            return None
+        try:
+            with urllib.request.urlopen(self.address("getCoverArt", id=cover, size=size), timeout=self.timeout) as response:
+                kind = response.headers.get("Content-Type") or ""
+                stand_in = "no-store" in (response.headers.get("Cache-Control") or "").lower() and not response.headers.get("ETag")
+                if not kind.startswith("image/") or stand_in:
+                    return None
+                return response.read(), kind
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            raise SubsonicError(f"getCoverArt: HTTP {e.code}") from None
+        except (urllib.error.URLError, OSError) as e:
+            raise SubsonicError(f"getCoverArt: {getattr(e, 'reason', e)}") from None
 
     def audio(self, song_id, byte_range=None):
         """The song as MP3 for the page's player (every browser plays it), opened: the caller reads and closes it."""

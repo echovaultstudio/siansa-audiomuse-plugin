@@ -134,13 +134,13 @@ def checks(base, catalog, problems):
     if not any("Siansa Beats" in m and "on port" in m for m in lines) or not any("BPM" in m for m in lines):
         problems.append(f"the log lacks the start or the songs ({len(lines)} lines)")
     # The style model, in the real image: each song heard (the test songs are clicks and tones, so their styles are
-    # whatever the model makes of them: only that each has some, and the vote and a radio work).
+    # whatever the model makes of them: only that each has some, and the genres and a radio work).
     styles = call(base, "/api/status")["styles"]
     if not styles.get("available") or styles.get("done", 0) < len(catalog) - 1:
         problems.append(f"the style model didn't hear every song: {styles}")
     listed = call(base, "/api/genres")["genres"]
     if not listed:
-        problems.append("no genres were voted")
+        problems.append("no genres came from the songs' sound")
     else:
         top = listed[0]["style"]
         if not call(base, "/api/genre?name=" + urllib.parse.quote(top))["ids"]:
@@ -158,6 +158,16 @@ def checks(base, catalog, problems):
         problems.append(f"only {len(measured)} of {len(catalog)} songs have their loudness: {profiles[:2]}")
     if not any(p.get("intro_bpm") and p.get("beat_grid") == "siansa_beats" for p in profiles):
         problems.append("no profile carries its beat grid")
+    # The listening history, in the real image: a listen at half past midnight in Helsinki on 1 January is that
+    # year's there (so the image knows the time zones), and it's linked to the song here.
+    some = next(iter(catalog))
+    kept = call(base, "/api/v1/listens", "POST", {"user": "e2e", "listens": [
+        {"id": some, "at": 1767220200, "artist": catalog[some]["artist"], "title": catalog[some]["title"], "duration": 60}]})
+    year = call(base, "/api/listens?user=e2e&year=2026&tz=Europe/Helsinki")
+    if kept.get("kept") != 1 or year["totals"]["listens"] != 1 or year["hours"][0] != 1:
+        problems.append(f"the listening history isn't right: {kept}, {year['totals']}, hours {year['hours']}")
+    if call(base, "/api/v1/listens/top?user=e2e")["top"][0].get("id") != some:
+        problems.append("a listen isn't linked to its song")
     if call(base, "/api/v1/openapi.json").get("openapi", "")[:1] != "3":
         problems.append("the API's description isn't there")
     report = call(base, "/api/debug")

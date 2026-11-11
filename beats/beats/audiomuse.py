@@ -100,6 +100,66 @@ class AudioMuse:
                 return prefix.strip("/").split("/")[-1]
         raise AudioMuseError("That address answers, but neither Siansa plugin is installed in AudioMuse-AI there")
 
+    # ---- its export for apps: every song's analysis and vectors (0.25) ----
+
+    def _sync(self, query):
+        try:
+            return self._get("/api/sync?" + urllib.parse.urlencode(query))
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise AudioMuseError("AudioMuse-AI didn't take the token" if self.token
+                                     else "AudioMuse-AI wants a token: one of its API tokens") from None
+            if e.code == 404:
+                raise AudioMuseError("This AudioMuse-AI has no export for apps (/api/sync): it needs a newer version") from None
+            raise AudioMuseError(f"AudioMuse-AI answered HTTP {e.code}") from None
+
+    def sync_check(self):
+        """How many songs AudioMuse-AI's export has; :class:`AudioMuseError` says why it can't be read."""
+        if not self.configured:
+            raise AudioMuseError("An address is needed")
+        answer = self._sync({"fields": "index", "limit": 1})
+        if not isinstance(answer, dict) or "tracks" not in answer:
+            raise AudioMuseError("That address answers, but not as AudioMuse-AI's export does")
+        return int(answer.get("total_tracks") or 0)
+
+    def servers(self):
+        """The music servers this AudioMuse-AI analyses, its default first: ``[{"id", "name", "type", "default"}]``.
+        One login covers them all (the owner, 11 Nov: the same Navidrome twice, for two of its users, is two of them).
+        Empty when it has no list (before it had several servers) or the token may not read it: its export then gives
+        the default server's songs alone."""
+        try:
+            answer = self._get("/api/servers")
+        except urllib.error.HTTPError as e:
+            _log.info("AudioMuse-AI's list of music servers can't be read (HTTP %s): its default server alone is asked", e.code)
+            return []
+        except AudioMuseError as e:
+            _log.info("AudioMuse-AI's list of music servers can't be read (%s): its default server alone is asked", e)
+            return []
+        rows = answer.get("servers") if isinstance(answer, dict) else None
+        out = [{"id": str(r["server_id"]), "name": str(r.get("name") or r["server_id"]),
+                "type": r.get("server_type"), "default": bool(r.get("is_default"))}
+               for r in rows or [] if isinstance(r, dict) and r.get("server_id")]
+        return sorted(out, key=lambda r: not r["default"])
+
+    def sync_index(self, server=None):
+        """Every song AudioMuse-AI has analysed (of its music server ``server``; its default one when ``None``), a
+        page at a time: lists of ``{"id" (that music server's), "fp" (what its analysis looks like: it changes when
+        the analysis does)}``."""
+        page = 1
+        while page:
+            answer = self._sync(self._of(server, {"fields": "index", "limit": 1000, "page": page})) or {}
+            yield answer.get("tracks") or [], int(answer.get("total_tracks") or 0)
+            page = answer.get("next_page") if answer.get("has_more") else None
+
+    def sync_songs(self, ids, server=None):
+        """The whole analysis of the songs ``ids`` (``server``'s ids; at most 100: AudioMuse-AI turns away long
+        addresses), vectors included (base64 of float32)."""
+        return (self._sync(self._of(server, {"ids": ",".join(ids), "limit": len(ids)})) or {}).get("tracks") or []
+
+    @staticmethod
+    def _of(server, query):
+        return dict(query, server=server) if server else query
+
     def similar(self, kind, query):
         """AudioMuse-AI's ``kind`` ("albums" or "artists") like ``query``'s ``track_id`` or ``artist``."""
         if kind not in KINDS:

@@ -37,7 +37,12 @@ jobs:
         run: cd beats && python3 -P tests/test_phrase.py && python3 -P tests/test_ends.py && python3 -P tests/test_genres.py && python3 -P tests/test_about.py
       - name: Loudness, fades and key (checked against scipy's filters and ffmpeg's own loudness meter)
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+          # ffmpeg from pip, put on the PATH: the runner's package mirrors can stall for minutes (11 Nov: the job ran
+          # out of its ten minutes twice waiting for apt), and the test only needs the program.
+          python3 -m pip install --quiet --break-system-packages --user imageio-ffmpeg==0.6.0 || python3 -m pip install --quiet --user imageio-ffmpeg==0.6.0
+          mkdir -p "$HOME/.local/bin" && ln -sf "$(python3 -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" "$HOME/.local/bin/ffmpeg"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH" && ffmpeg -version | head -1
           python3 -m pip install --break-system-packages --user scipy || python3 -m pip install --user scipy
           cd beats && python3 -P tests/test_loudness.py
       - name: CPU or GPU
@@ -48,6 +53,10 @@ jobs:
         run: cd beats && python3 -P tests/test_match.py && python3 -P tests/test_servers.py
       - name: No secret as plain text (hashed, encrypted or not kept), set on the page
         run: cd beats && python3 -P tests/test_secrets.py
+      - name: What songs sound like, taken over from AudioMuse-AI (0.25)
+        run: cd beats && python3 -P tests/test_sound.py
+      - name: The listening history (0.29), its exports and Last.fm
+        run: cd beats && python3 -P tests/test_listens.py
       - name: The page's script parses
         run: cd beats && python3 -P tests/test_page_script.py
 
@@ -165,7 +174,7 @@ jobs:
           docker image ls siansa-beats:test --format 'Image size: {{.Size}}'
 
       - name: Publish
-        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.event_name != 'pull_request'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/beats-sound') && github.event_name != 'pull_request'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           version=$(python3 -c "import re;print(re.search(r'__version__ = \"(.+)\"', open('beats/beats/__init__.py').read())[1])")
@@ -174,6 +183,10 @@ jobs:
             # dev / dev-cuda: the dev branch, never latest or cuda
             first=$([ -z "$suffix" ] && echo dev || echo dev-cuda)
             version="$version-dev"
+          elif [ "$GITHUB_REF" = refs/heads/beats-sound ]; then
+            # sound / sound-cuda: the try-out of 0.25 (what songs sound like), beside dev, until it's merged
+            first=$([ -z "$suffix" ] && echo sound || echo sound-cuda)
+            version="$version-sound"
           else
             first=$([ -z "$suffix" ] && echo latest || echo cuda)
           fi

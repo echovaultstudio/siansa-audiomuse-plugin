@@ -32,6 +32,7 @@ header { position: sticky; top: 0; z-index: 6; background: color-mix(in srgb, va
 h1 { font-size: 1.15rem; margin: 0; letter-spacing: -0.01em; }
 h1 b { color: var(--amber); }
 h1 a { color: inherit; text-decoration: none; }
+h1 .version { font-size: 0.72rem; font-weight: 500; color: var(--faint); margin-left: 6px; letter-spacing: 0; }
 h2 { font-size: 1.35rem; margin: 0 0 4px; letter-spacing: -0.01em; }
 h3 { font-size: 1rem; margin: 0 0 12px; }
 h4 { font-size: 0.82rem; margin: 18px 0 8px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.05em; }
@@ -81,7 +82,10 @@ main > section.on { display: grid; gap: 16px; }
   .page-name { display: block; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .page-name::before { content: "·"; margin-right: 8px; color: var(--faint); }
   h1 { white-space: nowrap; }
-  .nav { position: fixed; z-index: 30; top: 0; left: 0; bottom: 0; width: min(300px, 84vw); height: auto; padding: 12px 12px 24px;
+  /* As tall as the screen and scrolling inside: the desktop's align-self: start made it as tall as its links, so on a
+     phone the last ones (Log, Setup) were below the screen and out of reach (the owner, 11 Nov). */
+  .nav { position: fixed; z-index: 30; top: 0; left: 0; bottom: 0; width: min(300px, 84vw); align-self: auto;
+    height: 100vh; height: 100dvh; overflow-y: auto; overscroll-behavior: contain; padding: 12px 12px 24px;
     background: var(--raised); border-right: 1px solid var(--line); transform: translateX(-102%); transition: transform 0.22s ease;
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.45); }
   body.menu-open .nav { transform: none; }
@@ -98,6 +102,110 @@ main > section.on { display: grid; gap: 16px; }
 @media (prefers-reduced-motion: reduce) { .nav, .scrim { transition: none; } }
 
 .card { background: var(--raised); border: 1px solid var(--line); border-radius: 14px; padding: 16px; min-width: 0; }
+/* Listening: the time machine. A period in big letters, the years and months to travel to, then its numbers. */
+.tm-hero { position: relative; overflow: hidden; isolation: isolate; border-radius: 18px; padding: 22px 20px 18px; border: 1px solid var(--line);
+  background: radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--amber) 22%, transparent), transparent 60%), var(--raised); min-width: 0; }
+/* The time's most played artist, faint behind its name. */
+.tm-hero::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--face, none) center 22% / cover no-repeat; opacity: 0.34;
+  -webkit-mask-image: linear-gradient(to left, #000 0%, rgba(0, 0, 0, 0.5) 45%, transparent 85%); mask-image: linear-gradient(to left, #000 0%, rgba(0, 0, 0, 0.5) 45%, transparent 85%); }
+.tm-kicker { font-size: 0.74rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--amber-text); font-weight: 700; }
+.tm-hero h2 { font-size: clamp(2rem, 7vw, 3.4rem); line-height: 1.05; letter-spacing: -0.03em; margin: 6px 0 4px; }
+.tm-hero .sub { font-size: 0.95rem; color: var(--muted); }
+.tm-who { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
+.tm-strip { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 6px; margin-top: 12px; scrollbar-width: thin; }
+.tm-strip button { flex: 0 0 auto; padding: 6px 12px; font-variant-numeric: tabular-nums; }
+.tm-strip button[aria-pressed=true] { background: var(--amber); color: var(--on-amber); border-color: var(--amber); font-weight: 700; }
+.tm-strip button.empty { opacity: 0.45; }
+/* A picture's place: the cover or the artist's picture over a tile in the name's own colour with its first letters,
+   which is what shows for music that isn't on the server (0.30). */
+.art { position: relative; display: grid; place-items: center; flex: 0 0 auto; overflow: hidden; border-radius: 8px; aspect-ratio: 1;
+  background: linear-gradient(135deg, hsl(var(--h, 30) 45% 32%), hsl(calc(var(--h, 30) + 40) 50% 18%)); color: rgba(255, 255, 255, 0.82);
+  font-weight: 700; letter-spacing: 0.02em; user-select: none; }
+.art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.art.round { border-radius: 50%; }
+.art.s { width: 44px; font-size: 0.8rem; } .art.m { width: 56px; font-size: 0.95rem; } .art.xs { width: 22px; font-size: 0.55rem; }
+.tm-now { padding: 12px 14px; }
+.tm-now .row { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.tm-now .row + .row { margin-top: 10px; }
+.tm-now .t { min-width: 0; } .tm-now .t b, .tm-now .t span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tm-now .t span { color: var(--muted); font-size: 0.86rem; }
+.tm-now .kicker { display: flex; gap: 6px; align-items: center; color: var(--amber-text); }
+.tm-now .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); flex: 0 0 auto; animation: tm-pulse 1.6s ease-in-out infinite; }
+/* The favourites of a time: a picture each, the name over it. Side by side; on a phone a row to swipe through. */
+.tm-podium { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.tm-feature { position: relative; display: block; width: 100%; padding: 0; border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
+  aspect-ratio: 4 / 5; text-align: left; color: #fff; background: var(--raised-2); cursor: pointer; isolation: isolate; }
+.tm-feature .art { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 0; aspect-ratio: auto; font-size: 3rem; z-index: -2; }
+.tm-feature::after { content: ""; position: absolute; inset: 0; z-index: -1;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.45) 38%, rgba(0, 0, 0, 0) 70%); }
+.tm-feature .txt { position: absolute; left: 14px; right: 14px; bottom: 12px; display: grid; gap: 2px; }
+.tm-feature small { font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--amber); font-weight: 700; }
+.tm-feature b { font-size: 1.25rem; line-height: 1.15; letter-spacing: -0.01em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tm-feature i { font-style: normal; font-size: 0.86rem; color: rgba(255, 255, 255, 0.8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tm-feature:hover { border-color: var(--amber); }
+.tm-feature.wide { aspect-ratio: auto; height: 300px; cursor: default; margin-bottom: 10px; }
+.tm-feature.wide b { font-size: 1.7rem; }
+.tm-feature.wide:hover { border-color: var(--line); }
+@media (max-width: 700px) {
+  .tm-podium { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 10px; margin: 0 -16px; padding: 0 16px 4px; scrollbar-width: none; }
+  .tm-podium::-webkit-scrollbar { display: none; }
+  .tm-podium .tm-feature { flex: 0 0 68%; scroll-snap-align: center; }
+  .tm-feature.wide { aspect-ratio: 1; height: auto; }
+}
+@keyframes tm-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .tm-now .dot { animation: none; } }
+.tm-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.tm-chart { display: flex; align-items: flex-end; gap: 3px; height: 150px; }
+.tm-chart .col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px;
+  border: 0; background: none; padding: 0; border-radius: 6px; color: var(--faint); font-size: 0.68rem; cursor: default; }
+.tm-chart button.col { cursor: pointer; }
+.tm-chart .col i { display: block; width: 100%; min-height: 2px; border-radius: 4px 4px 1px 1px; background: var(--amber); }
+.tm-chart .col.none i { background: var(--line-strong); }
+.tm-chart button.col:hover i { filter: brightness(1.15); }
+.tm-chart .col span { white-space: nowrap; overflow: hidden; max-width: 100%; }
+.tm-chart.small { height: 90px; }
+.tm-rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: rank 1; }
+.tm-rank li { counter-increment: rank; display: grid; grid-template-columns: 2ch 44px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 8px;
+  border-radius: 8px; position: relative; isolation: isolate; }
+.tm-rank li::before { content: counter(rank); color: var(--faint); font-variant-numeric: tabular-nums; text-align: right; font-size: 0.82rem; }
+.tm-rank li::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--w, 0%); background: color-mix(in srgb, var(--amber) 10%, transparent); border-radius: 8px; z-index: -1; }
+.tm-listens { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.tm-listens li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.tm-listens .t { min-width: 0; } .tm-listens .t b, .tm-listens .t span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tm-listens .t b { font-weight: 600; } .tm-listens .t span { font-size: 0.8rem; color: var(--faint); }
+.tm-listens time { font-size: 0.76rem; color: var(--faint); white-space: nowrap; }
+.tm-faces { display: flex; flex-wrap: wrap; gap: 8px; }
+.tm-faces .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 3px; margin: 0; font-size: 0.82rem; }
+.tm-rank .t { min-width: 0; } .tm-rank .t b, .tm-rank .t span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tm-rank .t b { font-weight: 600; } .tm-rank .t span { font-size: 0.8rem; color: var(--faint); }
+.tm-rank .n { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.86rem; }
+.tm-facts { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; margin: 0; }
+.tm-facts dt { color: var(--muted); } .tm-facts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.tm-empty { text-align: center; padding: 28px 16px; color: var(--muted); }
+.tm-tabs { position: sticky; top: var(--header-h); z-index: 4; display: flex; gap: 4px; padding: 6px; border-radius: 999px;
+  background: color-mix(in srgb, var(--raised) 92%, transparent); backdrop-filter: blur(10px); border: 1px solid var(--line); }
+.tm-tabs button { flex: 1 1 0; border: 0; padding: 8px 6px; font-weight: 600; color: var(--muted); background: none; }
+.tm-tabs button[aria-selected=true] { background: var(--amber); color: var(--on-amber); }
+.tm-panel { display: grid; gap: 16px; min-width: 0; }
+.tm-seg { margin-bottom: 12px; }
+.tm-seg button[aria-pressed=true] { background: var(--amber); color: var(--on-amber); }
+.tm-join { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.tm-join button.primary { color: var(--on-amber); background: var(--amber); border-color: var(--amber); }
+@media (max-width: 600px) {
+  .tm-hero { padding: 16px 14px 12px; }
+  .tm-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .tm-tiles .tile { padding: 10px; } .tm-tiles .tile .v { font-size: 1.15rem; } .tm-tiles .tile .s { display: none; }
+}
+/* Phones: long lists show their first lines with "Show all" (data-cap), cards marked data-fold open and close by
+   their heading, and a button goes back to the top: less scrolling, and the page's parts stay findable. */
+.cap-more { margin-top: 10px; width: 100%; }
+.card.foldable > h3, .card.foldable > .card-head h3 { cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 0; }
+.card.foldable > h3::after, .card.foldable > .card-head h3::after { content: "▾"; color: var(--faint); font-size: 0.85rem; transition: transform 0.15s ease; }
+.card.foldable:not(.folded) > h3, .card.foldable:not(.folded) > .card-head h3 { margin-bottom: 12px; }
+.card.foldable.folded > h3::after, .card.foldable.folded > .card-head h3::after { transform: rotate(-90deg); }
+.card.foldable.folded > :not(h3):not(.card-head) { display: none !important; }
+.to-top { position: fixed; right: 16px; bottom: 20px; z-index: 20; border-radius: 999px; padding: 10px 14px; font-weight: 600;
+  background: var(--raised-2); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); }
 .card-head { display: flex; align-items: baseline; gap: 12px; } .card-head .more { margin-left: auto; font-size: 0.88rem; }
 .kicker { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); margin-bottom: 2px; }
 .now { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 24px; align-items: center; }
@@ -245,7 +353,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 <header>
   <div class="bar">
     <button class="menu-button" id="menu" aria-label="Menu" aria-controls="nav" aria-expanded="false">☰</button>
-    <h1><a href="#overview" id="home" title="Overview"><b>Siansa</b> Beats</a></h1>
+    <h1><a href="#overview" id="home" title="Overview"><b>Siansa</b> Beats</a><span class="version" id="header-version" title="This Siansa Beats' version"></span></h1>
     <span class="page-name" id="page-name"></span>
     <div class="status">
       <button class="status-button" id="status-button" aria-haspopup="true" aria-expanded="false" aria-controls="status-panel">
@@ -271,6 +379,10 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       <a href="#overview" data-view="overview">Overview</a>
       <a href="#libraries" data-view="libraries">Libraries</a>
       <a href="#songs" data-view="songs">Songs</a>
+    </div>
+    <div class="group">
+      <div class="group-name">Your music</div>
+      <a href="#listening" data-view="listening">Listening</a>
     </div>
     <div class="group">
       <div class="group-name">For the Siansa app</div>
@@ -306,7 +418,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       <div class="tiles" id="tiles"></div>
       <div class="card">
         <div class="card-head"><h3>Recent activity</h3><a href="#activity" class="more">All activity ›</a></div>
-        <ul class="events" id="events-recent"></ul>
+        <ul class="events" id="events-recent" data-cap="5"></ul>
       </div>
     </section>
 
@@ -415,7 +527,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         </div>
         <div class="card">
           <h3>Keys</h3>
-          <div class="hbars" id="l-keys"></div>
+          <div class="hbars" id="l-keys" data-cap="12"></div>
         </div>
         <div class="card">
           <h3>How songs start</h3>
@@ -430,21 +542,21 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
           <p class="sub" id="l-outro-note"></p>
         </div>
       </div>
-      <div class="card">
+      <div class="card" data-fold>
         <h3>Couldn't be measured</h3>
-        <ul class="events" id="l-failed"></ul>
+        <ul class="events" id="l-failed" data-cap="5"></ul>
       </div>
     </section>
 
     <!-- Genres -->
     <section data-view="genres" id="genre-card">
-      <div class="page-head"><h2>Genres</h2><p class="sub">Each song's genres by vote: what its sound says (Essentia's Discogs-EffNet, 400 Discogs styles)
-        first, its own tags second. Siansa's genre radios and its genre pages go by this vote, and by the tags without Siansa Beats.</p></div>
+      <div class="page-head"><h2>Genres</h2><p class="sub">Each song's genres from its sound alone (Essentia's Discogs-EffNet, 400 Discogs styles): a song is in every
+        style it scores 0.15 or more, and always in its best one. Siansa's genre list, genre pages and genre radios go by this; its tags are shown beside it and play no part.</p></div>
       <div class="card">
         <div id="genre-progress" class="sub">Loading the genres…</div>
         <div id="genre-agree"></div>
       </div>
-      <div class="card">
+      <div class="card" data-fold>
         <div class="card-head"><h3>Descriptions</h3><button class="more" id="about-fetch">Fetch all now</button></div>
         <p class="sub">Each genre's page in the app opens with a short description from Wikipedia. They're fetched in the
           background and kept (a found one for 90 days, a genre Wikipedia has nothing on for a week, one it couldn't be
@@ -454,14 +566,14 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       <div class="card">
         <h3>Genres by songs</h3>
         <div class="tools"><input type="search" class="grow" id="genre-find" placeholder="Find a genre" aria-label="Find a genre"></div>
-        <div id="genre-top" class="hbars"></div>
+        <div id="genre-top" class="hbars" data-cap="15"></div>
       </div>
     </section>
 
     <!-- Similar music -->
     <section data-view="similar">
       <div class="page-head"><h2>Similar music</h2><p class="sub">Albums and artists that sound alike, for Siansa's "Similar albums" and "Fans also like".
-        Siansa Beats asks AudioMuse-AI's Siansa plugin for them for now; later it works them out from its own reading of each song.</p></div>
+        Siansa Beats works them out from how each song sounds, as taken over from AudioMuse-AI.</p></div>
       <div class="card" id="s-status"></div>
       <div class="card">
         <h3>Try it</h3>
@@ -479,14 +591,93 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       <div class="page-head"><h2>Bad blends</h2><p class="sub">Song changes marked as bad in Siansa Dev, with how the app blended them. Tap a song to check its beats.</p></div>
       <div class="card">
         <p><a class="btn" href="api/bad-blends/export" download title="Every bad blend with both songs' beats and sound levels: the one file to send">Download bad blends</a></p>
-        <ul class="events" id="bad"></ul>
+        <ul class="events" id="bad" data-cap="10"></ul>
       </div>
     </section>
 
     <!-- Activity -->
+    <!-- Listening: the history, a month or a year at a time -->
+    <section data-view="listening">
+      <div class="tm-hero">
+        <div class="tm-kicker">Time machine</div>
+        <h2 id="tm-label">Listening</h2>
+        <p class="sub" id="tm-sub" role="status">Loading…</p>
+        <div class="tm-who" id="tm-who" hidden>
+          <label for="tm-user" class="sub">Listener</label>
+          <select id="tm-user" title="Whose listening is shown"></select>
+        </div>
+        <div class="tm-strip" id="tm-years" role="group" aria-label="Year"></div>
+        <div class="tm-strip" id="tm-months" role="group" aria-label="Month" hidden></div>
+      </div>
+      <div class="card tm-now" id="tm-now" hidden><div id="tm-now-what"></div></div>
+      <div class="banner warn tm-join" id="tm-join" hidden><span id="tm-join-text"></span><button type="button" class="primary" id="tm-join-go"></button></div>
+      <!-- One part at a time, chosen here (it stays in view while scrolling), so a phone never scrolls through all of it. -->
+      <div class="tm-tabs" role="tablist" aria-label="Part of your listening">
+        <button type="button" role="tab" data-tab="overview" aria-selected="true">Overview</button>
+        <button type="button" role="tab" data-tab="top" aria-selected="false">Top</button>
+        <button type="button" role="tab" data-tab="when" aria-selected="false">When</button>
+        <button type="button" role="tab" data-tab="history" aria-selected="false">History</button>
+      </div>
+      <div class="card tm-empty" id="tm-empty" hidden></div>
+      <div class="tm-panel" data-tab="overview" id="tm-body">
+        <div class="tm-podium" id="tm-podium" aria-label="Your favourites of this time"></div>
+        <div class="tiles tm-tiles" id="tm-tiles"></div>
+        <div class="card"><h3 id="tm-chart-title">When</h3><div class="tm-chart" id="tm-chart"></div><p class="sub">Press a bar to go there.</p></div>
+        <div class="card" id="tm-new-card"><h3>Heard for the first time</h3><div id="tm-new" class="tm-faces"></div></div>
+      </div>
+      <div class="tm-panel" data-tab="top" hidden>
+        <div class="card">
+          <div class="seg tm-seg" role="group" aria-label="Most played">
+            <button type="button" data-top="artists" aria-pressed="true">Artists</button>
+            <button type="button" data-top="albums" aria-pressed="false">Albums</button>
+            <button type="button" data-top="songs" aria-pressed="false">Songs</button>
+          </div>
+          <div id="tm-first"></div>
+          <ol class="tm-rank" id="tm-artists" data-cap="9" start="2"></ol>
+          <ol class="tm-rank" id="tm-albums" data-cap="9" start="2" hidden></ol>
+          <ol class="tm-rank" id="tm-songs" data-cap="9" start="2" hidden></ol>
+        </div>
+      </div>
+      <div class="tm-panel" data-tab="when" hidden>
+        <div class="tm-cols">
+          <div class="card"><h3>Around the clock</h3><div class="tm-chart small" id="tm-hours"></div><p class="sub" id="tm-hours-note"></p></div>
+          <div class="card"><h3>Through the week</h3><div class="tm-chart small" id="tm-weekdays"></div><p class="sub" id="tm-weekdays-note"></p></div>
+          <div class="card"><h3>Records</h3><dl class="tm-facts" id="tm-records"></dl></div>
+        </div>
+      </div>
+      <div class="tm-panel" data-tab="history" hidden>
+        <div class="card" id="tm-recent-card" hidden><h3>Last listens</h3><ul class="tm-listens" id="tm-recent" data-cap="6"></ul></div>
+        <div class="card" data-fold>
+          <h3>Bring in a history</h3>
+          <p class="sub">An export of Koito, of Last.fm (the JSON or CSV of an export tool) or of ListenBrainz. A listen that's here already is kept once, so a file can be brought in again.</p>
+          <form class="form" id="tm-import">
+            <label class="wide">The file<input type="file" id="tm-file" accept=".json,.jsonl,.csv,.txt,application/json,text/csv" required></label>
+            <label class="wide">Whose listens they are<input type="text" id="tm-import-user" autocomplete="off" placeholder="The name the app scrobbles as (your music server's user name)" list="tm-user-names"></label>
+            <datalist id="tm-user-names"></datalist>
+            <div class="controls"><button type="submit" class="primary" id="tm-import-go">Bring in</button></div>
+          </form>
+          <p class="sub" id="tm-import-state" role="status"></p>
+          <div class="controls" id="tm-remove-box" hidden><button type="button" id="tm-remove">Remove listens…</button></div>
+        </div>
+        <div class="card" data-fold>
+          <h3>On to Last.fm</h3>
+          <p class="sub" id="tm-lastfm-state" role="status"></p>
+          <form class="form" id="tm-lastfm">
+            <label>API key<input type="text" id="tm-lf-key" autocomplete="off" required></label>
+            <label>Shared secret<input type="password" id="tm-lf-secret" autocomplete="off" required></label>
+            <label>Last.fm user name<input type="text" id="tm-lf-name" autocomplete="off" required></label>
+            <label>Password<input type="password" id="tm-lf-password" autocomplete="off" required></label>
+            <div class="controls"><button type="submit" class="primary">Connect</button></div>
+            <p class="sub wide">Your own Last.fm API account (last.fm/api/account/create). The key, secret and sign-in are kept encrypted; the password isn't kept. New listens of this listener are then sent on; turn the app's own Last.fm off, so they aren't sent twice.</p>
+          </form>
+          <div class="controls" id="tm-lf-off-box" hidden><button type="button" id="tm-lf-off">Disconnect</button></div>
+        </div>
+      </div>
+    </section>
+
     <section data-view="activity">
       <div class="page-head"><h2>Activity</h2><p class="sub">What Siansa Beats did, newest first.</p></div>
-      <div class="card"><ul class="events tall" id="events"></ul></div>
+      <div class="card"><ul class="events tall" id="events" data-cap="25"></ul></div>
     </section>
 
     <!-- Log -->
@@ -516,7 +707,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         <p class="sub">These are still in the container's YAML and are no longer read: <strong id="left-names"></strong>. They were taken over
           once (hashed or encrypted) and are set on this page since, so you can delete those lines.</p>
       </div>
-      <div class="card" id="servers-card">
+      <div class="card" id="servers-card" data-fold="open">
         <h3>Music servers</h3>
         <p class="sub">Navidrome, Emby and Jellyfin, as many as you have, and more than one user of the same server (each
           sees the libraries that user may). A song two servers have is found by its file or its tags and analysed once.
@@ -545,9 +736,11 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         </details>
       </div>
       <div class="grid2">
-        <div class="card" id="audiomuse-card">
+        <div class="card" id="audiomuse-card" data-fold>
           <h3>AudioMuse-AI</h3>
-          <p class="sub">Asked for similar albums and artists, and for the loudness its Siansa plugin already measured. <span id="am-state"></span></p>
+          <p class="sub">What it has worked out about each song (how it sounds, its moods and genres) is taken over
+            from it, so nothing is analysed twice; Siansa Beats then answers similar songs, albums and artists, song paths,
+            blends and moods itself. A song's tempo is never AudioMuse-AI's: it's the one Beat This! finds here. <span id="am-state"></span></p>
           <form id="am-form" autocomplete="off">
             <div class="form">
               <label class="wide">Address <input type="url" id="am-url" placeholder="http://192.168.1.10:8000"></label>
@@ -561,8 +754,15 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
             <p class="sub" id="am-note" role="status"></p>
             <p class="sub">The token is kept encrypted and never shown again.</p>
           </form>
+          <div id="pull-box" hidden>
+            <p class="sub" id="pull-state" role="status"></p>
+            <div class="controls">
+              <button type="button" id="pull-now">Take over what's new</button>
+              <button type="button" id="pull-all" title="Asks AudioMuse-AI for every song again, not only new and changed ones">Take over everything again</button>
+            </div>
+          </div>
         </div>
-        <div class="card" id="access-card">
+        <div class="card" id="access-card" data-fold>
           <h3>Access</h3>
           <dl class="kv" id="setup-connections"></dl>
           <form id="pw-form" autocomplete="off">
@@ -586,8 +786,8 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
           </form>
         </div>
       </div>
-      <div class="card"><h3>The model</h3><dl class="kv" id="setup-model"></dl></div>
-      <div class="card">
+      <div class="card" data-fold><h3>The model</h3><dl class="kv" id="setup-model"></dl></div>
+      <div class="card" data-fold>
         <h3>Connect the Siansa app</h3>
         <ol class="steps">
           <li>In Siansa Dev: Settings › Connections › <strong>Siansa Beats</strong>.</li>
@@ -597,7 +797,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         </ol>
         <p class="sub">The app's API is described in <a href="api/v1/openapi.json" target="_blank" rel="noopener">openapi.json</a>; <a href="api/v1/capabilities" target="_blank" rel="noopener">capabilities</a> shows what it answers now.</p>
       </div>
-      <div class="card">
+      <div class="card" data-fold>
         <h3>When something's wrong</h3>
         <p class="sub">The debug report has the versions, the setup (no passwords), where each part is right now, the queue and the log: the one file to send.</p>
         <a class="btn" href="api/debug" download>Download debug report</a>
@@ -892,8 +1092,8 @@ async function openSong(id, newSong, fromHistory) {
     ["Time", r.model_seconds ? `model ${fmt(r.model_seconds)} s · decode ${fmt(r.decode_seconds)} s · download ${fmt(r.download_seconds)} s` : "–"],
   ];
   const genreFacts = [
-    ["By vote", byGenreSource(detail.genres, "vote").map((g) => `${styleOf(g.label)} ${g.weight.toFixed(2)}`).join(", ") || "–"],
-    ["Its sound", byGenreSource(detail.genres, "sound").slice(0, 5).map((g) => `${styleOf(g.label)} ${g.weight.toFixed(2)}`).join(", ") || "–"],
+    ["Its genres", heardGenres(detail.genres).map((g) => `${styleOf(g.label)} ${g.weight.toFixed(2)}`).join(", ") || "–"],
+    ["All its sound said", byGenreSource(detail.genres, "sound").map((g) => `${styleOf(g.label)} ${g.weight.toFixed(2)}`).join(", ") || "–"],
     ["Its tags", byGenreSource(detail.genres, "tag").map((g) => g.label).join(", ") || "–"],
   ];
   const factCards = (list) => list.map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
@@ -1212,9 +1412,9 @@ function statusRows(s) {
   const servers = (s.servers || []).map((x) => ["ok", x.name, `${x.url} · ${num(x.songs)} songs${x.default && s.servers.length > 1 ? " · default" : ""}`]);
   return [
     ...(servers.length ? servers : [["bad", "Music server", "None yet: add one under Setup"]]),
-    [cn.audiomuse ? "ok" : "wait", "AudioMuse-AI", cn.audiomuse ? "Asked for similar music, and the loudness its plugin measured" : "Not connected (Setup): no similar music"],
+    [cn.audiomuse ? "ok" : "wait", "AudioMuse-AI", cn.audiomuse ? "What it worked out about each song is taken over" : "Not connected (Setup): nothing new is taken over"],
     [s.model_loaded ? (s.device_note ? "wait" : "ok") : "wait", `Beat This! ${s.model}`, s.model_loaded ? `On the ${where}` + (s.model_load_seconds ? `, loaded in ${fmt(s.model_load_seconds)} s` : "") + (s.device_note ? `. ${s.device_note}` : "") : `Loads with the first song, on ${where}`],
-    [(s.styles || {}).available ? "ok" : "wait", "Style model", (s.styles || {}).available ? "Votes each song's genres from its sound" : "Not in this image: genres are the songs' tags"],
+    [(s.styles || {}).available ? "ok" : "wait", "Style model", (s.styles || {}).available ? "Gives each song its genres from its sound" : "Not in this image: genres are the songs' tags"],
     ["ok", "The Siansa app", cn.api_key ? "Connects with BEATS_API_KEY" : cn.password ? "Connects with this page's password" : "Connects without a key"],
     s.log_level === "debug" ? ["wait", "Debug details on", "The log says every step: turn it off under Log when you're done"] : null,
   ].filter(Boolean);
@@ -1228,6 +1428,7 @@ function drawStatus(s) {
   $("status-button").title = rows.map((r) => `${r[1]}: ${r[2]}`).join("\n");
   $("status-rows").innerHTML = rows.map(([st, name, detail]) => `<div class="status-row"><span class="dot ${st}"></span><span class="name">${esc(name)}</span><span class="detail">${esc(detail)}</span></div>`).join("");
   $("status-version").textContent = `Siansa Beats ${s.version}`;
+  $("header-version").textContent = s.version || "";
 }
 function statusMenu(open) {
   $("status-panel").hidden = !open;
@@ -1250,10 +1451,61 @@ $("scrim").addEventListener("click", () => menu(false));
 $("nav").addEventListener("click", (e) => { if (e.target.closest("a")) menu(false); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.body.classList.contains("menu-open")) { menu(false); $("menu").focus(); } });
 
+// ---- for phones: shorter lists, folding cards, back to the top ----
+const PHONE = window.matchMedia("(max-width: 700px)");
+const capOpen = new Set();  // lists shown in full, by id: a refresh doesn't shorten them again
+function capList(el) {
+  const n = +el.dataset.cap, items = [...el.children].filter((c) => !c.classList.contains("cap-more"));
+  const all = !PHONE.matches || capOpen.has(el.id) || items.length <= n + 2;
+  items.forEach((c, i) => { c.hidden = !all && i >= n; });
+  let more = el.nextElementSibling && el.nextElementSibling.classList.contains("cap-more") ? el.nextElementSibling : null;
+  if (all || el.hidden) { if (more) more.hidden = true; if (all) return; }
+  if (!more) {
+    more = document.createElement("button");
+    more.type = "button";
+    more.className = "cap-more";
+    more.addEventListener("click", () => { capOpen.add(el.id); capList(el); });
+    el.after(more);
+  }
+  more.hidden = el.hidden;  // a list not shown now (another tab's) shows no button either
+  more.textContent = `Show all ${num(items.length)}`;
+}
+document.querySelectorAll("[data-cap]").forEach((el) => {
+  new MutationObserver(() => capList(el)).observe(el, {childList: true});
+  capList(el);
+});
+PHONE.addEventListener?.("change", () => document.querySelectorAll("[data-cap]").forEach(capList));
+// A card marked data-fold opens and closes by its heading; on a phone it starts closed (data-fold="open": open).
+function foldKey(card) { return "beats-fold-" + (card.id || card.querySelector("h3")?.textContent.trim()); }
+document.querySelectorAll(".card[data-fold]").forEach((card) => {
+  const head = card.querySelector(":scope > h3, :scope > .card-head h3");
+  if (!head) return;
+  card.classList.add("foldable");
+  let kept = null;
+  try { kept = localStorage.getItem(foldKey(card)); } catch (e) { /* private window */ }
+  card.classList.toggle("folded", kept ? kept === "folded" : PHONE.matches && card.dataset.fold !== "open");
+  head.setAttribute("role", "button");
+  head.tabIndex = 0;
+  const flip = () => {
+    const folded = card.classList.toggle("folded");
+    head.setAttribute("aria-expanded", String(!folded));
+    try { localStorage.setItem(foldKey(card), folded ? "folded" : "open"); } catch (e) { /* private window */ }
+  };
+  head.setAttribute("aria-expanded", String(!card.classList.contains("folded")));
+  head.addEventListener("click", flip);
+  head.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); } });
+});
+const toTop = document.createElement("button");
+toTop.type = "button"; toTop.className = "to-top"; toTop.textContent = "↑ Top"; toTop.hidden = true;
+toTop.setAttribute("aria-label", "Back to the top of the page");
+toTop.addEventListener("click", () => window.scrollTo({top: 0, behavior: "smooth"}));
+document.body.append(toTop);
+window.addEventListener("scroll", () => { toTop.hidden = window.scrollY < window.innerHeight * 1.5; }, {passive: true});
+
 // ---- pages ----
 // One page at a time, chosen in the side menu (tabs on a phone) and kept in the address (#songs, #song=<id>), so Back
 // and a bookmark work.
-const VIEWS = ["overview", "libraries", "songs", "loudness", "genres", "similar", "blends", "activity", "log", "setup"];
+const VIEWS = ["overview", "libraries", "songs", "listening", "loudness", "genres", "similar", "blends", "activity", "log", "setup"];
 let currentView = null;
 function showView(view, keepHash) {
   if (!VIEWS.includes(view)) view = "overview";
@@ -1269,6 +1521,7 @@ function showView(view, keepHash) {
   if (view === "log") refreshLog(true);
   if (view === "loudness") refreshLoudness();
   if (view === "similar") drawSimilarStatus();
+  if (view === "listening") refreshListening();
 }
 function route() {
   const m = location.hash.match(/^#song=(.+)$/);
@@ -1277,13 +1530,251 @@ function route() {
 }
 window.addEventListener("hashchange", () => { route(); window.scrollTo({top: 0}); });
 
+// ---- listening: the time machine ----
+// A listener's history a month or a year at a time (or all of it). The days and hours are this browser's clock's.
+const tm = {user: null, year: null, month: null, data: null, timer: null};
+const TM_ZONE = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { return ""; } })();
+const TM_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function tmHours(seconds) { const h = seconds / 3600; return h >= 100 ? num(Math.round(h)) : h >= 10 ? h.toFixed(0) : h.toFixed(1); }
+function tmBars(id, points, pick) {
+  const most = Math.max(1, ...points.map((p) => p.listens));
+  $(id).innerHTML = points.map((p, i) => {
+    const tag = pick && p.listens ? "button" : "div";
+    return `<${tag} class="col${p.listens ? "" : " none"}" ${tag === "button" ? `type="button" data-i="${i}"` : ""} title="${esc(p.title || p.label)}: ${num(p.listens)} listens">` +
+      `<i style="height:${p.listens ? Math.max(3, Math.round(p.listens / most * 100)) : 0}%"></i><span>${esc(p.short ?? p.label)}</span></${tag}>`;
+  }).join("");
+  if (pick) $(id).querySelectorAll("button.col").forEach((b) => b.addEventListener("click", () => pick(points[+b.dataset.i])));
+}
+// A picture's place: the cover ("cover") or the artist's picture ("artist") of the song `song` here, over a tile in the
+// name's own colour with its first letters, which stays when there's no picture (music that isn't on the server).
+function artUrl(kind, song, size) { return `api/art/${kind}/${encodeURIComponent(song)}?size=${size}`; }
+function art(kind, song, name, size, cls, by) {
+  let h = 0;  // the tile's colour: the name's and its artist's, so two artists' "Greatest Hits" differ
+  for (const c of String(name || "") + String(by || "")) h = (h * 31 + c.codePointAt(0)) % 360;
+  const letters = String(name || "?").replace(/[^\p{L}\p{N} ]/gu, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => [...w][0]).join("").toUpperCase() || "♪";
+  return `<span class="art ${cls || ""}" style="--h:${h}" aria-hidden="true"><span>${esc(letters)}</span>` +
+    (song ? `<img loading="lazy" decoding="async" alt="" src="${esc(artUrl(kind, song, size))}" onerror="this.remove()">` : "") + "</span>";
+}
+const TM_KINDS = {
+  artists: {one: "Top artist", title: (r) => r.artist, under: () => "", pic: (r, size, cls) => art("artist", r.face, r.artist, size, cls), round: true},
+  albums: {one: "Top album", title: (r) => r.album, under: (r) => r.artist, pic: (r, size, cls) => art("cover", r.cover, r.album, size, cls, r.artist)},
+  songs: {one: "Top song", title: (r) => r.title, under: (r) => r.artist, pic: (r, size, cls) => art("cover", r.cover, r.title, size, cls, r.artist)},
+};
+function tmFeature(kind, r, wide) {
+  const k = TM_KINDS[kind], under = k.under(r);
+  return `<${wide ? "div" : "button type=\"button\""} class="tm-feature${wide ? " wide" : ""}" data-kind="${kind}">${k.pic(r, 640, "")}` +
+    `<span class="txt"><small>${wide ? "Number one" : k.one}</small><b>${esc(k.title(r))}</b><i>${under ? esc(under) + " · " : ""}${num(r.listens)} plays</i></span></${wide ? "div" : "button"}>`;
+}
+// The rows after the first (which is the picture above the list), numbered from 2.
+function tmRank(kind, rows) {
+  const k = TM_KINDS[kind], most = Math.max(1, ...rows.map((r) => r.listens));
+  $("tm-" + kind).innerHTML = rows.slice(1).map((r) => `<li style="--w:${Math.round(r.listens / most * 100)}%">${k.pic(r, 96, "s" + (k.round ? " round" : ""))}` +
+    `<div class="t"><b>${esc(k.title(r))}</b>${k.under(r) ? `<span>${esc(k.under(r))}</span>` : ""}</div><span class="n">${num(r.listens)}</span></li>`).join("");
+}
+function tmFirst() {
+  const rows = tm.data ? tm.data.top[tm.top] : [];
+  $("tm-first").innerHTML = rows.length ? tmFeature(tm.top, rows[0], true) : '<p class="sub">Nothing in this time.</p>';
+}
+function tmTop(kind) {
+  tm.top = kind;
+  document.querySelectorAll(".tm-seg [data-top]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.top === kind)));
+  ["songs", "artists", "albums"].forEach((k) => { $("tm-" + k).hidden = k !== kind; capList($("tm-" + k)); });
+  tmFirst();
+}
+// When a listen was: "5 min ago", "3 h ago", "yesterday", else the date.
+function tmAgo(at) {
+  const s = Date.now() / 1000 - at;
+  if (s < 90) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  if (s < 172800) return "yesterday";
+  return new Date(at * 1000).toLocaleDateString(undefined, {day: "numeric", month: "short", year: s > 300 * 86400 ? "numeric" : undefined});
+}
+function tmGo(year, month) { tm.year = year; tm.month = month; refreshListening(); }
+// The part shown (Overview, Top, When, History) and the top list's kind, kept in this browser.
+tm.tab = (() => { try { return localStorage.getItem("beats-tm-tab") || "overview"; } catch (e) { return "overview"; } })();
+tm.top = "artists";
+function tmTab(tab) {
+  tm.tab = tab;
+  try { localStorage.setItem("beats-tm-tab", tab); } catch (e) { /* private window */ }
+  document.querySelectorAll(".tm-tabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
+  document.querySelectorAll(".tm-panel").forEach((p) => { p.hidden = p.dataset.tab !== tab || (tab !== "history" && !(tm.data && tm.data.totals.listens)); });
+}
+document.querySelectorAll(".tm-tabs [data-tab]").forEach((b) => b.addEventListener("click", () => { tmTab(b.dataset.tab); window.scrollTo({top: 0}); }));
+document.querySelectorAll(".tm-seg [data-top]").forEach((b) => b.addEventListener("click", () => tmTop(b.dataset.top)));
+function drawListening(d) {
+  tm.data = d;
+  tm.user = d.user;
+  // Where you are, in the header too: "Listening · May 2024".
+  if (currentView === "listening") $("page-name").textContent = `Listening · ${d.all && d.all.listens ? d.period.label : ""}`.replace(/ · $/, "");
+  // What's playing, for every listener (the app's listener may not be the one shown).
+  const playing = d.playing || [];
+  $("tm-now").hidden = !playing.length;
+  $("tm-now-what").innerHTML = playing.map((p) => `<div class="row">${art("cover", p.cover, p.title, 96, "m")}<div class="t">` +
+    `<div class="kicker"><span class="dot" aria-hidden="true"></span>Playing now${playing.length > 1 || p.user !== d.user ? ` · ${esc(p.user || "no name")}` : ""}</div>` +
+    `<b>${esc(p.title)}</b><span>${esc(p.artist)}</span></div></div>`).join("");
+  // Listens without a listener's name (a file brought in with none) beside a named listener (the app's): join them.
+  const users0 = d.users || [], blank = users0.find((u) => !u.user && u.listens), named = users0.filter((u) => u.user);
+  $("tm-join").hidden = !(blank && named.length);
+  if (blank && named.length) {
+    const to = (playing.find((p) => p.user) || named[0]).user;
+    $("tm-join-text").textContent = `${num(blank.listens)} listens have no listener's name (a file brought in without one). The app sends yours as ${to}.`;
+    $("tm-join-go").textContent = `Make them ${to}'s`;
+    $("tm-join-go").onclick = async () => {
+      try { await api("api/listens/rename", {method: "POST", body: JSON.stringify({from: "", to})}); tm.user = to; tm.year = tm.month = null; refreshListening(); }
+      catch (e) { banner(e.message); }
+    };
+  }
+  const users = d.users || [];
+  $("tm-who").hidden = users.length < 2;
+  $("tm-user").innerHTML = users.map((u) => `<option value="${esc(u.user)}"${u.user === d.user ? " selected" : ""}>${esc(u.user || "(no name)")} · ${num(u.listens)}</option>`).join("");
+  $("tm-user-names").innerHTML = users.map((u) => `<option value="${esc(u.user)}"></option>`).join("");
+  if (!$("tm-import-user").value) $("tm-import-user").value = d.user || (users.find((u) => u.user) || {}).user || ((d.playing || []).find((p) => p.user) || {}).user || "";
+  const t = d.totals, all = d.all || {};
+  $("tm-label").textContent = all.listens ? d.period.label : "Listening";
+  $("tm-sub").textContent = !all.listens ? "No listens yet." :
+    `${num(t.listens)} listens · ${tmHours(t.seconds)} hours` + (d.period.year ? "" : ` · since ${new Date(all.first * 1000).toLocaleDateString(undefined, {year: "numeric", month: "long"})}`);
+  // The years to travel to, then the months of the chosen one.
+  $("tm-years").hidden = !all.listens;
+  $("tm-years").innerHTML = `<button type="button" data-year="" aria-pressed="${!d.period.year}">All time</button>` +
+    (d.years || []).slice().reverse().map((y) => `<button type="button" data-year="${y.year}" aria-pressed="${d.period.year === y.year}" title="${num(y.listens)} listens">${y.year}</button>`).join("");
+  $("tm-years").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => tmGo(+b.dataset.year || null, null)));
+  $("tm-months").hidden = !d.period.year;
+  if (d.period.year) {
+    $("tm-months").innerHTML = `<button type="button" data-month="" aria-pressed="${!d.period.month}">Whole year</button>` +
+      TM_MONTHS.map((m, i) => `<button type="button" data-month="${i + 1}" class="${d.months[i] ? "" : "empty"}" aria-pressed="${d.period.month === i + 1}" title="${num(d.months[i])} listens">${m}</button>`).join("");
+    $("tm-months").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => tmGo(d.period.year, +b.dataset.month || null)));
+  }
+  $("tm-empty").hidden = !!t.listens;
+  $("tm-empty").hidden = !!t.listens || tm.tab === "history";
+  $("tm-empty").textContent = all.listens ? `Nothing was played in ${d.period.label}.` :
+    "Nothing here yet. Turn on Scrobble to Siansa Beats in the Siansa app (Settings › Scrobbling), or bring in a history under History.";
+  tmTab(tm.tab);
+  if (t.listens) {
+    const tile = (k, v, s) => `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${v}</div><div class="s sub">${esc(s || "")}</div></div>`;
+    $("tm-tiles").innerHTML = tile("Listens", num(t.listens), `${d.records.per_day} a day you listened`) +
+      tile("Hours", tmHours(t.seconds), t.guessed ? `${num(t.guessed)} songs' lengths aren't known: counted as 3½ min` : "of music") +
+      tile("Artists", num(t.artists), d.period.year ? `${num(t.new_artists)} for the first time` : "") +
+      tile("Songs", num(t.songs), "different ones") + tile("Albums", num(t.albums), "") + tile("Days", num(t.days), "with music");
+    const unit = d.chart.unit;
+    $("tm-chart-title").textContent = unit === "year" ? "Year by year" : unit === "month" ? "Month by month" : "Day by day";
+    tmBars("tm-chart", d.chart.points.map((p) => ({...p, short: unit === "day" && d.chart.points.length > 16 && +p.label % 5 && +p.label !== 1 ? "" : p.label})),
+      unit === "year" ? (p) => tmGo(p.year, null) : unit === "month" ? (p) => tmGo(d.period.year, p.month) : null);
+    ["artists", "albums", "songs"].forEach((k) => tmRank(k, d.top[k]));
+    tmFirst();
+    // The favourites of this time, a picture each: press one for its whole list.
+    $("tm-podium").innerHTML = ["artists", "albums", "songs"].filter((k) => d.top[k].length).map((k) => tmFeature(k, d.top[k][0], false)).join("");
+    $("tm-podium").querySelectorAll(".tm-feature").forEach((b) => b.addEventListener("click", () => { tmTop(b.dataset.kind); tmTab("top"); window.scrollTo({top: 0}); }));
+    // The most played artist of this time, faint behind its name.
+    const face = (d.top.artists.find((a) => a.face) || {}).face;
+    document.querySelector(".tm-hero").style.setProperty("--face", face ? `url("${artUrl("artist", face, 640)}")` : "none");
+    tmBars("tm-hours", d.hours.map((n, h) => ({label: `${String(h).padStart(2, "0")}:00`, short: h % 6 ? "" : String(h), listens: n})));
+    const peak = d.hours.indexOf(Math.max(...d.hours));
+    $("tm-hours-note").textContent = `Most around ${String(peak).padStart(2, "0")}:00.`;
+    tmBars("tm-weekdays", d.weekdays.map((w) => ({label: w.day, listens: w.listens})));
+    const day = d.weekdays.slice().sort((a, b) => b.listens - a.listens)[0];
+    $("tm-weekdays-note").textContent = `Most on ${({Mon: "Mondays", Tue: "Tuesdays", Wed: "Wednesdays", Thu: "Thursdays", Fri: "Fridays", Sat: "Saturdays", Sun: "Sundays"})[day.day]}.`;
+    const r = d.records, when = (iso) => new Date(iso + "T12:00:00").toLocaleDateString(undefined, {day: "numeric", month: "long", year: "numeric"});
+    $("tm-records").innerHTML = [
+      ["Busiest day", r.busiest_day ? `${when(r.busiest_day.date)} · ${num(r.busiest_day.listens)}` : "–"],
+      ["Longest run of days", r.streak ? `${num(r.streak)} in a row` : "–"],
+      ["First listen", r.first ? `${r.first.artist} – ${r.first.title}` : "–"],
+      ["", r.first ? new Date(r.first.at * 1000).toLocaleString(undefined, {dateStyle: "medium", timeStyle: "short"}) : ""],
+    ].map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+    $("tm-new-card").hidden = !d.period.year || !(d.new_artists || []).length;
+    $("tm-new").innerHTML = (d.new_artists || []).map((a) => `<span class="chip" title="${num(a.listens)} listens since">${art("artist", a.face, a.artist, 96, "xs round")}${esc(a.artist)}</span>`).join("");
+  }
+  $("tm-recent-card").hidden = !(d.recent || []).length;  // History: always there, also in a month with nothing
+  $("tm-recent").innerHTML = (d.recent || []).map((l) => `<li>${art("cover", l.cover, l.title, 96, "s")}<div class="t"><b>${esc(l.title)}</b><span>${esc(l.artist)}</span></div>` +
+    `<time>${esc(tmAgo(l.at))}</time></li>`).join("");
+  drawImport(d.importing);
+  $("tm-remove-box").hidden = !users.some((u) => u.user === d.user && u.listens);
+  const lf = (users.find((u) => u.user === d.user) || {}).lastfm || {};
+  $("tm-lastfm").hidden = !!lf.connected;
+  $("tm-lf-off-box").hidden = !lf.connected;
+  $("tm-lastfm-state").textContent = lf.connected
+    ? `${d.user || "This listener"}'s new listens are sent on to ${lf.name} on Last.fm: ${num(lf.sent)} sent` + (lf.waiting ? `, ${num(lf.waiting)} waiting` : "") +
+      (lf.turned_away ? `, ${num(lf.turned_away)} not taken (too old, or turned away)` : "") + (lf.error ? `. ${lf.error}` : ".")
+    : `Send ${d.user ? d.user + "'s" : "this listener's"} new listens on to a Last.fm account, as they come in. Listens from a file aren't sent.`;
+}
+function drawImport(state) {
+  state = state || {};
+  $("tm-import-go").disabled = !!state.running;
+  const when = state.first ? ` (${new Date(state.first * 1000).getFullYear()} to ${new Date(state.last * 1000).getFullYear()})` : "";
+  $("tm-import-state").textContent = state.running ? `Bringing in ${state.file || "the file"}… ${num(state.read || 0)} listens read` :
+    state.error ? `${state.file || "The file"} wasn't brought in: ${state.error}` :
+    state.finished ? `${state.file || "The file"}: ${num(state.kept)} listens brought in${when}` + (state.known ? `, ${num(state.known)} were here already` : "") +
+      (state.skipped ? `, ${num(state.skipped)} without a date, artist or title left out` : "") + "." : "";
+  clearTimeout(tm.timer);
+  if (state.running) tm.timer = setTimeout(async () => {
+    try { const now = await api("api/listens/import"); if (now.running) drawImport(now); else refreshListening(); } catch (e) { drawImport({...state, running: false, error: e.message}); }
+  }, 1000);
+}
+async function refreshListening() {
+  const q = new URLSearchParams();
+  if (tm.user != null) q.set("user", tm.user);
+  if (tm.year) q.set("year", tm.year);
+  if (tm.month) q.set("month", tm.month);
+  if (TM_ZONE) q.set("tz", TM_ZONE);
+  try { drawListening(await api("api/listens?" + q)); }
+  catch (e) { $("tm-sub").textContent = e.message; }
+  // Kept up to date while it's on screen: what's playing and the last listens change with every song (the owner,
+  // 11 Nov: the page still showed the song from when it was opened). The numbers are kept ready, so this is cheap.
+  clearTimeout(tm.refresh);
+  if (currentView === "listening" && !document.hidden) tm.refresh = setTimeout(refreshListening, 15000);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && currentView === "listening") refreshListening(); });
+$("tm-user").addEventListener("change", () => { tm.user = $("tm-user").value; tm.year = tm.month = null; $("tm-import-user").value = tm.user; refreshListening(); });
+$("tm-import").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const file = $("tm-file").files[0];
+  if (!file) return;
+  const user = $("tm-import-user").value.trim();
+  $("tm-import-go").disabled = true;
+  $("tm-import-state").textContent = `Sending ${file.name}…`;
+  try {
+    const r = await fetch(`api/listens/import?user=${encodeURIComponent(user)}&name=${encodeURIComponent(file.name)}`, {method: "POST", body: file});
+    const answer = await r.json();
+    if (!r.ok) throw new Error(answer.error || r.statusText);
+    tm.user = user;
+    drawImport(answer.importing);
+  } catch (err) { $("tm-import-go").disabled = false; $("tm-import-state").textContent = err.message; }
+});
+$("tm-remove").addEventListener("click", async () => {
+  const names = {all: "all of them", siansa: "those from the Siansa app", koito: "those from Koito's export", lastfm: "those from Last.fm's export", listenbrainz: "those from ListenBrainz's export"};
+  const source = (prompt(`Remove which listens of ${tm.user || "this listener"}? Type one of: all, siansa, koito, lastfm, listenbrainz`) || "").trim().toLowerCase();
+  if (!names[source] || !confirm(`Remove ${names[source]} for ${tm.user || "this listener"}? This can't be undone.`)) return;
+  try { await api("api/listens/remove", {method: "POST", body: JSON.stringify({user: tm.user || "", source})}); tm.year = tm.month = null; refreshListening(); }
+  catch (e) { banner(e.message); }
+});
+$("tm-lastfm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("tm-lastfm-state").textContent = "Signing in to Last.fm…";
+  try {
+    await api("api/listens/lastfm", {method: "POST", body: JSON.stringify({user: tm.user || "", api_key: $("tm-lf-key").value.trim(),
+      secret: $("tm-lf-secret").value.trim(), name: $("tm-lf-name").value.trim(), password: $("tm-lf-password").value})});
+    ["tm-lf-key", "tm-lf-secret", "tm-lf-name", "tm-lf-password"].forEach((id) => { $(id).value = ""; });
+    refreshListening();
+  } catch (err) { $("tm-lastfm-state").textContent = err.message; }
+});
+$("tm-lf-off").addEventListener("click", async () => {
+  if (!confirm("Stop sending listens on to Last.fm?")) return;
+  try { await api("api/listens/lastfm", {method: "POST", body: JSON.stringify({user: tm.user || "", disconnect: true})}); refreshListening(); }
+  catch (e) { banner(e.message); }
+});
+
 // ---- genres ----
 function styleOf(label) { return (label || "").split("---").pop(); }
 function byGenreSource(list, source) { return (list || []).filter((g) => g.source === source); }
+// A song's genres: every style its sound scores 0.15 or more, and always its best one (beats/genres.py).
+function heardGenres(list) {
+  const sound = byGenreSource(list, "sound").slice().sort((a, b) => b.weight - a.weight);
+  return sound.filter((g) => g.weight >= 0.15 || g.weight === sound[0].weight);
+}
 function genreChips(list) {
-  const vote = byGenreSource(list, "vote"), tags = byGenreSource(list, "tag");
-  const tip = (g) => `${g.label} · vote ${g.weight.toFixed(2)}`;
-  if (vote.length) return vote.slice(0, 2).map((g) => `<span class="chip" title="${esc(tip(g))}">${esc(styleOf(g.label))}</span>`).join("");
+  const heard = heardGenres(list), tags = byGenreSource(list, "tag");
+  const tip = (g) => `${g.label} · its sound ${g.weight.toFixed(2)}`;
+  if (heard.length) return heard.slice(0, 2).map((g) => `<span class="chip" title="${esc(tip(g))}">${esc(styleOf(g.label))}</span>`).join("");
   return tags.map((g) => `<span class="chip" title="from its tags">${esc(g.label)}</span>`).join("") || '<span class="sub">–</span>';
 }
 let genresShownAt = 0;
@@ -1408,6 +1899,7 @@ function drawSetup(s) {
   $("am-remove").hidden = !cn.audiomuse; $("am-save").textContent = cn.audiomuse ? "Save" : "Connect";
   if (cn.audiomuse && !$("am-url").value && document.activeElement !== $("am-url")) $("am-url").value = cn.audiomuse_url;
   $("am-token").placeholder = cn.audiomuse_token ? "Kept: leave empty to keep it" : "One of AudioMuse-AI's API tokens";
+  drawPull(status.sound);
   const left = cn.left_in_container || [];
   $("left-card").hidden = !left.length; $("left-names").textContent = left.join(", ");
   $("setup-model").innerHTML = [
@@ -1421,18 +1913,46 @@ function drawSetup(s) {
   $("setup-key").innerHTML = cn.api_key ? "Key: the app's key made under Access (make a new one there if you no longer have it)." : cn.password ? "Key: this page's password (or make the app a key of its own under Access)." : "Key: none needed (no password is set).";
 }
 
+// ---- what AudioMuse-AI has worked out, taken over (0.25) ----
+function drawPull(sound) {
+  $("pull-box").hidden = !sound || !sound.audiomuse;
+  if (!sound) return;
+  const p = sound.pull || {};
+  const model = sound.text_model || {};
+  const have = `The sound of ${num(sound.sound)} of ${num(sound.songs)} songs is here` +
+    (model.available ? `; ${num(sound.words)} can be found by describing them in words` : "; this image has no text model, so music can't be found by words (0.26 has it)") +
+    (sound.sources ? ` (${num(sound.sources.audiomuse)} from AudioMuse-AI, ${num(sound.sources.beats)} heard here` + (sound.sources.failed ? `, ${num(sound.sources.failed)} couldn't be heard` : "") + ")" : "") +
+    (sound.hearing ? `. Hearing ${sound.hearing.artist || ""} – ${sound.hearing.title || ""} now` : "") +
+    (sound.hears === false ? ". This image can't hear songs itself (0.27 can)" : "");
+  let text;
+  if (p.running) text = p.total ? `Taking over from AudioMuse-AI: ${num(p.done || 0)} of ${num(p.total)} songs…` : "Asking AudioMuse-AI what it has…";
+  else if (p.error) text = `${have}. The last try failed: ${p.error}`;
+  else if (p.finished) text = `${have}. Last taken over ${new Date(p.finished * 1000).toLocaleString()}: ${num(p.kept || 0)} new or changed` +
+    (p.unknown ? `, ${num(p.unknown)} of AudioMuse-AI's songs aren't in the libraries chosen here` : "") +
+    ((p.servers || []).length > 1 ? ` (its music servers: ${p.servers.map((m) => `${m.name} ${num(m.total)} songs, ${num(m.kept)} taken over`).join("; ")})` : "") + ".";
+  else text = `${have}. Nothing taken over yet.`;
+  $("pull-state").textContent = text;
+  $("pull-now").disabled = $("pull-all").disabled = !!p.running;
+}
+async function pull(everything) {
+  try { await api("api/sound/pull", {method: "POST", body: JSON.stringify({everything})}); statusLoop(); }
+  catch (e) { $("pull-state").textContent = e.message; }
+}
+$("pull-now").addEventListener("click", () => pull(false));
+$("pull-all").addEventListener("click", () => { if (confirm("Ask AudioMuse-AI for every song again? This takes a few minutes for a big library.")) pull(true); });
+
 // ---- AudioMuse-AI and access, set here (0.24.0) ----
 const amFields = () => ({url: $("am-url").value.trim(), token: $("am-token").value});
 $("am-test").addEventListener("click", async () => {
   $("am-note").textContent = "Asking…";
-  try { const r = await api("api/audiomuse/test", {method: "POST", body: JSON.stringify(amFields())}); $("am-note").textContent = `It answers and takes the token (its ${r.plugin} plugin).`; }
+  try { const r = await api("api/audiomuse/test", {method: "POST", body: JSON.stringify(amFields())}); $("am-note").textContent = `It answers and takes the token (${r.plugin === "export" ? "its export for apps; no Siansa plugin there, and none is needed" : "its " + r.plugin + " plugin"}).`; }
   catch (err) { $("am-note").textContent = err.message; }
 });
 $("am-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!amFields().url) { $("am-note").textContent = "An address is needed."; return; }
   $("am-note").textContent = "Asking AudioMuse-AI…";
-  try { const r = await api("api/audiomuse", {method: "POST", body: JSON.stringify(amFields())}); $("am-token").value = ""; $("am-note").textContent = `Connected (its ${r.plugin} plugin).`; statusLoop(); }
+  try { const r = await api("api/audiomuse", {method: "POST", body: JSON.stringify(amFields())}); $("am-token").value = ""; $("am-note").textContent = `Connected (${r.plugin === "export" ? "its export for apps; no Siansa plugin there, and none is needed" : "its " + r.plugin + " plugin"}).`; statusLoop(); }
   catch (err) { $("am-note").textContent = err.message; }
 });
 $("am-remove").addEventListener("click", async () => {
@@ -1541,7 +2061,7 @@ $("about-fetch").addEventListener("click", async () => {
 function drawSimilarStatus() {
   const on = status && (status.connections || {}).audiomuse;
   $("s-status").innerHTML = on
-    ? '<span class="pill ok">AudioMuse-AI is set up</span> <span class="sub">Similar albums and artists are asked of its Siansa plugin.</span>'
+    ? '<span class="pill ok">AudioMuse-AI is set up</span> <span class="sub">Similar albums and artists come from the songs\' sound taken over from it (Setup › AudioMuse-AI); for a song whose sound isn\'t here yet, its Siansa plugin is asked.</span>'
     : '<span class="pill wait">AudioMuse-AI isn\'t set up</span> <p class="sub">Connect it under <a href="#setup">Setup › AudioMuse-AI</a> with its address and one of its API tokens. Until then the app asks the plugin itself, when it can.</p>';
 }
 let similarTimer = null;

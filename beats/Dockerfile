@@ -23,7 +23,7 @@ ENV PIP_DEFAULT_TIMEOUT=120 PIP_RETRIES=10
 RUN pip install --index-url "$TORCH_INDEX" torch==2.3.1 torchaudio==2.3.1 \
  && pip install numpy==1.26.4 einops==0.8.0 rotary-embedding-torch==0.6.4 soxr==0.3.7 tqdm==4.66.4 \
 # cryptography: what Siansa Beats has to say to other servers is kept encrypted (beats/vault.py, 0.24.0).
- && pip install cryptography==43.0.3
+ && pip install cryptography==43.0.3 tzdata==2025.2
 
 # Beat This! itself, at a fixed commit (version 1.1.0, 28 May 2026).
 ARG BEAT_THIS_COMMIT=b95c8ab0c58c2d9fcfd40508ae8dffbc05ac4f5c
@@ -76,8 +76,62 @@ m = convert(path).eval(); out = m(torch.from_numpy(x)); out = out if isinstance(
 diff = max(float(numpy.abs(a - b.detach().numpy()).max()) for a, b in zip(ref, out)); \
 assert diff < 1e-3, diff; print('onnx2torch matches ONNX Runtime within', diff)"
 
+# The search by words (0.26): AudioMuse-AI's own models, so a description lands among the songs as it does there.
+# LAION CLAP's text tower as ONNX (500 MB) and the two small models its concept steering uses (a sparse autoencoder
+# over CLAP's space), from AudioMuse-AI's releases; RoBERTa's tokenizer is in the repository (beats/roberta-tokenizer.json).
+ARG AUDIOMUSE_MODELS=https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v5.0.0-model
+ARG AUDIOMUSE_SAE=https://github.com/NeptuneHub/AudioMuse-AI-SAE/releases/download/v1
+RUN pip install tokenizers==0.20.3 \
+ && for url in "${AUDIOMUSE_MODELS}/clap_text_model.onnx" "${AUDIOMUSE_SAE}/dclap_sae_k20_d1024_best_encoder.onnx" \
+               "${AUDIOMUSE_SAE}/dclap_sae_k20_d1024_best_decoder.onnx"; do \
+      for try in 1 2 3 4 5; do \
+        python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+          "$url" "/models/$(basename "$url")" && break || { echo "download $try failed, trying again"; sleep 15; }; \
+      done; \
+      test -s "/models/$(basename "$url")"; \
+    done
+
+# How a song sounds, heard here (0.27): AudioMuse-AI's own models and its own recipe, so a new song needs no
+# AudioMuse-AI and lands where AudioMuse-AI would have put it. MusiCNN (its embedding and its 50 tags) and the distilled
+# CLAP audio model (AudioMuse-AI's DCLAP, AGPL-3.0), from AudioMuse-AI's releases; librosa makes the spectrograms, as
+# in AudioMuse-AI, so they're the same to the last digit (numba's wheels go with numpy 1.26).
+ARG AUDIOMUSE_DCLAP=https://github.com/NeptuneHub/AudioMuse-AI-DCLAP/releases/download/v1
+# Everything librosa brings is pinned to versions that go with numpy 1.26.4 (0.27's first build let pip take the
+# newest, which brought numpy 2 and broke soxr).
+RUN pip install numpy==1.26.4 librosa==0.10.2.post1 soundfile==0.12.1 scipy==1.13.1 scikit-learn==1.5.2 \
+      numba==0.60.0 llvmlite==0.43.0 soxr==0.3.7 \
+ && python -c "import numpy, librosa, soxr; assert numpy.__version__ == '1.26.4', numpy.__version__; print('librosa', librosa.__version__)" \
+ && for url in "${AUDIOMUSE_MODELS}/musicnn_embedding.onnx" "${AUDIOMUSE_MODELS}/musicnn_prediction.onnx" \
+               "${AUDIOMUSE_DCLAP}/model_epoch_36.onnx" "${AUDIOMUSE_DCLAP}/model_epoch_36.onnx.data"; do \
+      for try in 1 2 3 4 5; do \
+        python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+          "$url" "/models/$(basename "$url")" && break || { echo "download $try failed, trying again"; sleep 15; }; \
+      done; \
+      test -s "/models/$(basename "$url")"; \
+    done
+
 WORKDIR /app
 COPY beats/ /app/beats/
+# A song heard for real: a made-up one, read through librosa and through ffmpeg, twice the same.
+RUN ffmpeg -v error -f lavfi -i "sine=frequency=220:duration=14,aformat=channel_layouts=stereo" -f lavfi -i "anoisesrc=d=14:c=pink:a=0.2" \
+      -filter_complex amix=inputs=2 -ar 44100 /tmp/heard.flac \
+ && python -c "import numpy; from beats.hear import Hearer; from beats.words import Words; \
+h = Hearer('/models', Words('/models')); assert h.available; a = h('/tmp/heard.flac'); b = h('/tmp/heard.flac'); \
+assert len(a['musicnn']) == 800 and len(a['clap']) == 2048, (len(a['musicnn']), len(a['clap'])); \
+assert a['musicnn'] == b['musicnn'] and a['clap'] == b['clap']; \
+c = numpy.frombuffer(a['clap'], numpy.float32); assert abs(float(numpy.linalg.norm(c)) - 1) < 1e-4; \
+assert a['moods'].count(':') == 5 and a['other'].startswith('danceable:0.') and 0 < a['energy'] < 1, a; \
+print('heard:', a['moods'], '|', a['other'], '| energy', round(a['energy'], 3), '| models loaded in', h.load_seconds, 's')" \
+ && rm /tmp/heard.flac
+# The text model for real: words that mean alike land together, and steering moves a query towards its concept.
+RUN python -c "import numpy; from beats.words import Words; w = Words('/models'); assert w.available and w.steers; \
+a, b, c = w.embed('calm quiet soft piano'), w.embed('gentle peaceful piano music'), w.embed('aggressive heavy metal'); \
+assert abs(float(numpy.linalg.norm(a)) - 1) < 1e-4 and a.shape == (512,), a.shape; \
+assert float(a @ b) > float(a @ c) + 0.2, (float(a @ b), float(a @ c)); \
+terms, problems = w.terms([{'term': 'piano', 'direction': 'more'}]); assert terms and not problems, problems; \
+q, p = w.embed('electronic music'), w.embed('solo piano'); s = w.steer(q, terms); \
+assert float(s @ p) > float(q @ p), (float(s @ p), float(q @ p)); \
+print('text model ok: alike', round(float(a @ b), 3), 'unlike', round(float(a @ c), 3), 'steered towards piano', round(float(s @ p) - float(q @ p), 3), 'in', w.load_seconds, 's')"
 RUN python -c "import torch, beat_this.inference, beats.server; print('imports ok, torch', torch.__version__, 'cuda', torch.version.cuda)" \
  && python -c "import numpy, beats.style as s; m = s.StyleModel('/models'); assert m.available; \
 r = m(numpy.zeros(16000 * 5, numpy.float32)); assert len(r) == 400 and 0 <= r[0][1] <= 1, r[:3]; print('style model ok:', r[0])"

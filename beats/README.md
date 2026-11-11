@@ -130,7 +130,88 @@ background, and the page shows which library is being read and how far.
 - **Removing a server** forgets the songs only it had; songs another server has too stay, analysed.
 - No password is kept as it's typed (see "Secrets" below), and none is ever shown, logged or put in the debug
   report. Emby's and Jellyfin's token is sent in a header, never in an address. Nothing is ever written to a server.
-- Similar albums and artists are still asked of AudioMuse-AI, by the ids of the server AudioMuse-AI knows.
+- What songs sound like (below) is answered for each server in its own ids.
+
+### What songs sound like (0.25)
+
+Siansa asks for songs like a song, a path from one song to another, a blend of songs, mood radios, "your sound",
+similar albums and artists, and each song's tempo, key, moods and energy. Until 0.25 it asked AudioMuse-AI for all of
+that; Siansa Beats now answers them itself, from what AudioMuse-AI has already worked out about each song.
+
+**A song's tempo is never AudioMuse-AI's.** It's the one Beat This! finds here (AudioMuse-AI gave drum and bass as
+89 or 110 BPM): AudioMuse-AI's isn't taken over or kept, and a song not analysed here yet has no tempo. The key is
+this service's own measure where there is one. Moods, genres and energy are AudioMuse-AI's, until Siansa Beats makes
+them itself.
+
+
+1. Under **Setup › AudioMuse-AI**, connect AudioMuse-AI (its address and one of its API tokens). Its Siansa plugin is
+   no longer needed: Siansa Beats reads AudioMuse-AI's own export for apps (`/api/sync`).
+2. Everything it has analysed is **taken over** straight away (a few minutes for a big library), and what's new or
+   changed every 6 hours after, or when you press **Take over what's new**. Nothing is analysed twice. The card says
+   how many songs' sound is here, and how many of AudioMuse-AI's songs aren't in the libraries chosen here.
+3. In Siansa, the answers then come from Siansa Beats; AudioMuse-AI needn't be set up in the app for them.
+
+**Music found by describing it (0.26).** "Chill relaxed mellow grooves", Siansa's mood radios, its vibes and their
+sliders, cards made from a sound: Siansa Beats answers these too, with AudioMuse-AI's own models, so a description
+lands among the songs exactly as it did there. The image holds LAION CLAP's text model (500 MB; it's loaded at the
+first search, takes about 600 MB of memory while in use, and is let go after 10 minutes without one) and the two
+small models and the catalogue of 109 concepts (genre, instrument, vocals, mood, production, tempo, era) that
+steering uses. Each song's vector for this was taken over from AudioMuse-AI with the rest.
+
+**Siansa Beats hears songs itself (0.27).** Each new song's sound is worked out here while it's analysed, with
+AudioMuse-AI's own models and AudioMuse-AI's own recipe (its two vectors, its moods and tags, the six feelings,
+energy), so it lands where AudioMuse-AI would have put it, beside the songs taken over. Songs analysed before, whose
+sound AudioMuse-AI never had, are caught up on one at a time while nothing else is being done. The spectrograms are
+checked to be identical to AudioMuse-AI's own code. So **AudioMuse-AI no longer has to run**: connect it once to
+take over what it has (or don't, and every song is heard here), then it can be switched off. A song's tempo is
+still only ever Beat This!'s.
+
+**Every music server of AudioMuse-AI is taken over (0.29).** AudioMuse-AI can analyse several music servers under
+its one login, and the same Navidrome twice for two of its users counts as two. Its export gives only the songs its
+default server's user can see unless a server is named, so Siansa Beats asks for each of its servers in turn (0.28
+took over the default one alone and heard the others' songs itself). Nothing to set: the one address and token cover
+them all, and the page says how many songs came from each. An AudioMuse-AI without a list of servers, or a token
+that may not read it, is asked as before.
+
+**Your listening history (0.29).** The **Listening** page is a time machine: all time, a year or one of its
+months, with the listens, hours, artists, songs and albums of that time, the most played of each, the days or
+months as bars (press one to go there), when in the day and the week you listen, records, the artists heard for
+the first time, what's playing now and the last listens. Days and hours are your browser's clock's.
+
+- **Pictures (0.30):** the favourites of a time (top artist, album and song), the number one of each list, the
+  lists' rows, what's playing and the last listens show the cover or the artist's picture. They're the music
+  server's own, asked through a song of that album or artist in the library and kept in the data folder (`art/`);
+  nothing is looked up on the internet. Music that isn't on the server shows a tile in its own colour with the
+  name's first letters. Navidrome's stand-in picture (its blue disc, its star) is never shown as a picture.
+- **From the app:** turn on **Scrobble to Siansa Beats** in Siansa (Settings › Scrobbling). Each listen is kept
+  under the name the app scrobbles as (your music server's user name), so two people have a history each; the page
+  has a listener switch when there's more than one.
+- **From a file:** an export of Koito (its own JSON), of Last.fm (the JSON or CSV of an export tool, e.g.
+  lastfm.ghan.nl/export) or of ListenBrainz. Choose the file and whose listens they are. A listen that's here
+  already (the same listener, second, artist and title) is kept once, so a file can be brought in again and two
+  services' exports of the same years don't count double. A listen is linked to the song here by artist and title.
+  Last.fm's exports don't say how long a song is: the hours then use the song's length from the library or another
+  listen, else 3½ minutes, and the page says for how many.
+- **On to Last.fm:** per listener, with their own Last.fm API account (key and shared secret) and one sign-in. New
+  listens from the app are sent on in the background, and again later when Last.fm can't be reached; listens from a
+  file never are, nor ones older than two weeks (Last.fm turns those away). The key, secret and session are kept
+  encrypted, the password not at all. Turn the app's own Last.fm scrobbling off then, so nothing is sent twice.
+  The app's hearts go on too, as loved tracks (0.29.2).
+- **A history brought in without a name** (the "whose listens" box left empty) is offered to the app's listener once
+  the app sends something: **Make them max's** joins them (a listen both have is kept once), and sending on to
+  Last.fm, if it was connected on the unnamed one, moves along, with the app's listens since then.
+- **On a phone** the page shows one part at a time (Overview, Top, When, History; the bar stays in view), long
+  lists show their first lines with **Show all**, the Setup cards open by their heading, and **↑ Top** goes back up.
+
+**Songs gone from the server are forgotten (0.27).** When a library is read again (every few hours, or **Read
+again**), a song that's no longer on the server goes from here with its analysis, unless another server still has
+it. A library that suddenly lists far fewer songs (more than 25 songs and 10% missing at once) is left alone, with a
+warning: that's more often a server still scanning or a disk not mounted than a clear-out.
+
+The answers follow AudioMuse-AI's own rules and defaults (cosine distance between its MusiCNN vectors, at most three
+songs by one artist, the same recording never twice), so the two can be compared. The mood centres
+(`beats/mood_centroids.json`) and the method for similar albums and artists come from AudioMuse-AI and its Siansa
+plugin (AGPL-3.0, as this repository).
 
 1. On **Libraries**, tick the libraries to analyse and press **Start analysis**. It reads their songs from Navidrome and works
    through them a song at a time; the top shows the song
@@ -214,24 +295,25 @@ to judge how long a library will. The table shows the first 200 songs, the searc
 CSV** and **Download data** take the songs it finds (every song when nothing is searched: for a big library the data
 is large).
 
-**Genres by vote.** Each song's genres come from a vote, for Siansa's genre radios:
+**Genres from the sound.** Each song's genres come from its sound alone, for Siansa's genre list (Search › Genres),
+genre pages and genre radios:
 
-- **its sound first**: Essentia's Discogs-EffNet (the Music Technology Group, UPF) hears the song and scores each of
-  400 Discogs styles, from Progressive Trance and Deep House to Punk and Boom Bap. It runs on the GPU when there is one
-  (through the PyTorch Beat This! uses; the model is small, so Beat This! hardly notices), else on the CPU (ONNX
-  Runtime, `STYLE_THREADS`, 2 by default); `BEATS_DEVICE=cpu` keeps both on the CPU. New songs are heard on
-  their way through the queue; songs analysed before are downloaded once more and heard while the queue is empty;
-- **its tags second**: "Electronic / Trance", "Drum And Bass" and "DnB" are matched onto the same styles. A tag
-  naming a style adds 0.35 to it, one naming a genre (Electronic, Rock) 0.10 to each of its styles; so a tag tips a
-  close call, and a wrong tag (an album tag on a remix) loses to what every bar of the song sounds like. A song
-  without a sound score is voted on its tags alone;
-- a song keeps up to 5 styles of 0.15 or more, and is in a genre's radio from 0.30.
+- Essentia's Discogs-EffNet (the Music Technology Group, UPF) hears the song and scores each of 400 Discogs styles,
+  from Progressive Trance and Deep House to Punk and Boom Bap. It runs on the GPU when there is one (through the
+  PyTorch Beat This! uses; the model is small, so Beat This! hardly notices), else on the CPU (ONNX Runtime,
+  `STYLE_THREADS`, 2 by default); `BEATS_DEVICE=cpu` keeps both on the CPU. New songs are heard on their way through
+  the queue; songs analysed before are downloaded once more and heard while the queue is empty;
+- **a song is in a genre when its sound scores that style 0.15 or more, and always in the one it scores highest.**
+  There's no limit on how many genres a song is in, and a genre gives all its songs, the ones that sound most like it
+  first;
+- the songs' own genre tags play no part (before 0.28 they were voted together with the sound; those votes are
+  removed on the first start). Siansa still shows the tags where they belong: on an album's and an artist's page.
 
-The **Genres** card says how far it is, where the model runs, how often the sound agrees with the tags (the tagged genre, and the tagged
-style in the sound's top 3), and the styles with the most songs. A song's page shows its vote, what its sound said
-and its tags; the table's genre column and the CSV (`voted_genres`, `sound_top`) the vote. Last.fm's tags can join
-the vote later. The model is under CC BY-NC-ND 4.0 (free for non-commercial use, unchanged), downloaded while the
-image is built; how often it's right on your music is what the agreement says, and what you hear.
+The **Genres** card says how far it is, where the model runs, how often the sound agrees with the tags (the tagged
+genre, and the tagged style in the sound's top 3: for your information only), and the styles with the most songs. A
+song's page shows its genres, everything its sound said and its tags; the table's genre column and the CSV
+(`sound_genres`, `sound_top`) its genres. The model is under CC BY-NC-ND 4.0 (free for non-commercial use,
+unchanged), downloaded while the image is built; how often it's right on your music is what you hear.
 
 ## Test it
 
@@ -352,11 +434,22 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 |---|---|
 | `GET /api/v1/capabilities` | What this Siansa Beats can do now and how far it is: songs analysed, measured for loudness, the style model. |
 | `GET /api/v1/profiles?ids=a,b` | Up to 500 songs: loudness (`ref_lufs`), fades (`start_ramp`, `end_ramp`), key and scale, and the beat grid at each end. Songs with nothing yet are `pending`. |
-| `GET /api/v1/genres` | Every style with songs voted into it. |
-| `GET /api/v1/genre?name=&limit=` | The songs of a genre, by vote. |
-| `GET /api/v1/genre/about?name=` | A short description of a genre, from Wikipedia. Every genre's (the voted ones and the songs' tags) is fetched in the background every 6 hours and kept; one not fetched yet waits up to 3 s and then answers `"pending": true`, to ask again shortly. |
-| `GET /api/v1/similar/albums?track_id=` | Albums that sound like that song's album, asked of AudioMuse-AI's Siansa plugin (until Siansa Beats works them out itself). |
+| `GET /api/v1/genres` | Every style with songs in its genre by their sound, most songs first. |
+| `GET /api/v1/genre?name=&limit=` | The songs of a genre, by their sound, the ones that sound most like it first: all of them (`songs` says how many), or a random `limit` of them. |
+| `POST /api/v1/listens` | Finished listens of a listener: `{"user", "listens": [{"id", "at", "artist", "title", "album", "duration"}]}` (at most 500; `at`: seconds since 1970). Answers `{"kept", "known", "skipped"}`; the same listen twice is kept once. |
+| `POST /api/v1/listens/now` | What's playing now: `{"user", "artist", "title", "album", "duration"}`. |
+| `GET /api/v1/listens/top?user=&kind=&from=&to=&limit=` | A listener's most listened `songs` (with the server's id, when it has the song), `artists` or `albums` in a stretch of time. |
+| `GET /api/v1/genre/about?name=` | A short description of a genre, from Wikipedia. Every genre's (the sound's and the songs' tags) is fetched in the background every 6 hours and kept; one not fetched yet waits up to 3 s and then answers `"pending": true`, to ask again shortly. |
+| `GET /api/v1/similar/albums?track_id=` | Albums that sound like that song's album (`source`: `beats`, from the songs' sound here; `audiomuse` when the song's sound isn't here yet and AudioMuse-AI's Siansa plugin answered). |
 | `GET /api/v1/similar/artists?track_id=` or `?artist=` | Artists that sound like that one, the same way. |
+| `GET /api/v1/audiomuse/api/similar_tracks?item_id=&n=` | Songs that sound like a song, as AudioMuse-AI answers it (`mood_similarity=true`: only in its mood; `mood=&centroid_index=`: around a mood centre). |
+| `GET /api/v1/audiomuse/api/find_path?start_song_id=&end_song_id=&max_steps=` | A path of exactly `max_steps` songs from one song to the other (an end can be `start_mood` / `end_mood`). |
+| `POST /api/v1/audiomuse/api/alchemy` | `{"items": [{"id", "op": "ADD" or "SUBTRACT", "type": "song"}], "n"}`: songs near the ones to blend, away from the ones to avoid. |
+| `GET /api/v1/audiomuse/api/mood_centroids` | AudioMuse-AI's mood centres, each with its tags. |
+| `POST /api/v1/audiomuse/api/sonic_fingerprint/generate` | `{"n"}`: songs near what this server's user has played most (or near `ids`, when given). |
+| `POST /api/v1/audiomuse/api/clap/search` | `{"query", "limit", "steering": [{"term", "direction": "more" or "less", "weight"}]}`: the songs that sound like the description (0.26), each with its `similarity`; `steering_warnings` names terms that aren't concepts. |
+| `GET /api/v1/audiomuse/api/clap/concepts` | The concepts a search can be steered by, in their groups. |
+| `GET /api/v1/audiomuse/api/sync?ids=` | Up to 500 songs' tempo (Beat This!'s, `tempo_source`: `beat_this`; never AudioMuse-AI's), key, moods, genres and energy, without the vectors. |
 | `POST /api/v1/bad-blends` | A song change marked as bad in the app. |
 
 With several music servers, every one of these takes `?server=`: the id (or name) of the server the app plays from,
@@ -364,6 +457,10 @@ from the capabilities' `servers` (each with its `kind`, `url` and `user`, to tel
 (`profiles`, `bad-blends`) are understood from any server; ids answered (`genre`) are that server's own, and the counts
 (`capabilities`, `genres`) are of its songs. Without `server` the default one is meant. (`similar/…` passes its `server`
 on to AudioMuse-AI, whose own name for a server it is.)
+
+The paths under `/api/v1/audiomuse/` are AudioMuse-AI's own, with its parameters and its answers' layout, so an app
+that asks AudioMuse-AI can ask Siansa Beats instead by changing the address alone. The capabilities' `sound` says
+which of them are answered (`answers`) and for how many songs.
 
 Songs analysed before 0.20 get their loudness, fades and key while the queue is empty: with AudioMuse-AI connected
 (Setup), whatever AudioMuse-AI's Siansa plugin already measured is taken from it (nothing to download),
@@ -373,7 +470,7 @@ and the rest are downloaded once more and measured here. New songs are measured 
 
 `GET /api/health`, `/api/status`, `/api/libraries`, `/api/songs`, `/api/songs/<id>` (with every beat),
 `/api/beats/<id>`, `/api/audio/<id>`, `/api/grids?ids=`, `/api/export.csv`, `/api/export.json`;
-`/api/bad-blends`, `/api/failed/export`, `/api/genres`, `/api/genre?name=&limit=`, `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`; `POST /api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
+`/api/bad-blends`, `/api/failed/export`, `/api/listens?user=&year=&month=&tz=`, `/api/art/cover/<song id>?size=` and `/api/art/artist/<song id>?size=` (a song's cover and its artist's picture), `/api/listens/import` (`POST`: the export file as the body, `?user=&name=`), `POST /api/listens/lastfm`, `POST /api/listens/remove`, `/api/genres`, `/api/genre?name=&limit=`, `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`; `POST /api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
 `beats/server.py`.
 
 Beat This! is by Francesco Foscarin, Jan Schlüter and Gerhard Widmer (ISMIR 2024), under the MIT licence.

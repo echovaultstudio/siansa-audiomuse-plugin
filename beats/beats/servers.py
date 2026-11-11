@@ -191,12 +191,14 @@ class Servers:
             raise ValueError("A user name is needed")
         if not password and kind == "navidrome":
             raise ValueError("Its password is needed")
-        return self._signed_in(kind, url, str(user or "").strip(), password or "")[0]
+        return self._signed_in(kind, url, str(user or "").strip(), password or "", device="siansa-beats-test")[0]
 
-    def _signed_in(self, kind, url, user, password):
+    def _signed_in(self, kind, url, user, password, device=None):
         """Signs in to check a server: ``(what it is and has, what to keep for it)``. What's kept is never the password
         as it was typed: Navidrome's encrypted, or the encrypted token Emby or Jellyfin gave for it."""
         client = make_client(kind, url, user, password, empty_password=not password)
+        if device and hasattr(client, "device"):
+            client.device = device  # a check: as another device, so the kept sign-in goes on working
         got = []
         if kind != "navidrome":
             client.on_login = lambda user_id, token: got.append({"user_id": user_id, "token": token})

@@ -40,6 +40,10 @@ class MediaBrowser:
         self.kind = "jellyfin" if jellyfin else "emby"
         self.label = "Jellyfin" if jellyfin else "Emby"
         self.timeout = timeout
+        # The device this sign-in is as. Jellyfin keeps one sign-in a device and user: a new one under the same name
+        # ends the one before, so a check of a server (its Test button) signs in as another device than the kept
+        # sign-in, which would stop working otherwise (0.25, found by the real-server checks).
+        self.device = "siansa-beats"
         self._login = None  # (user id, token)
         # Called with (user id, token) after each sign-in, so the token is kept and the password needn't be (0.24).
         self.on_login = None
@@ -57,7 +61,7 @@ class MediaBrowser:
 
     def _headers(self, token):
         who = (f'{"MediaBrowser" if self.jellyfin else "Emby"} Client="Siansa Beats", Device="Siansa Beats", '
-               f'DeviceId="siansa-beats", Version="{__version__}"') + (f', Token="{token}"' if token else "")
+               f'DeviceId="{self.device}", Version="{__version__}"') + (f', Token="{token}"' if token else "")
         if self.jellyfin:
             return {"Authorization": who}
         return {"X-Emby-Authorization": who, **({"X-Emby-Token": token} if token else {})}
@@ -149,6 +153,15 @@ class MediaBrowser:
         if not isinstance(info, dict) or not info.get("Version"):
             if problem and not str(problem).startswith(("/", "That address")):
                 raise problem  # nothing answers there at all: said as it is
+            if any(": HTTP 403" in t for t in tried):
+                # The server itself turns this container away before any sign-in (the owner's Emby, 11 Nov: the app
+                # on the same network got in, Siansa Beats got "Forbidden" for a page that needs no login).
+                raise ServerError(
+                    f"{self.label} answers at {self.url} but refuses Siansa Beats (HTTP 403, before any sign-in). "
+                    f"It lets in only addresses it counts as local: in {self.label}'s settings under Network, add "
+                    "this container's network to the LAN networks (Docker's is usually 172.16.0.0/12) or allow "
+                    f"remote connections; or use the address {self.label} is reached at through your proxy. "
+                    f"What answered: {'; '.join(tried)}")
             # Something answers, but not as this server: what it said is given, so the cause can be seen (0.24.2: an
             # Emby reached through its proxy's address but not by IP and port, with nothing to say why).
             raise ServerError(f"No {self.label} answers at {self.url}: is it {self.label}'s own address and port, "
@@ -189,6 +202,15 @@ class MediaBrowser:
                 return songs
             start += page
 
+    def most_played(self, limit=20):
+        """The ids of the songs this user has played most, the most played first."""
+        def items(user_id, token):
+            return (self._json(self._items_path(user_id, IncludeItemTypes="Audio", Recursive="true", Filters="IsPlayed",
+                                                SortBy="PlayCount", SortOrder="Descending", Limit=limit), token)
+                    or {}).get("Items") or []
+
+        return [str(e["Id"]) for e in self._as_user(items) if e.get("Id")]
+
     def song(self, song_id):
         def one(user_id, token):
             item = urllib.parse.quote(str(song_id), safe="")
@@ -196,6 +218,34 @@ class MediaBrowser:
             return self._json(path, token) or {}
 
         return song_from(self._as_user(one))
+
+    def picture(self, song_id, of="cover", size=300):
+        """``(bytes, content type)`` of the song's cover (``of="cover"``: its album's, else its own) or its artist's
+        picture (``"artist"``), about ``size`` px wide; None when the server has none."""
+        def fetch(user_id, token):
+            item = urllib.parse.quote(str(song_id), safe="")
+            path = f"/Items/{item}?userId={user_id}" if self.jellyfin else f"/Users/{user_id}/Items/{item}"
+            song = self._json(path, token) or {}
+            if of == "artist":
+                ids = [a.get("Id") for a in (song.get("ArtistItems") or []) + (song.get("AlbumArtists") or []) if a.get("Id")]
+            else:
+                ids = [song.get("AlbumId") if song.get("AlbumPrimaryImageTag") else None,
+                       song.get("Id") if (song.get("ImageTags") or {}).get("Primary") else None, song.get("AlbumId")]
+            for one in dict.fromkeys(i for i in ids if i):
+                try:
+                    with self._open(f"/Items/{urllib.parse.quote(str(one), safe='')}/Images/Primary?maxWidth={int(size)}&quality=90",
+                                    token, headers={"Accept": "image/*"}) as response:
+                        kind = response.headers.get("Content-Type") or ""
+                        if kind.startswith("image/"):
+                            return response.read(), kind
+                except ServerError as e:
+                    if "HTTP 404" not in str(e):
+                        raise
+                if of == "artist":
+                    break  # the first artist's, or none: not a featured guest's picture for the song's artist
+            return None
+
+        return self._as_user(fetch)
 
     def _stream(self, song_id, token, byte_range=None, timeout=None):
         item = urllib.parse.quote(str(song_id), safe="")

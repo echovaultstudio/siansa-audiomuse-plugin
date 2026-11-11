@@ -29,7 +29,7 @@ PATCH_HOP = 62
 MAX_PATCHES = 64
 MODEL_FILE = "discogs-effnet-bsdynamic-1.onnx"
 LABELS_FILE = "discogs-effnet-bs64-1.json"
-KEEP = 15  # the top styles kept for each song (with their scores), for the vote and the page
+KEEP = 15  # the top styles kept for each song (with their scores), its genres (beats.genres) among them, and for the page
 
 
 def _hz_to_mel(f):

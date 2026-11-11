@@ -19,6 +19,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -94,6 +95,12 @@ def main(servers, library_path):
             sizes.setdefault(match.tail(song["path"]) or match.meta(song), {})[kind] = size
         with client.audio(songs[0]["id"], "bytes=0-99") as r:
             check(r.status in (200, 206) and len(r.read()) > 0, f"the page's player gets the song (HTTP {r.status})")
+        # Pictures (0.30): asked the way the real server takes it. The test library's songs may have none: then it's
+        # None (Navidrome's stand-in told apart, Emby's and Jellyfin's 404), never an error or something else.
+        for of in ("cover", "artist"):
+            found = client.picture(songs[0]["id"], of, 300)
+            check(found is None or (len(found[0]) > 100 and found[1].startswith("image/")),
+                  f"{kind}: a song's {of} picture is a picture or none ({None if found is None else (len(found[0]), found[1])})")
     same = [by for by in sizes.values() if len(by) == len(servers) and len(set(by.values())) == 1]
     check(len(same) == len(wanted), f"every server sends the same file, whole: {len(same)} of {len(wanted)} songs "
           f"({[by for by in sizes.values() if by not in same][:2]})")
@@ -151,13 +158,40 @@ def main(servers, library_path):
         check(read == {"songs": len(wanted), "queued": 0}, f"{kind}: its songs are found here, none queued: {read}")
         said = [e["message"] for e in call("/api/status")["events"] if added["name"] in e["message"] and "Library" in e["message"]]
         check(any(f"{len(wanted)} by their file" in e for e in said), f"{kind}: all found by their files: {said[:1]}")
-        mine = [s for f in libraries for s in make_client(kind, url, USER, PASSWORD).all_songs(f["id"])]
+        mine = [s for f in libraries for s in app.servers.client(added["id"]).all_songs(f["id"])]  # the kept sign-in
         profiles = call(f"/api/v1/profiles?server={added['id']}&ids=" + ",".join(s["id"] for s in mine))
         check(len(profiles["profiles"]) == len(wanted) and not profiles["pending"],
               f"{kind}: the app gets every song's profile by {kind}'s own ids ({len(profiles['profiles'])})")
         status = call(f"/api/status?server={added['id']}")
         check(status["counts"].get("songs") == len(wanted) and status["counts"].get("done") == len(wanted),
               f"{kind}: its own numbers: {status['counts']}")
+    # What songs sound like (0.25): each song a made-up vector, as if taken over from AudioMuse-AI. Asked by each
+    # server's own ids, the answer is in that server's ids; "your sound" reads the server's most played songs.
+    import numpy
+
+    here = app.store.song_ids()
+    rng = numpy.random.RandomState(7)
+    app.store.save_sound([{"song_id": i, "musicnn": rng.rand(200).astype(numpy.float32).tobytes(), "fp": "x"} for i in here])
+    for shown in call("/api/v1/capabilities")["servers"]:
+        kind, name = shown["kind"], shown["id"]
+        client = app.servers.client(name)
+        mine = {s["id"] for s in client.all_songs()}
+        one = sorted(mine)[0]
+        like = call(f"/api/v1/audiomuse/api/similar_tracks?server={name}&item_id={urllib.parse.quote(one)}&n=5")
+        check(len(like) == min(5, len(mine) - 1) and {s["item_id"] for s in like} <= mine - {one},
+              f"{kind}: songs like a song come in {kind}'s own ids ({len(like)})")
+        if kind == "navidrome":
+            client._get("scrobble", id=one, submission="true")
+        else:
+            client._as_user(lambda user_id, token: client._json(
+                f"/UserPlayedItems/{one}?userId={user_id}" if client.jellyfin else f"/Users/{user_id}/PlayedItems/{one}",
+                token, body={}))
+        played = client.most_played(5)
+        check(played[:1] == [one], f"{kind}: the most played song is the one just played ({played[:2]})")
+        yours = call(f"/api/v1/audiomuse/api/sonic_fingerprint/generate?server={name}", "POST", {"n": 3})
+        check(len(yours) == 3 and yours[0]["item_id"] == one and {s["item_id"] for s in yours} <= mine,
+              f"{kind}: your sound starts from the most played song, in {kind}'s ids")
+
     time.sleep(1)
     check(Tracker.calls == len(wanted), f"nothing was analysed again ({Tracker.calls} runs of the model for {len(wanted)} songs)")
     check(call("/api/status")["counts"].get("songs") == len(wanted), "the catalogue still has each song once")

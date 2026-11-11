@@ -61,8 +61,8 @@ id or name: the default server's without it.
     GET  /api/bad-blends              the song changes marked as bad in Siansa Dev, newest first
     GET  /api/bad-blends/export       all of them with both songs' beats, sound levels and results, as a file
     GET  /api/failed/export           the songs that couldn't be analysed, with why, as a file
-    GET  /api/genres                  the style model's progress and agreement with the tags, and every style voted
-    GET  /api/genre?name=&limit=      the songs a radio for a genre plays (by vote): {"ids", "styles", "genres"}
+    GET  /api/genres                  the style model's progress and agreement with the tags, and every style heard
+    GET  /api/genre?name=&limit=      the songs of a genre, by their sound: {"ids", "styles", "genres", "songs"}
     POST /api/bad-blends              {"from_id", "to_id", "technique", "details"}: one more (from the app, through
                                       the Siansa Beats (dev) plugin)
     DELETE /api/bad-blends/<n>        takes one away
@@ -93,7 +93,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import gzip
 
 from . import __version__, api_v1, grid, loudness
-from .audiomuse import AudioMuse
+from .audiomuse import AudioMuse, AudioMuseError
 from .servers import KINDS, MAIN, Servers, folders_key
 from .store import Store
 from .vault import Vault
@@ -187,10 +187,18 @@ class Kept:
             self._done.wait(wait)
 
 
+def _remove(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 class App:
     """Everything the handler needs, so the tests can make one with stand-ins."""
 
-    def __init__(self, config, tracker=None, decode=None, measure=None, style=None, sound=None):
+    def __init__(self, config, tracker=None, decode=None, measure=None, style=None, sound=None, words=None,
+                 hearer=None):
         from . import analyser
         from . import style as style_module
 
@@ -205,19 +213,106 @@ class App:
         self.tracker = tracker or analyser.BeatThis(config.model, config.device, config.models_dir, config.threads,
                                                     config.float16)
         self.style = style if style is not None else style_module.StyleModel(config.models_dir, config.style_threads, config.device)
+        # Music found by describing it in words (0.26): the text model, loaded when first searched.
+        from .hear import Hearer
+        from .words import Words
+
+        self.words = words if words is not None else Words(config.models_dir)
+        # How a song sounds, heard here with AudioMuse-AI's models (0.27): new songs need no AudioMuse-AI.
+        self.hearer = hearer if hearer is not None else Hearer(config.models_dir, self.words, config.threads)
         self.worker = Worker(self.store, self.servers, self.tracker, decode or analyser.decode,
-                             config.data_dir, config.model, measure, self.style, sound)
+                             config.data_dir, config.model, measure, self.style, sound, self.hearer)
         self.started = time.time()
-        # Answers the page and the app ask for often, kept ready: the genre list changes only when songs are voted,
-        # the styles' counts with each song heard (the page asks every 2 s).
+        # Answers the page and the app ask for often, kept ready: the genre list and the styles' counts change with
+        # each song heard (the page asks every 2 s).
         # One of each for every server looked at (its songs alone); with one server, for all the songs.
         self._kept, self._kept_lock = {}, threading.Lock()
-        self.worker.on_voted = lambda: [k.refresh() for (name, _), k in list(self._kept.items()) if name == "genres"]
         from . import about as about_module
 
         self.about = about_module.Keeper(self.store, self.about_names)
         # What the Siansa plugin already measured needn't be downloaded again (asked of whichever AudioMuse-AI is set).
         self.worker.importer = lambda ids: self.audiomuse.profiles(ids)
+        # What songs sound like (0.25): taken over from AudioMuse-AI's export, and answered from here.
+        from .pull import Puller
+        from .sound import Sound
+
+        self.sound = Sound(self.store)
+        self.puller = Puller(self.store, lambda: self.audiomuse)
+        # What was listened to (0.29): from the app as it happens, from exports, and on to Last.fm.
+        from .listens import Listens
+
+        self.listens = Listens(self.store, self.vault)
+        # Covers and artists' pictures for the listening page (0.30): the music server's own, kept in the data folder.
+        from .art import Art
+
+        self.art = Art(self.store, self.servers, config.data_dir)
+
+
+    PULL_EVERY = 6 * 3600  # AudioMuse-AI's new songs are taken over this often
+
+    def pull_now_and_then(self):
+        """Pulls from AudioMuse-AI a minute after the start and every :data:`PULL_EVERY` after (while it's connected)."""
+        def loop():
+            time.sleep(60)
+            while True:
+                if self.audiomuse.configured:
+                    self.puller.start()
+                # The text model goes when nobody has searched for a while (looked at every minute).
+                for _ in range(self.PULL_EVERY // 60):
+                    time.sleep(60)
+                    self.words.unload_if_idle()
+
+        threading.Thread(target=loop, name="sound-pull-timer", daemon=True).start()
+
+    RELAY_EVERY = 30  # seconds between tries to send waiting listens on to Last.fm
+
+    def relay_now_and_then(self):
+        """Sends listens on to Last.fm in the background, for the listeners who connected it."""
+        def loop():
+            while True:
+                time.sleep(self.RELAY_EVERY)
+                try:
+                    self.listens.relay()
+                except Exception:  # nothing here may take the service down
+                    _log.exception("Sending listens on to Last.fm went wrong")
+
+        threading.Thread(target=loop, name="lastfm-relay", daemon=True).start()
+
+    def listening(self, user=None, year=None, month=None, tz=None):
+        """The listening page: the listeners, and one's numbers for a month, a year or all time (the first listener's
+        without one)."""
+        users = self.listens.users()
+        if user is None:  # the first one with a name (the app's), else the first
+            user = next((u["user"] for u in users if u["user"]), users[0]["user"] if users else "")
+        answer = {"users": users, "importing": dict(self.listens.importing), "playing": self.listens.all_playing(),
+                  **self.listens.summary(user, year, month, tz)}
+        # Which song's cover and which song's artist picture each row shows ("cover", "face": a song id here, or
+        # null for music that isn't in the library): the page asks /api/art for them as it shows them.
+        def pictured(row, cover=True, face=False):
+            row = dict(row)
+            if cover:
+                row["cover"] = self.art.song_for("cover", row.get("song"), row.get("artist"), row.get("album"))
+            if face:
+                row["face"] = self.art.song_for("artist", row.get("song"), row.get("artist"))
+            return row
+
+        top = answer["top"]
+        answer["top"] = {"songs": [pictured(r) for r in top["songs"]], "albums": [pictured(r) for r in top["albums"]],
+                         "artists": [pictured(r, cover=False, face=True) for r in top["artists"]]}
+        answer["recent"] = [pictured(r) for r in answer["recent"]]
+        answer["playing"] = [pictured(r, face=True) for r in answer["playing"]]
+        answer["new_artists"] = [pictured(r, cover=False, face=True) for r in answer["new_artists"]]
+        return answer
+
+    def sound_status(self, server=None):
+        """How much of ``server``'s music has its sound here, and how the pull from AudioMuse-AI is going."""
+        counts = self.store.sound_counts(self.only(server))
+        return {**counts, "pull": dict(self.puller.state), "audiomuse": self.audiomuse.configured,
+                "text_model": {"available": self.words.available, "steering": self.words.steers,
+                               "loaded": self.words.loaded, "load_seconds": self.words.load_seconds},
+                # Heard here (0.27): whether this image can, where each song's sound came from, what's being heard.
+                "hears": self.hearer.available, "sources": self.store.sound_sources(self.only(server)),
+                "hearing": dict(self.worker.hearing) if self.worker.hearing else None}
 
     # ---- connections and access, set on the page (0.24.0) ----
 
@@ -291,11 +386,20 @@ class App:
             raise ValueError("The address starts with http:// or https://")
         token = str(token or "") or (self.vault.open(saved.get("token")) if saved.get("url") == url else "")
         client = AudioMuse(url, token)
-        plugin = client.check()
+        try:
+            plugin = client.check()
+        except AudioMuseError as e:
+            # No Siansa plugin there: its export for apps is all that's needed since 0.25. A refused token is still said.
+            if "plugin" not in str(e):
+                raise
+            client.sync_check()
+            plugin = "export"
         if not check_only:
             self.store.set_setting("audiomuse", {"url": url, "token": self.vault.seal(token)})
             self.audiomuse = client
-            self.store.event(f"AudioMuse-AI connected ({plugin} plugin)")
+            self.store.event(f"AudioMuse-AI connected ({plugin} plugin)" if plugin != "export"
+                             else "AudioMuse-AI connected (its export for apps; no Siansa plugin there)")
+            self.puller.start()  # what it has analysed is taken over straight away
         return plugin
 
     @property
@@ -518,6 +622,7 @@ class App:
                          "measuring": dict(worker.measuring) if worker.measuring else None},
             "regridding": dict(worker.regridding) if worker.regridding else None,
             "reading": dict(worker.reading) if worker.reading else None,
+            "sound": self.sound_status(server),
             "libraries": {"chosen": self.store.setting(folders_key(server)) or [],
                           "read_at": self.store.setting("library_read_at")},
             # The server these numbers are of, and all of them (for the page's switch).
@@ -559,7 +664,7 @@ class App:
         return out
 
     def about_names(self):
-        """Every genre the app may show a page for: the voted ones as the app names them, then the songs' tags."""
+        """Every genre the app may show a page for: the sound's as the app names them, then the songs' tags."""
         names, seen = [], set()
         for name in [g["name"] for g in self.genre_list()] + self.store.tag_genres():
             if name and name.lower() not in seen:
@@ -580,7 +685,7 @@ class App:
         return {"name": name, "about": found, "pending": pending, "status": status}
 
     def genre_list(self, server=None):
-        """Every style with songs (of ``server``'s) voted into it, most first, kept ready (:class:`Kept`): ``[{"label",
+        """Every style with songs (of ``server``'s) in its genre by their sound, most first, kept ready (:class:`Kept`): ``[{"label",
         "genre", "style", "songs", "name", "libraries"}]``; ``libraries``: the songs in each of the server's libraries,
         by its id."""
         server = server or self.servers.default_id
@@ -588,8 +693,8 @@ class App:
                          lambda: self.store.genre_changes).get()
 
     def _genre_list(self, server, only):
-        counts = self.store.vote_counts(genres_module.RADIO_MIN, only)
-        by_library = self.store.vote_counts_by_library(genres_module.RADIO_MIN, server)
+        counts = self.store.heard_counts(genres_module.HEARD_MIN, only)
+        by_library = self.store.heard_counts_by_library(genres_module.HEARD_MIN, server)
         ranked = sorted(counts.items(), key=lambda p: -p[1])
         named = {}
         for label, _ in ranked:
@@ -604,21 +709,28 @@ class App:
                         "libraries": by_library.get(label, {})})
         return out
 
-    def genre_songs(self, name, limit=300, server=None):
-        """The songs a radio for the genre ``name`` plays (a tag as the app shows it: "Trance", "Electronic /
-        Trance"), by vote: ``{"name", "styles", "genres", "ids"}``, the ids ``server``'s own for the songs it has.
-        Nothing when the style model isn't there or the name matches none of its styles, so the app falls back to the
-        tags."""
+    def genre_songs(self, name, limit=None, server=None):
+        """The songs of the genre ``name`` (a tag as the app shows it: "Trance", "Electronic / Trance") by their sound
+        (:mod:`beats.genres`), the ones that sound most like it first: ``{"name", "styles", "genres", "ids", "songs"}``,
+        the ids ``server``'s own for the songs it has; ``songs``: how many there are, of which ``ids`` is a random
+        ``limit`` when there are more. Nothing when the style model isn't there or the name matches none of its
+        styles, so the app falls back to the tags."""
         taxonomy = self.worker.taxonomy()
         if taxonomy is None:
-            return {"name": name, "styles": [], "genres": [], "ids": [], "why": "no style model in this image"}
+            return {"name": name, "styles": [], "genres": [], "ids": [], "songs": 0, "why": "no style model in this image"}
         styles, families = genres_module.target(taxonomy, name)
         labels = set(styles)
         for f in families:
             labels |= set(taxonomy.by_genre.get(genres_module.key(f), []))
-        ids = self.store.songs_voted(labels, genres_module.RADIO_MIN, limit, server or self.servers.default_id)
-        return {"name": name, "styles": sorted(styles), "genres": sorted(families), "ids": ids,
-                "why": None if labels else "no style of that name"}
+        ids = self.store.songs_heard(labels, genres_module.HEARD_MIN, None, server or self.servers.default_id)
+        songs = len(ids)
+        if limit is not None and songs > limit:
+            import random
+
+            keep = set(random.sample(range(songs), limit))
+            ids = [i for n, i in enumerate(ids) if n in keep]  # still the ones that sound most like it first
+        return {"name": name, "styles": sorted(styles), "genres": sorted(families), "ids": ids, "songs": songs,
+                "by": "sound", "why": None if labels else "no style of that name"}
 
     def debug_report(self):
         """Everything that helps find out why something's wrong, in one file: versions, the setup (addresses, never
@@ -671,7 +783,7 @@ class App:
 
     def csv(self, find=None, show="all", server=None):
         out = io.StringIO()
-        columns = ["artist", "title", "album", "genres", "voted_genres", "sound_top", "tag_bpm", "bpm",
+        columns = ["artist", "title", "album", "genres", "sound_genres", "sound_top", "tag_bpm", "bpm",
                    "main_share", "bpm_fit", "grid_bpm", "on_grid", "grid_drift", "downbeat_source", "phrase_first_ms", "phrase_bars", "phrase_count",
                    "phrase_big", "phrase_big_on",
                    "intro_bpm", "outro_bpm", "steady", "grid_share", "beats_per_bar", "bar_share", "first_downbeat_ms",
@@ -684,7 +796,8 @@ class App:
             for g in row["genres"]:
                 by.setdefault(g["source"], []).append(g)
             w.writerow([row["artist"], row["title"], row["album"], " / ".join(g["label"] for g in by.get("tag", [])),
-                        " / ".join(f"{g['label'].partition('---')[2]} {g['weight']:.2f}" for g in by.get("vote", [])),
+                        " / ".join(f"{l.partition('---')[2]} {v:.2f}" for l, v in genres_module.heard(
+                            [(g["label"], g["weight"]) for g in by.get("sound", [])])),
                         " / ".join(f"{g['label'].partition('---')[2]} {g['weight']:.2f}" for g in by.get("sound", [])[:3]),
                         row["tag_bpm"], _round(r.get("bpm")),
                         _round(r.get("main_share"), 3), _round(r.get("bpm_fit")), _round(r.get("grid_bpm")),
@@ -707,7 +820,7 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     # The page asks for these every few seconds: logged only when they fail, so the debug log stays readable.
-    POLLED = ("/api/status", "/api/songs", "/api/libraries", "/api/log", "/api/bad-blends", "/api/health")
+    POLLED = ("/api/status", "/api/songs", "/api/libraries", "/api/log", "/api/bad-blends", "/api/health", "/api/art/")
 
     def log_message(self, fmt, *args):  # http.server's own complaints (a malformed request); requests: log_request
         _log.debug("%s: %s", self.client_address[0], log.redact(fmt % args if args else fmt))
@@ -767,7 +880,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        if "Cache-Control" not in (headers or {}):  # a picture says how long it may be kept; nothing else is
+            self.send_header("Cache-Control", "no-store")
         if squeezed:
             self.send_header("Content-Encoding", "gzip")
             self.send_header("Vary", "Accept-Encoding")
@@ -783,12 +897,51 @@ class Handler(BaseHTTPRequestHandler):
     def _error(self, status, message):
         self._json({"error": message}, status)
 
+    IMPORT_MOST = 2 * 1024 ** 3  # bytes: no export of a listening history comes near
+
+    def _import_listens(self):
+        """Takes an export file as the request's body (``?user=`` whose it is, ``?name=`` its name) and brings it in
+        in the background."""
+        import tempfile
+
+        app, query = self.app, self._query()
+        length = int(self.headers.get("Content-Length") or 0)
+        if not length:
+            return self._error(HTTPStatus.BAD_REQUEST, "Choose a file: an export of Koito, Last.fm or ListenBrainz")
+        if length > self.IMPORT_MOST:
+            return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "That file is too big")
+        if app.listens.importing.get("running"):
+            return self._error(HTTPStatus.CONFLICT, "A file is being brought in already")
+        folder = os.path.join(app.config.data_dir, "tmp")
+        os.makedirs(folder, exist_ok=True)
+        handle, path = tempfile.mkstemp(prefix="listens-", dir=folder)
+        try:
+            with os.fdopen(handle, "wb") as out:
+                left = length
+                while left:
+                    piece = self.rfile.read(min(left, 1 << 20))
+                    if not piece:
+                        break
+                    out.write(piece)
+                    left -= len(piece)
+            if left:
+                raise OSError("the file didn't arrive whole")
+        except OSError as e:
+            _remove(path)
+            return self._error(HTTPStatus.BAD_REQUEST, f"The file couldn't be taken: {e}")
+        user = (query.get("user") or [""])[0].strip()
+        name = (query.get("name") or ["the file"])[0][:120]
+        if not app.listens.start_import(path, user, name, done=lambda: _remove(path)):
+            _remove(path)
+            return self._error(HTTPStatus.CONFLICT, "A file is being brought in already")
+        return self._json({"started": True, "importing": dict(app.listens.importing)})
+
     def _body(self):
         length = int(self.headers.get("Content-Length") or 0)
         if not length:
             return {}
         try:
-            return json.loads(self.rfile.read(min(length, 65536)) or b"{}")
+            return json.loads(self.rfile.read(min(length, 1 << 20)) or b"{}")
         except ValueError:
             return {}
 
@@ -840,6 +993,24 @@ class Handler(BaseHTTPRequestHandler):
                 return None
             if path.startswith("/api/v1/") and api_v1.get(self, path, query, server):
                 return None
+            if path == "/api/listens":
+                def number(name):
+                    value = (query.get(name) or [""])[0]
+                    return int(value) if value.isdigit() and int(value) else None
+                user = (query.get("user") or [None])[0]
+                month = number("month")
+                if month is not None and not 1 <= month <= 12:
+                    return self._error(HTTPStatus.BAD_REQUEST, "month is 1 to 12")
+                return self._json(app.listening(user, number("year"), month, (query.get("tz") or [None])[0]))
+            if path == "/api/listens/import":
+                return self._json(dict(app.listens.importing))
+            m = re.fullmatch(r"/api/art/(cover|artist)/([^/]+)", path)
+            if m:  # a song's cover, or its artist's picture, from the music server (kept here once fetched)
+                size = (query.get("size") or ["300"])[0]
+                found = app.art.get(m[1], _id(m[2]), int(size) if size.isdigit() else 300)
+                if found is None:
+                    return self._send(HTTPStatus.NOT_FOUND, b"", "text/plain", {"Cache-Control": "private, max-age=3600"})
+                return self._send(HTTPStatus.OK, found[0], found[1], {"Cache-Control": "private, max-age=604800"})
             if path == "/api/genres":
                 return self._json({"styles": app.styles_status(server), "genres": app.genre_list(server),
                                    "about": app.about.status()})
@@ -931,6 +1102,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guard():
             return
         path = self.path.split("?", 1)[0]
+        if path == "/api/listens/import":  # a file, as it is: it can be far bigger than any other request
+            return self._import_listens()
         app, body = self.app, self._body()
         try:
             if path.startswith("/api/servers"):
@@ -944,6 +1117,34 @@ class Handler(BaseHTTPRequestHandler):
                 except AudioMuseError as e:
                     return self._error(HTTPStatus.BAD_GATEWAY, str(e))
                 return self._json({"plugin": plugin, "url": app.audiomuse.url or None})
+            if path == "/api/sound/pull":  # everything again with {"everything": true}
+                if not app.audiomuse.configured:
+                    return self._error(HTTPStatus.BAD_REQUEST, "Connect AudioMuse-AI first (Setup › AudioMuse-AI)")
+                started = app.puller.start(bool(body.get("everything")))
+                return self._json({"started": started, "pull": dict(app.puller.state)})
+            if path == "/api/listens/lastfm":  # on to Last.fm, with the listener's own API account
+                from .listens import LastFmError
+                user = str(body.get("user") or "")
+                try:
+                    if body.get("disconnect"):
+                        app.listens.disconnect_lastfm(user)
+                        return self._json(app.listens.lastfm_status(user))
+                    return self._json(app.listens.connect_lastfm(user, body.get("api_key"), body.get("secret"),
+                                                                 body.get("name"), body.get("password")))
+                except ValueError as e:
+                    return self._error(HTTPStatus.BAD_REQUEST, str(e))
+                except LastFmError as e:
+                    return self._error(HTTPStatus.BAD_GATEWAY, str(e))
+            if path == "/api/listens/rename":  # {"from", "to"}: one listener's listens become another's
+                if "from" not in body or not str(body.get("to") or "").strip():
+                    return self._error(HTTPStatus.BAD_REQUEST, "from and to needed: whose listens, and whose they become")
+                return self._json({"moved": app.listens.rename(body["from"], body["to"])})
+            if path == "/api/listens/remove":  # a listener's listens from one source (a file brought in by mistake)
+                if "user" not in body or body.get("source") not in ("koito", "lastfm", "listenbrainz", "siansa", "all"):
+                    return self._error(HTTPStatus.BAD_REQUEST, "user and source needed: koito, lastfm, listenbrainz, siansa or all")
+                gone = app.listens.remove(str(body["user"]), None if body["source"] == "all" else body["source"])
+                app.store.event(f"Removed {gone} listens of {body['user'] or 'the listener'} ({body['source']})")
+                return self._json({"removed": gone})
             if path == "/api/access/password":
                 try:
                     app.set_password(body.get("password"))
@@ -1179,6 +1380,8 @@ def main():
     _log.info("Log level %s (%s)", log.level(), "chosen on the page" if chosen else "LOG_LEVEL")
     app.worker.start()
     app.about.start()
+    app.pull_now_and_then()
+    app.relay_now_and_then()
     app.store.event(f"Started: model {config.model}, device {config.device}"
                     f"{' (half precision on a GPU)' if config.float16 else ''}")
     if not app.servers.all():
@@ -1195,15 +1398,17 @@ def main():
             app.worker.regrid()
         except Exception:
             _log.exception("Working out older results again went wrong")
-        try:  # every song's genres voted again: the vote's rules or the tags may have changed
-            voted = app.worker.revote()
-            if voted:
-                report = app.worker.genre_report or {}
-                app.store.event(f"Voted the genres of {voted} songs" + (
-                    f" · the sound agrees with the tags' genre on {report['family'] * 100:.0f} % of {report['songs']}"
-                    if report.get("family") is not None else ""))
+        try:  # genres are the sound's alone from 0.28: the ones voted with the tags go
+            gone = app.store.drop_votes()
+            if gone:
+                app.store.event(f"Genres now come from each song's sound alone: removed {gone} genres voted with the tags")
+            compared = app.worker.compare_with_tags()
+            report = app.worker.genre_report or {}
+            if compared and report.get("family") is not None:
+                app.store.event(f"The sound agrees with the tags' genre on {report['family'] * 100:.0f} % of "
+                                f"{report['songs']} songs with both")
         except Exception:
-            _log.exception("Voting the genres went wrong")
+            _log.exception("Tidying the genres went wrong")
 
     threading.Thread(target=background, name="start", daemon=True).start()
     server = make_server(app)

@@ -1,947 +1,1697 @@
 {
- "openapi": "3.1.0",
- "info": {
-  "title": "Siansa Beats",
-  "version": "1",
-  "description": "What the Siansa app asks Siansa Beats for. Within v1 fields are only added, never renamed or removed. Song ids are the music server's own (Navidrome's, Emby's or Jellyfin's). With several servers (0.23.0), a request may name the one it means with ?server= (its id or name, from the capabilities' servers); without it the default server is meant. Ids asked about are understood from any server; ids answered are the named server's, and songs it doesn't have are left out. When BEATS_PASSWORD or BEATS_API_KEY is set, every path but /api/health needs Authorization: Bearer <key or password> (or Basic with user siansa and the password)."
- },
- "servers": [
-  {
-   "url": "/"
-  }
- ],
- "security": [
-  {
-   "bearer": []
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Siansa Beats",
+    "version": "1",
+    "description": "What the Siansa app asks Siansa Beats for. Within v1 fields are only added, never renamed or removed. Song ids are the music server's own (Navidrome's, Emby's or Jellyfin's). With several servers (0.23.0), a request may name the one it means with ?server= (its id or name, from the capabilities' servers); without it the default server is meant. Ids asked about are understood from any server; ids answered are the named server's, and songs it doesn't have are left out. When BEATS_PASSWORD or BEATS_API_KEY is set, every path but /api/health needs Authorization: Bearer <key or password> (or Basic with user siansa and the password)."
   },
-  {
-   "basic": []
-  }
- ],
- "paths": {
-  "/api/health": {
-   "get": {
-    "summary": "Whether the service runs (always open)",
-    "security": [],
-    "responses": {
-     "200": {
-      "description": "Running",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Health"
-        }
-       }
-      }
-     }
+  "servers": [
+    {
+      "url": "/"
     }
-   }
-  },
-  "/api/v1/capabilities": {
-   "get": {
-    "summary": "What this Siansa Beats can do now, and how far it is",
-    "responses": {
-     "200": {
-      "description": "Its features",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Capabilities"
-        }
-       }
-      }
-     },
-     "401": {
-      "description": "The password or API key is needed"
-     }
+  ],
+  "security": [
+    {
+      "bearer": []
     },
-    "parameters": [
-     {
-      "$ref": "#/components/parameters/Server"
-     }
-    ]
-   }
-  },
-  "/api/v1/profiles": {
-   "get": {
-    "summary": "Loudness, fades, key and beat grids of up to 500 songs",
-    "parameters": [
-     {
-      "name": "ids",
-      "in": "query",
-      "required": true,
-      "description": "Song ids (Navidrome's), comma-separated, at most 500",
-      "schema": {
-       "type": "string"
-      }
-     },
-     {
-      "$ref": "#/components/parameters/Server"
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "The songs that have one; the rest are pending",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Profiles"
-        }
-       }
-      }
-     },
-     "400": {
-      "description": "Something was missing or wrong: {\"error\": why}",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Error"
-        }
-       }
-      }
-     },
-     "401": {
-      "description": "The password or API key is needed"
-     }
+    {
+      "basic": []
     }
-   }
-  },
-  "/api/v1/genres": {
-   "get": {
-    "summary": "Every style with songs voted into it, most songs first",
-    "responses": {
-     "200": {
-      "description": "The styles",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Genres"
-        }
-       }
-      }
-     },
-     "401": {
-      "description": "The password or API key is needed"
-     }
-    },
-    "parameters": [
-     {
-      "$ref": "#/components/parameters/Server"
-     }
-    ]
-   }
-  },
-  "/api/v1/genre": {
-   "get": {
-    "summary": "The songs of a genre, by vote",
-    "parameters": [
-     {
-      "name": "name",
-      "in": "query",
-      "required": true,
-      "description": "The genre as a tag (Trance, or Electronic / Trance)",
-      "schema": {
-       "type": "string"
-      }
-     },
-     {
-      "name": "limit",
-      "in": "query",
-      "schema": {
-       "type": "integer",
-       "minimum": 1,
-       "maximum": 2000,
-       "default": 300
-      }
-     },
-     {
-      "$ref": "#/components/parameters/Server"
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Its songs (none when the style model isn't there: use the tags)",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/GenreSongs"
-        }
-       }
-      }
-     },
-     "400": {
-      "description": "Something was missing or wrong: {\"error\": why}",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Error"
-        }
-       }
-      }
-     },
-     "401": {
-      "description": "The password or API key is needed"
-     }
-    }
-   }
-  },
-  "/api/v1/genre/about": {
-   "get": {
-    "summary": "A short description of a genre, from Wikipedia (kept; a new one is looked up and may say pending)",
-    "parameters": [
-     {
-      "name": "name",
-      "in": "query",
-      "required": true,
-      "description": "The genre as a tag (Trance, or Electronic / Trance)",
-      "schema": {
-       "type": "string"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Its description, or about null",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/GenreAbout"
-        }
-       }
-      }
-     },
-     "400": {
-      "description": "Something was missing or wrong: {\"error\": why}",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Error"
-        }
-       }
-      }
-     },
-     "401": {
-      "description": "The password or API key is needed"
-     }
-    }
-   }
-  },
-  "/api/v1/bad-blends": {
-   "post": {
-    "summary": "A song change marked as bad in the app",
-    "requestBody": {
-     "required": true,
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/BadBlend"
-       }
-      }
-     }
-    },
-    "responses": {
-     "200": {
-      "description": "Kept",
-      "content": {
-       "application/json": {
-        "schema": {
-         "type": "object",
-         "properties": {
-          "id": {
-           "type": "integer"
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Whether the service runs (always open)",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
           }
-         }
         }
-       }
       }
-     },
-     "400": {
-      "description": "Something was missing or wrong: {\"error\": why}",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Error"
-        }
-       }
-      }
-     },
-     "401": {
-      "description": "The password or API key is needed"
-     }
     },
-    "parameters": [
-     {
-      "$ref": "#/components/parameters/Server"
-     }
-    ]
-   }
-  },
-  "/api/v1/openapi.json": {
-   "get": {
-    "summary": "This description",
-    "responses": {
-     "200": {
-      "description": "OpenAPI 3.1"
-     }
-    }
-   }
-  },
-  "/api/v1/similar/albums": {
-   "get": {
-    "summary": "Albums that sound like a song's album (asked of AudioMuse-AI's Siansa plugin for now)",
-    "parameters": [
-     {
-      "name": "track_id",
-      "in": "query",
-      "description": "A song of the album or artist (Navidrome's id)",
-      "schema": {
-       "type": "string"
-      },
-      "required": true
-     },
-     {
-      "name": "server",
-      "in": "query",
-      "description": "The music server's name in AudioMuse-AI, when it has several",
-      "schema": {
-       "type": "string"
+    "/api/v1/capabilities": {
+      "get": {
+        "summary": "What this Siansa Beats can do now, and how far it is",
+        "responses": {
+          "200": {
+            "description": "Its features",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capabilities"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Server"
+          }
+        ]
       }
-     },
-     {
-      "name": "limit",
-      "in": "query",
-      "schema": {
-       "type": "integer"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Similar albums, most alike first",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Similar"
-        }
-       }
-      }
-     },
-     "400": {
-      "description": "Something was missing or wrong: {\"error\": why}",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Error"
-        }
-       }
-      }
-     },
-     "401": {
-      "description": "The password or API key is needed"
-     },
-     "502": {
-      "description": "AudioMuse-AI isn't set up or couldn't answer: {\"error\": why}",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Error"
-        }
-       }
-      }
-     }
-    }
-   }
-  },
-  "/api/v1/similar/artists": {
-   "get": {
-    "summary": "Artists that sound like an artist (asked of AudioMuse-AI's Siansa plugin for now)",
-    "parameters": [
-     {
-      "name": "track_id",
-      "in": "query",
-      "description": "A song of the album or artist (Navidrome's id)",
-      "schema": {
-       "type": "string"
-      }
-     },
-     {
-      "name": "artist",
-      "in": "query",
-      "description": "The artist, by name (instead of track_id)",
-      "schema": {
-       "type": "string"
-      }
-     },
-     {
-      "name": "server",
-      "in": "query",
-      "description": "The music server's name in AudioMuse-AI, when it has several",
-      "schema": {
-       "type": "string"
-      }
-     },
-     {
-      "name": "limit",
-      "in": "query",
-      "schema": {
-       "type": "integer"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Similar artists, most alike first",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Similar"
-        }
-       }
-      }
-     },
-     "400": {
-      "description": "Something was missing or wrong: {\"error\": why}",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Error"
-        }
-       }
-      }
-     },
-     "401": {
-      "description": "The password or API key is needed"
-     },
-     "502": {
-      "description": "AudioMuse-AI isn't set up or couldn't answer: {\"error\": why}",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Error"
-        }
-       }
-      }
-     }
-    }
-   }
-  }
- },
- "components": {
-  "securitySchemes": {
-   "bearer": {
-    "type": "http",
-    "scheme": "bearer",
-    "description": "BEATS_API_KEY or BEATS_PASSWORD"
-   },
-   "basic": {
-    "type": "http",
-    "scheme": "basic",
-    "description": "User siansa, password BEATS_PASSWORD"
-   }
-  },
-  "schemas": {
-   "Error": {
-    "type": "object",
-    "properties": {
-     "error": {
-      "type": "string"
-     }
-    }
-   },
-   "Health": {
-    "type": "object",
-    "properties": {
-     "status": {
-      "type": "string",
-      "const": "ok"
-     },
-     "version": {
-      "type": "string"
-     },
-     "model": {
-      "type": "string"
-     },
-     "model_loaded": {
-      "type": "boolean"
-     }
-    }
-   },
-   "Feature": {
-    "type": "object",
-    "required": [
-     "available"
-    ],
-    "properties": {
-     "available": {
-      "type": "boolean"
-     },
-     "songs": {
-      "type": "integer",
-      "description": "Songs that have it"
-     }
     },
-    "additionalProperties": true
-   },
-   "Capabilities": {
-    "type": "object",
-    "required": [
-     "service",
-     "version",
-     "api",
-     "features"
-    ],
-    "properties": {
-     "service": {
-      "type": "string",
-      "const": "siansa-beats"
-     },
-     "version": {
-      "type": "string"
-     },
-     "api": {
-      "type": "integer",
-      "description": "The newest API version it answers"
-     },
-     "apis": {
-      "type": "array",
-      "items": {
-       "type": "integer"
-      }
-     },
-     "music_server": {
-      "type": "object",
-      "properties": {
-       "kind": {
-        "type": "string"
-       },
-       "set_up": {
-        "type": "boolean"
-       }
-      }
-     },
-     "songs": {
-      "type": "object",
-      "properties": {
-       "known": {
-        "type": "integer"
-       },
-       "analysed": {
-        "type": "integer"
-       },
-       "failed": {
-        "type": "integer"
-       },
-       "waiting": {
-        "type": "integer"
-       }
-      }
-     },
-     "features": {
-      "type": "object",
-      "description": "beat_grids, loudness, keys, genres, genre_about, bad_blends, similar; more may come",
-      "additionalProperties": {
-       "$ref": "#/components/schemas/Feature"
-      }
-     },
-     "limits": {
-      "type": "object",
-      "properties": {
-       "profile_ids": {
-        "type": "integer"
-       },
-       "genre_songs": {
-        "type": "integer"
-       }
-      }
-     },
-     "servers": {
-      "type": "array",
-      "items": {
-       "$ref": "#/components/schemas/MusicServer"
-      },
-      "description": "Every music server here (0.23.0): the app names the one it plays from with ?server=<id>"
-     }
-    }
-   },
-   "Profile": {
-    "type": "object",
-    "required": [
-     "track_id",
-     "ref_lufs",
-     "start_ramp",
-     "end_ramp",
-     "duration_ms"
-    ],
-    "properties": {
-     "track_id": {
-      "type": "string"
-     },
-     "ref_lufs": {
-      "type": [
-       "number",
-       "null"
-      ],
-      "description": "Integrated loudness (BS.1770, LUFS); null when not measured yet or silent"
-     },
-     "start_ramp": {
-      "type": "string",
-      "description": "How soon the song reaches each level: base64 of 3-byte (int8 dB, uint16le 100 ms chunk) pairs"
-     },
-     "end_ramp": {
-      "type": "string",
-      "description": "How long before the end the song is last at each level, the same way"
-     },
-     "duration_ms": {
-      "type": "integer"
-     },
-     "key": {
-      "type": "string",
-      "description": "C, C#, D … B"
-     },
-     "scale": {
-      "type": "string",
-      "enum": [
-       "major",
-       "minor"
-      ]
-     },
-     "intro_bpm": {
-      "type": "number",
-      "description": "Tempo at this end (intro)"
-     },
-     "intro_beat_ms": {
-      "type": "number",
-      "description": "A beat on the grid (ms from the start) (intro)"
-     },
-     "intro_bar_ms": {
-      "type": "number",
-      "description": "A downbeat on the grid (ms) (intro)"
-     },
-     "intro_rhythm": {
-      "type": "number",
-      "description": "How clear the beat is, 0..1 (intro)"
-     },
-     "intro_steady": {
-      "type": "number",
-      "description": "How steady the tempo is, 0..1 (intro)"
-     },
-     "intro_phrase_ms": {
-      "type": "number",
-      "description": "Where a phrase starts (ms) (intro)"
-     },
-     "intro_phrase_bars": {
-      "type": "number",
-      "description": "Bars in a phrase (intro)"
-     },
-     "intro_lock_ms": {
-      "type": "number",
-      "description": "Where the beat locks in (ms) (intro)"
-     },
-     "intro_bass_bars": {
-      "type": "number",
-      "description": "Bars before the bass comes in (intro)"
-     },
-     "intro_energy": {
-      "type": "number",
-      "description": "Loudness of this end against the song (dB) (intro)"
-     },
-     "outro_bpm": {
-      "type": "number",
-      "description": "Tempo at this end (outro)"
-     },
-     "outro_beat_ms": {
-      "type": "number",
-      "description": "A beat on the grid (ms from the start) (outro)"
-     },
-     "outro_bar_ms": {
-      "type": "number",
-      "description": "A downbeat on the grid (ms) (outro)"
-     },
-     "outro_rhythm": {
-      "type": "number",
-      "description": "How clear the beat is, 0..1 (outro)"
-     },
-     "outro_steady": {
-      "type": "number",
-      "description": "How steady the tempo is, 0..1 (outro)"
-     },
-     "outro_phrase_ms": {
-      "type": "number",
-      "description": "Where a phrase starts (ms) (outro)"
-     },
-     "outro_phrase_bars": {
-      "type": "number",
-      "description": "Bars in a phrase (outro)"
-     },
-     "outro_lock_ms": {
-      "type": "number",
-      "description": "Where the beat locks in (ms) (outro)"
-     },
-     "outro_bass_bars": {
-      "type": "number",
-      "description": "Bars before the bass comes in (outro)"
-     },
-     "outro_energy": {
-      "type": "number",
-      "description": "Loudness of this end against the song (dB) (outro)"
-     },
-     "beats_until_ms": {
-      "type": "number",
-      "description": "Where the beat stops well before the end (ms)"
-     },
-     "mix_track": {
-      "type": "boolean",
-      "description": "Part of a continuous mix"
-     },
-     "drops_ms": {
-      "type": "array",
-      "items": {
-       "type": "number"
-      }
-     },
-     "breakdowns_ms": {
-      "type": "array",
-      "items": {
-       "type": "number"
-      }
-     },
-     "beat_grid": {
-      "type": "string",
-      "const": "siansa_beats",
-      "description": "Present when the beat grid fields are there"
-     }
-    }
-   },
-   "Profiles": {
-    "type": "object",
-    "properties": {
-     "schema_version": {
-      "type": "integer",
-      "const": 1
-     },
-     "profiles": {
-      "type": "array",
-      "items": {
-       "$ref": "#/components/schemas/Profile"
-      }
-     },
-     "pending": {
-      "type": "array",
-      "items": {
-       "type": "string"
-      },
-      "description": "Asked for, but nothing measured yet"
-     }
-    }
-   },
-   "Genre": {
-    "type": "object",
-    "properties": {
-     "label": {
-      "type": "string"
-     },
-     "genre": {
-      "type": "string"
-     },
-     "style": {
-      "type": "string"
-     },
-     "songs": {
-      "type": "integer"
-     },
-     "name": {
-      "type": "string",
-      "description": "What to ask /api/v1/genre for"
-     },
-     "libraries": {
-      "type": "object",
-      "additionalProperties": {
-       "type": "integer"
-      },
-      "description": "Its songs in each Navidrome library, by the library's id: leave out a genre whose songs are all in libraries the app hides"
-     }
-    }
-   },
-   "Genres": {
-    "type": "object",
-    "properties": {
-     "styles": {
-      "type": "object",
-      "description": "The style model's state"
-     },
-     "genres": {
-      "type": "array",
-      "items": {
-       "$ref": "#/components/schemas/Genre"
-      }
-     }
-    }
-   },
-   "GenreSongs": {
-    "type": "object",
-    "properties": {
-     "name": {
-      "type": "string"
-     },
-     "styles": {
-      "type": "array",
-      "items": {
-       "type": "string"
-      }
-     },
-     "genres": {
-      "type": "array",
-      "items": {
-       "type": "string"
-      }
-     },
-     "ids": {
-      "type": "array",
-      "items": {
-       "type": "string"
-      }
-     },
-     "why": {
-      "type": "string"
-     }
-    }
-   },
-   "GenreAbout": {
-    "type": "object",
-    "properties": {
-     "name": {
-      "type": "string"
-     },
-     "about": {
-      "type": [
-       "object",
-       "null"
-      ],
-      "properties": {
-       "summary": {
-        "type": "string"
-       },
-       "url": {
-        "type": "string"
-       },
-       "source": {
-        "type": "string"
-       }
-      }
-     },
-     "pending": {
-      "type": "boolean",
-      "description": "Still being looked up: ask again in a few seconds"
-     },
-     "status": {
-      "type": "string",
-      "enum": [
-       "found",
-       "pending",
-       "missing",
-       "failed"
-      ],
-      "description": "found; pending (ask again shortly); missing (Wikipedia has nothing on it); failed (Wikipedia couldn't be asked, tried again in half an hour)"
-     }
-    }
-   },
-   "BadBlend": {
-    "type": "object",
-    "required": [
-     "from_id",
-     "to_id"
-    ],
-    "properties": {
-     "from_id": {
-      "type": "string"
-     },
-     "to_id": {
-      "type": "string"
-     },
-     "technique": {
-      "type": "string",
-      "maxLength": 80
-     },
-     "details": {
-      "type": "object"
-     }
-    }
-   },
-   "Similar": {
-    "type": "object",
-    "properties": {
-     "source": {
-      "type": "string",
-      "description": "Where it came from: audiomuse"
-     },
-     "similar": {
-      "type": "array",
-      "items": {
-       "type": "object",
-       "properties": {
-        "album": {
-         "type": "string"
-        },
-        "artist": {
-         "type": "string"
-        },
-        "track_id": {
-         "type": "string",
-         "description": "One of its songs"
-        },
-        "score": {
-         "type": "number"
+    "/api/v1/profiles": {
+      "get": {
+        "summary": "Loudness, fades, key and beat grids of up to 500 songs",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": true,
+            "description": "Song ids (Navidrome's), comma-separated, at most 500",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Server"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The songs that have one; the rest are pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profiles"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
         }
-       }
       }
-     }
+    },
+    "/api/v1/genres": {
+      "get": {
+        "summary": "Every style with songs in its genre by their sound, most songs first",
+        "responses": {
+          "200": {
+            "description": "The styles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Genres"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Server"
+          }
+        ]
+      }
+    },
+    "/api/v1/genre": {
+      "get": {
+        "summary": "The songs of a genre by their sound, the ones that sound most like it first: all of them, or a random limit of them",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "description": "The genre as a tag (Trance, or Electronic / Trance)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Server"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Its songs (none when the style model isn't there: use the tags)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenreSongs"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        }
+      }
+    },
+    "/api/v1/genre/about": {
+      "get": {
+        "summary": "A short description of a genre, from Wikipedia (kept; a new one is looked up and may say pending)",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "description": "The genre as a tag (Trance, or Electronic / Trance)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Its description, or about null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenreAbout"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        }
+      }
+    },
+    "/api/v1/bad-blends": {
+      "post": {
+        "summary": "A song change marked as bad in the app",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BadBlend"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Kept",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Server"
+          }
+        ]
+      }
+    },
+    "/api/v1/openapi.json": {
+      "get": {
+        "summary": "This description",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1"
+          }
+        }
+      }
+    },
+    "/api/v1/similar/albums": {
+      "get": {
+        "summary": "Albums that sound like a song's album (asked of AudioMuse-AI's Siansa plugin for now)",
+        "parameters": [
+          {
+            "name": "track_id",
+            "in": "query",
+            "description": "A song of the album or artist (Navidrome's id)",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "server",
+            "in": "query",
+            "description": "The music server's name in AudioMuse-AI, when it has several",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Similar albums, most alike first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Similar"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          },
+          "502": {
+            "description": "AudioMuse-AI isn't set up or couldn't answer: {\"error\": why}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/similar/artists": {
+      "get": {
+        "summary": "Artists that sound like an artist (asked of AudioMuse-AI's Siansa plugin for now)",
+        "parameters": [
+          {
+            "name": "track_id",
+            "in": "query",
+            "description": "A song of the album or artist (Navidrome's id)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artist",
+            "in": "query",
+            "description": "The artist, by name (instead of track_id)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "server",
+            "in": "query",
+            "description": "The music server's name in AudioMuse-AI, when it has several",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Similar artists, most alike first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Similar"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          },
+          "502": {
+            "description": "AudioMuse-AI isn't set up or couldn't answer: {\"error\": why}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/audiomuse/api/similar_tracks": {
+      "get": {
+        "summary": "Songs that sound like a song, as AudioMuse-AI answers it (0.25).",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The song, by the server's id."
+          },
+          {
+            "name": "n",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "How many (50)."
+          },
+          {
+            "name": "mood_similarity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "true: only songs in the song's mood."
+          },
+          {
+            "name": "mood",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "With centroid_index: songs around that mood centre."
+          },
+          {
+            "name": "centroid_index",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "The mood centre's index."
+          },
+          {
+            "name": "server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The music server the app plays from (its id or name, from the capabilities); the default one without it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The songs, nearest first, with the server's own ids.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "item_id": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "author": {
+                        "type": "string"
+                      },
+                      "album": {
+                        "type": "string"
+                      },
+                      "distance": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The song isn't known here, or its sound isn't yet."
+          }
+        }
+      }
+    },
+    "/api/v1/audiomuse/api/find_path": {
+      "get": {
+        "summary": "A path of songs from one song to another.",
+        "parameters": [
+          {
+            "name": "start_song_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Where it starts."
+          },
+          {
+            "name": "end_song_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Where it ends."
+          },
+          {
+            "name": "start_mood",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "A mood to start from, in place of a song."
+          },
+          {
+            "name": "end_mood",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "A mood to end in, in place of a song."
+          },
+          {
+            "name": "max_steps",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "How many songs, both ends counted (25)."
+          },
+          {
+            "name": "server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The music server the app plays from (its id or name, from the capabilities); the default one without it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The path, in order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "item_id": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "author": {
+                            "type": "string"
+                          },
+                          "album": {
+                            "type": "string"
+                          },
+                          "distance": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The song isn't known here, or its sound isn't yet."
+          }
+        }
+      }
+    },
+    "/api/v1/audiomuse/api/mood_centroids": {
+      "get": {
+        "summary": "AudioMuse-AI's mood centres, each with its tags.",
+        "responses": {
+          "200": {
+            "description": "Mood name to its centres."
+          }
+        }
+      }
+    },
+    "/api/v1/audiomuse/api/sync": {
+      "get": {
+        "summary": "Songs' tempo, key, moods, genres and energy, without the vectors.",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Up to 500 song ids, comma separated."
+          },
+          {
+            "name": "server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The music server the app plays from (its id or name, from the capabilities); the default one without it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{tracks: [{id, title, artist, album, tempo, key, scale, mood_vector, other_features, energy}]}"
+          }
+        }
+      }
+    },
+    "/api/v1/audiomuse/api/alchemy": {
+      "post": {
+        "summary": "Songs near the ones to blend, away from the ones to avoid.",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The music server the app plays from (its id or name, from the capabilities); the default one without it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "op": {
+                          "type": "string",
+                          "enum": [
+                            "ADD",
+                            "SUBTRACT"
+                          ]
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "n": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The songs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "item_id": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "author": {
+                            "type": "string"
+                          },
+                          "album": {
+                            "type": "string"
+                          },
+                          "distance": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The song isn't known here, or its sound isn't yet."
+          }
+        }
+      }
+    },
+    "/api/v1/audiomuse/api/sonic_fingerprint/generate": {
+      "post": {
+        "summary": "Songs near what this server's user has played most (or near ids).",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The music server the app plays from (its id or name, from the capabilities); the default one without it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "n": {
+                    "type": "integer"
+                  },
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The songs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "item_id": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "author": {
+                        "type": "string"
+                      },
+                      "album": {
+                        "type": "string"
+                      },
+                      "distance": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The song isn't known here, or its sound isn't yet."
+          }
+        }
+      }
+    },
+    "/api/v1/audiomuse/api/clap/search": {
+      "post": {
+        "summary": "Songs that sound like a description in words, as AudioMuse-AI answers it (0.26).",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The music server the app plays from (its id or name, from the capabilities); the default one without it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "query"
+                ],
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  },
+                  "limit": {
+                    "type": "integer"
+                  },
+                  "steering": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "term": {
+                          "type": "string"
+                        },
+                        "direction": {
+                          "type": "string",
+                          "enum": [
+                            "more",
+                            "less"
+                          ]
+                        },
+                        "weight": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{query, count, results: [{item_id, title, author, album, similarity}], steering, steering_warnings}"
+          },
+          "400": {
+            "description": "No query, or nothing usable to steer by."
+          },
+          "503": {
+            "description": "No text model in this image, or no song has the vector for it yet."
+          }
+        }
+      }
+    },
+    "/api/v1/audiomuse/api/clap/concepts": {
+      "get": {
+        "summary": "The concepts a search by words can be steered by, in their groups.",
+        "responses": {
+          "200": {
+            "description": "{available, categories: [{category, label, terms: [{term, grounding}]}], max_terms, alpha_steps, default_alpha}"
+          }
+        }
+      }
+    },
+    "/api/v1/listens": {
+      "post": {
+        "summary": "Finished listens of a listener, from the app (the same listen twice is kept once)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Server"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "listens"
+                ],
+                "properties": {
+                  "user": {
+                    "type": "string",
+                    "description": "The listener: the name the app scrobbles as (the music server's user name)"
+                  },
+                  "listens": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "at",
+                        "artist",
+                        "title"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "The music server's id of the song"
+                        },
+                        "at": {
+                          "type": "integer",
+                          "description": "When it started, seconds since 1970"
+                        },
+                        "artist": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "album": {
+                          "type": "string"
+                        },
+                        "duration": {
+                          "type": "integer",
+                          "description": "Seconds"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "How many were kept, were here already, or had no date, artist or title",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "kept": {
+                      "type": "integer"
+                    },
+                    "known": {
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}"
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        }
+      }
+    },
+    "/api/v1/listens/now": {
+      "post": {
+        "summary": "What's playing now for a listener",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "artist",
+                  "title"
+                ],
+                "properties": {
+                  "user": {
+                    "type": "string"
+                  },
+                  "artist": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "album": {
+                    "type": "string"
+                  },
+                  "duration": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Taken"
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}"
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        }
+      }
+    },
+    "/api/v1/listens/top": {
+      "get": {
+        "summary": "A listener's most listened songs, artists or albums in a stretch of time",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "songs",
+                "artists",
+                "albums"
+              ],
+              "default": "songs"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Seconds since 1970",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 50
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Server"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The most listened, most first; a song has the named server's id when it has the song",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "listens": {
+                      "type": "integer"
+                    },
+                    "top": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}"
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        }
+      }
+    },
+    "/api/v1/loves": {
+      "post": {
+        "summary": "A heart given or taken back in the app: passed on to the listener's Last.fm when Siansa Beats sends their listens on",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "artist",
+                  "title"
+                ],
+                "properties": {
+                  "user": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "artist": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "loved": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "passed_on: whether it goes on to Last.fm"
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}"
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        }
+      }
     }
-   },
-   "MusicServer": {
-    "type": "object",
-    "description": "A music server Siansa Beats reads (never its password)",
-    "properties": {
-     "id": {
-      "type": "string",
-      "description": "What ?server= takes"
-     },
-     "kind": {
-      "type": "string",
-      "enum": [
-       "navidrome",
-       "emby",
-       "jellyfin"
-      ]
-     },
-     "name": {
-      "type": "string"
-     },
-     "url": {
-      "type": "string"
-     },
-     "user": {
-      "type": "string"
-     },
-     "default": {
-      "type": "boolean"
-     },
-     "songs": {
-      "type": "integer",
-      "description": "Its songs in Siansa Beats"
-     }
-    }
-   }
   },
-  "parameters": {
-   "Server": {
-    "name": "server",
-    "in": "query",
-    "required": false,
-    "description": "The music server meant: its id or name from the capabilities' servers. The default server without it. An unknown one answers 400.",
-    "schema": {
-     "type": "string"
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "BEATS_API_KEY or BEATS_PASSWORD"
+      },
+      "basic": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "User siansa, password BEATS_PASSWORD"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok"
+          },
+          "version": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "model_loaded": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Feature": {
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "songs": {
+            "type": "integer",
+            "description": "Songs that have it"
+          }
+        },
+        "additionalProperties": true
+      },
+      "Capabilities": {
+        "type": "object",
+        "required": [
+          "service",
+          "version",
+          "api",
+          "features"
+        ],
+        "properties": {
+          "service": {
+            "type": "string",
+            "const": "siansa-beats"
+          },
+          "version": {
+            "type": "string"
+          },
+          "api": {
+            "type": "integer",
+            "description": "The newest API version it answers"
+          },
+          "apis": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "music_server": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "set_up": {
+                "type": "boolean"
+              }
+            }
+          },
+          "songs": {
+            "type": "object",
+            "properties": {
+              "known": {
+                "type": "integer"
+              },
+              "analysed": {
+                "type": "integer"
+              },
+              "failed": {
+                "type": "integer"
+              },
+              "waiting": {
+                "type": "integer"
+              }
+            }
+          },
+          "features": {
+            "type": "object",
+            "description": "beat_grids, loudness, keys, genres, genre_about, bad_blends, similar; more may come",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Feature"
+            }
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "profile_ids": {
+                "type": "integer"
+              },
+              "genre_songs": {
+                "type": "integer"
+              }
+            }
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MusicServer"
+            },
+            "description": "Every music server here (0.23.0): the app names the one it plays from with ?server=<id>"
+          }
+        }
+      },
+      "Profile": {
+        "type": "object",
+        "required": [
+          "track_id",
+          "ref_lufs",
+          "start_ramp",
+          "end_ramp",
+          "duration_ms"
+        ],
+        "properties": {
+          "track_id": {
+            "type": "string"
+          },
+          "ref_lufs": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Integrated loudness (BS.1770, LUFS); null when not measured yet or silent"
+          },
+          "start_ramp": {
+            "type": "string",
+            "description": "How soon the song reaches each level: base64 of 3-byte (int8 dB, uint16le 100 ms chunk) pairs"
+          },
+          "end_ramp": {
+            "type": "string",
+            "description": "How long before the end the song is last at each level, the same way"
+          },
+          "duration_ms": {
+            "type": "integer"
+          },
+          "key": {
+            "type": "string",
+            "description": "C, C#, D … B"
+          },
+          "scale": {
+            "type": "string",
+            "enum": [
+              "major",
+              "minor"
+            ]
+          },
+          "intro_bpm": {
+            "type": "number",
+            "description": "Tempo at this end (intro)"
+          },
+          "intro_beat_ms": {
+            "type": "number",
+            "description": "A beat on the grid (ms from the start) (intro)"
+          },
+          "intro_bar_ms": {
+            "type": "number",
+            "description": "A downbeat on the grid (ms) (intro)"
+          },
+          "intro_rhythm": {
+            "type": "number",
+            "description": "How clear the beat is, 0..1 (intro)"
+          },
+          "intro_steady": {
+            "type": "number",
+            "description": "How steady the tempo is, 0..1 (intro)"
+          },
+          "intro_phrase_ms": {
+            "type": "number",
+            "description": "Where a phrase starts (ms) (intro)"
+          },
+          "intro_phrase_bars": {
+            "type": "number",
+            "description": "Bars in a phrase (intro)"
+          },
+          "intro_lock_ms": {
+            "type": "number",
+            "description": "Where the beat locks in (ms) (intro)"
+          },
+          "intro_bass_bars": {
+            "type": "number",
+            "description": "Bars before the bass comes in (intro)"
+          },
+          "intro_energy": {
+            "type": "number",
+            "description": "Loudness of this end against the song (dB) (intro)"
+          },
+          "outro_bpm": {
+            "type": "number",
+            "description": "Tempo at this end (outro)"
+          },
+          "outro_beat_ms": {
+            "type": "number",
+            "description": "A beat on the grid (ms from the start) (outro)"
+          },
+          "outro_bar_ms": {
+            "type": "number",
+            "description": "A downbeat on the grid (ms) (outro)"
+          },
+          "outro_rhythm": {
+            "type": "number",
+            "description": "How clear the beat is, 0..1 (outro)"
+          },
+          "outro_steady": {
+            "type": "number",
+            "description": "How steady the tempo is, 0..1 (outro)"
+          },
+          "outro_phrase_ms": {
+            "type": "number",
+            "description": "Where a phrase starts (ms) (outro)"
+          },
+          "outro_phrase_bars": {
+            "type": "number",
+            "description": "Bars in a phrase (outro)"
+          },
+          "outro_lock_ms": {
+            "type": "number",
+            "description": "Where the beat locks in (ms) (outro)"
+          },
+          "outro_bass_bars": {
+            "type": "number",
+            "description": "Bars before the bass comes in (outro)"
+          },
+          "outro_energy": {
+            "type": "number",
+            "description": "Loudness of this end against the song (dB) (outro)"
+          },
+          "beats_until_ms": {
+            "type": "number",
+            "description": "Where the beat stops well before the end (ms)"
+          },
+          "mix_track": {
+            "type": "boolean",
+            "description": "Part of a continuous mix"
+          },
+          "drops_ms": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "breakdowns_ms": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "beat_grid": {
+            "type": "string",
+            "const": "siansa_beats",
+            "description": "Present when the beat grid fields are there"
+          }
+        }
+      },
+      "Profiles": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "profiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Profile"
+            }
+          },
+          "pending": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Asked for, but nothing measured yet"
+          }
+        }
+      },
+      "Genre": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "genre": {
+            "type": "string"
+          },
+          "style": {
+            "type": "string"
+          },
+          "songs": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "description": "What to ask /api/v1/genre for"
+          },
+          "libraries": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Its songs in each Navidrome library, by the library's id: leave out a genre whose songs are all in libraries the app hides"
+          }
+        }
+      },
+      "Genres": {
+        "type": "object",
+        "properties": {
+          "styles": {
+            "type": "object",
+            "description": "The style model's state"
+          },
+          "genres": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Genre"
+            }
+          }
+        }
+      },
+      "GenreSongs": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "styles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "genres": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "why": {
+            "type": "string"
+          }
+        }
+      },
+      "GenreAbout": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "about": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "summary": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            }
+          },
+          "pending": {
+            "type": "boolean",
+            "description": "Still being looked up: ask again in a few seconds"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "found",
+              "pending",
+              "missing",
+              "failed"
+            ],
+            "description": "found; pending (ask again shortly); missing (Wikipedia has nothing on it); failed (Wikipedia couldn't be asked, tried again in half an hour)"
+          }
+        }
+      },
+      "BadBlend": {
+        "type": "object",
+        "required": [
+          "from_id",
+          "to_id"
+        ],
+        "properties": {
+          "from_id": {
+            "type": "string"
+          },
+          "to_id": {
+            "type": "string"
+          },
+          "technique": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "details": {
+            "type": "object"
+          }
+        }
+      },
+      "Similar": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Where it came from: audiomuse"
+          },
+          "similar": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "album": {
+                  "type": "string"
+                },
+                "artist": {
+                  "type": "string"
+                },
+                "track_id": {
+                  "type": "string",
+                  "description": "One of its songs"
+                },
+                "score": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        }
+      },
+      "MusicServer": {
+        "type": "object",
+        "description": "A music server Siansa Beats reads (never its password)",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "What ?server= takes"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "navidrome",
+              "emby",
+              "jellyfin"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          },
+          "default": {
+            "type": "boolean"
+          },
+          "songs": {
+            "type": "integer",
+            "description": "Its songs in Siansa Beats"
+          }
+        }
+      }
+    },
+    "parameters": {
+      "Server": {
+        "name": "server",
+        "in": "query",
+        "required": false,
+        "description": "The music server meant: its id or name from the capabilities' servers. The default server without it. An unknown one answers 400.",
+        "schema": {
+          "type": "string"
+        }
+      }
     }
-   }
   }
- }
 }

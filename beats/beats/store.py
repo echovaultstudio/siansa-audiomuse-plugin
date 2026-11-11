@@ -3,9 +3,9 @@
 Tables:
 
 - ``songs``: each song from the chosen Navidrome libraries, with its BPM tag and its library (``folder``);
-- ``genres``: a song's genres, each with where it came from (``source``): ``tag`` (its own tags), ``sound`` (the
-  styles :mod:`beats.style` hears, with their scores; ``sound-failed`` when its sound couldn't be read) and ``vote``
-  (:mod:`beats.genres`: what the song's genres are, for the radios);
+- ``genres``: a song's genres, each with where it came from (``source``): ``tag`` (its own tags) and ``sound`` (the
+  styles :mod:`beats.style` hears, with their scores: the song's genres, :mod:`beats.genres`; ``sound-failed`` when its
+  sound couldn't be read);
 - ``jobs``: each song's place in the queue and what's happening to it;
 - ``results``: Beat This!'s readings, one row per song and model, with every beat and downbeat;
 - ``events``: what the service did, for the page's activity list;
@@ -74,6 +74,12 @@ CREATE TABLE IF NOT EXISTS bad_blends (
 CREATE TABLE IF NOT EXISTS links (
     server TEXT, item_id TEXT, song_id TEXT, folder TEXT, PRIMARY KEY (server, item_id)
 );
+-- The sound of each song as AudioMuse-AI's models hear it (0.25): pulled from AudioMuse-AI, later made here.
+-- Never its tempo (the owner, 11 Nov): a song's tempo is Beat This!'s alone, in results.
+CREATE TABLE IF NOT EXISTS sound (
+    song_id TEXT PRIMARY KEY, musicnn BLOB, clap BLOB, key TEXT, scale TEXT, moods TEXT, other TEXT,
+    energy REAL, album_artist TEXT, year INTEGER, fp TEXT, source TEXT, at REAL
+);
 CREATE INDEX IF NOT EXISTS links_by_song ON links (song_id, server);
 CREATE INDEX IF NOT EXISTS links_by_server ON links (server, song_id);
 CREATE INDEX IF NOT EXISTS links_by_item ON links (item_id);
@@ -104,6 +110,7 @@ class Store:
         self.path = path
         self.lock = threading.RLock()
         self.genre_changes = 0  # counts every change to the genres table, so kept answers know when they're old
+        self.sound_changes = 0  # the same for the sound table: the vectors in memory are read again when it moves
         self.measure_changes = 0  # the same for the loudness measures
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
@@ -113,6 +120,14 @@ class Store:
         self.db.execute("PRAGMA synchronous=NORMAL")  # safe with WAL, and each change no longer waits for the disk twice
         with self._write():
             self.db.executescript(SCHEMA)
+            if "tempo" in {r[1] for r in self.db.execute("PRAGMA table_info(sound)")}:
+                # 0.25's first builds kept AudioMuse-AI's tempo: it goes, and is never asked for again.
+                try:
+                    self.db.execute("ALTER TABLE sound DROP COLUMN tempo")
+                except sqlite3.OperationalError:  # an SQLite from before columns could be dropped: emptied instead
+                    self.db.execute("UPDATE sound SET tempo=NULL")
+            if "error" not in {r[1] for r in self.db.execute("PRAGMA table_info(sound)")}:
+                self.db.execute("ALTER TABLE sound ADD COLUMN error TEXT")  # 0.27: why a song couldn't be heard here
             if "source" not in {r[1] for r in self.db.execute("PRAGMA table_info(measures)")}:
                 self.db.execute("ALTER TABLE measures ADD COLUMN source TEXT")  # 0.20.0's first builds had none
             if "folder" not in {r[1] for r in self.db.execute("PRAGMA table_info(songs)")}:
@@ -183,6 +198,78 @@ class Store:
             return [dict(r) for r in reader.execute(sql, args).fetchall()]
         finally:
             self._readers.put(reader)
+
+    # ---- the sound of songs (0.25) ----
+
+    SOUND_FIELDS = ("musicnn", "clap", "key", "scale", "moods", "other", "energy", "album_artist", "year", "fp")
+
+    def save_sound(self, rows, source="audiomuse"):
+        """Keeps the sound of songs: each row ``{"song_id", …SOUND_FIELDS}`` (vectors as float32 bytes). The number kept."""
+        now = time.time()
+        with self._write():
+            self.db.executemany(
+                "INSERT OR REPLACE INTO sound (song_id, " + ", ".join(self.SOUND_FIELDS) + ", source, at) VALUES (?"
+                + ", ?" * len(self.SOUND_FIELDS) + ", ?, ?)",
+                [(r["song_id"], *(r.get(f) for f in self.SOUND_FIELDS), source, now) for r in rows])
+        self.sound_changes += 1
+        return len(rows)
+
+    def sound_failed(self, song_id, error):
+        """Keeps why ``song_id`` couldn't be heard here, so it isn't tried again and again (a pull from AudioMuse-AI,
+        or hearing it after an update, replaces this)."""
+        with self._write():
+            self.db.execute("INSERT OR REPLACE INTO sound (song_id, source, at, error) VALUES (?, 'beats', ?, ?)",
+                            (song_id, time.time(), str(error)[:300]))
+
+    def without_sound(self, limit=20):
+        """Songs analysed for their beats whose sound isn't known (and that didn't fail to be heard), newest first."""
+        return [r["song_id"] for r in self._rows(
+            "SELECT j.song_id FROM jobs j LEFT JOIN sound o ON o.song_id = j.song_id WHERE j.state = 'done' AND "
+            "o.song_id IS NULL ORDER BY j.finished_at DESC LIMIT ?", (limit,))]
+
+    def sound_sources(self, server=None):
+        """``{"audiomuse": n, "beats": n, "failed": n}``: where each of ``server``'s songs' sound came from."""
+        of, args = self._of(server, "o.song_id")
+        out = {"audiomuse": 0, "beats": 0, "failed": 0}
+        for r in self._rows("SELECT CASE WHEN o.musicnn IS NULL THEN 'failed' ELSE COALESCE(o.source, 'audiomuse') END "
+                            f"AS source, COUNT(*) AS n FROM sound o WHERE 1=1{of} GROUP BY 1", args):
+            out[r["source"]] = out.get(r["source"], 0) + r["n"]
+        return out
+
+    def sound_prints(self):
+        """``{song id: fp}``: what AudioMuse-AI's analysis of each song looked like when it was pulled."""
+        return {r["song_id"]: r["fp"] for r in self._rows("SELECT song_id, fp FROM sound")}
+
+    def sound_vectors(self, column="musicnn"):
+        """Every song with a ``column`` vector, with what's said of it in an answer: rows of ``{"song_id", "vector"
+        (bytes), "title", "artist", "album", "album_artist", "other"}``, by song id."""
+        if column not in ("musicnn", "clap"):
+            raise ValueError(column)
+        return self._rows(f"SELECT o.song_id, o.{column} AS vector, s.title, s.artist, s.album, o.album_artist, o.other "
+                          f"FROM sound o JOIN songs s ON s.id=o.song_id WHERE o.{column} IS NOT NULL ORDER BY o.song_id")
+
+    def sound_rows(self, song_ids):
+        """``{song id: its sound without the vectors}`` of the songs among ``song_ids`` that have one."""
+        out, ids = {}, list(dict.fromkeys(song_ids))
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            for r in self._rows("SELECT o.song_id, o.key, o.scale, o.moods, o.other, o.energy, o.album_artist, "
+                                "o.year, o.fp, s.title, s.artist, s.album FROM sound o JOIN songs s ON s.id=o.song_id "
+                                f"WHERE o.song_id IN ({', '.join('?' for _ in chunk)})", chunk):
+                out[r["song_id"]] = r
+        return out
+
+    def sound_counts(self, server=None):
+        """``{"songs", "sound", "words"}``: ``server``'s songs, how many have their sound, how many the vector the
+        search by words needs."""
+        of, args = self._of(server)
+        row = self._rows("SELECT COUNT(*) AS songs, COUNT(o.musicnn) AS sound, COUNT(o.clap) AS words FROM songs s "
+                         f"LEFT JOIN sound o ON o.song_id=s.id WHERE 1=1{of}", args)[0]
+        return row
+
+    def server_song_ids(self, server):
+        """The ids here of the songs ``server`` has."""
+        return {r["song_id"] for r in self._rows("SELECT DISTINCT song_id FROM links WHERE server=?", (server,))}
 
     # ---- songs and genres ----
 
@@ -325,7 +412,7 @@ class Store:
                 weight = weights[i] if weights else 1.0
                 self.db.execute("INSERT OR REPLACE INTO genres VALUES (?,?,?,?)", (song_id, source, label, weight))
 
-    # ---- genres by vote (beats.genres): the sound's styles, the tags, and the vote of both ----
+    # ---- genres (beats.genres): the styles each song's sound has, and its tags beside them ----
 
     def songs_without_style(self, limit=50):
         """Songs of the chosen libraries whose sound hasn't been given styles yet (nor failed to): the next ones for
@@ -348,12 +435,12 @@ class Store:
         return {"done": by.get("sound", 0), "failed": by.get("sound-failed", 0), "total": total}
 
     def tag_genres(self, limit=300):
-        """The songs' own genre tags, most songs first: ``["Hard Rock", …]`` (the genres Siansa shows without a vote)."""
+        """The songs' own genre tags, most songs first: ``["Hard Rock", …]`` (the genres Siansa shows without Siansa Beats)."""
         return [r["label"] for r in self._rows(
             "SELECT label, COUNT(*) AS n FROM genres WHERE source='tag' GROUP BY label ORDER BY n DESC LIMIT ?", (limit,))]
 
     def genre_rows(self, song_ids=None, sources=("sound", "tag")):
-        """``{song_id: {source: [(label, weight)]}}`` of ``song_ids`` (every song when ``None``), for voting."""
+        """``{song_id: {source: [(label, weight)]}}`` of ``song_ids`` (every song when ``None``)."""
         out = {}
         marks = ", ".join("?" for _ in sources)
         where, args = f"source IN ({marks})", list(sources)
@@ -366,53 +453,58 @@ class Store:
             out.setdefault(r["song_id"], {}).setdefault(r["source"], []).append((r["label"], r["weight"]))
         return out
 
-    def replace_votes(self, votes):
-        """Writes each song's ``vote`` rows (``{song_id: [(label, score)]}``) in one go."""
-        self.genre_changes += 1
-        with self._write():
-            for song_id, voted in votes.items():
-                self.db.execute("DELETE FROM genres WHERE song_id=? AND source='vote'", (song_id,))
-                self.db.executemany("INSERT OR REPLACE INTO genres VALUES (?, 'vote', ?, ?)",
-                                    [(song_id, label, score) for label, score in voted])
+    # A song is in a style's genre when its sound scores it ``minimum`` or more, and always in its best one.
+    HEARD = ("g.source='sound' AND (g.weight >= ? OR NOT EXISTS (SELECT 1 FROM genres b WHERE b.song_id = g.song_id "
+             "AND b.source='sound' AND b.weight > g.weight))")
 
-    def vote_counts(self, minimum, server=None):
-        """``{label: songs}``: how many songs (``server``'s only, when given) have each style in their vote at
-        ``minimum`` or more."""
+    def drop_votes(self):
+        """Removes the genres voted from sound and tags together (before 0.28). How many rows went."""
+        with self._write():
+            gone = self.db.execute("DELETE FROM genres WHERE source='vote'").rowcount
+        if gone:
+            self.genre_changes += 1
+        return gone
+
+    def heard_counts(self, minimum, server=None):
+        """``{label: songs}``: how many songs (``server``'s only, when given) are in each style's genre by their
+        sound."""
         if server is None:
             return {r["label"]: r["n"] for r in self._rows(
-                "SELECT label, COUNT(*) AS n FROM genres WHERE source='vote' AND weight >= ? GROUP BY label", (minimum,))}
-        # The server's songs first, then each one's votes (CROSS JOIN keeps that order: five times quicker than the
-        # votes first on a big library).
+                f"SELECT g.label, COUNT(*) AS n FROM genres g WHERE {self.HEARD} GROUP BY g.label", (minimum,))}
+        # The server's songs first, then each one's styles (CROSS JOIN keeps that order: five times quicker than the
+        # styles first on a big library).
         return {r["label"]: r["n"] for r in self._rows(
-            "SELECT g.label, COUNT(*) AS n FROM links l CROSS JOIN genres g ON g.song_id = l.song_id AND g.source='vote' "
-            "WHERE l.server = ? AND g.weight >= ? GROUP BY g.label", (server, minimum))}
+            "SELECT g.label, COUNT(*) AS n FROM links l CROSS JOIN genres g ON g.song_id = l.song_id "
+            f"WHERE l.server = ? AND {self.HEARD} GROUP BY g.label", (server, minimum))}
 
-    def vote_counts_by_library(self, minimum, server=MAIN):
-        """``{label: {library: songs}}``: :meth:`vote_counts` split by the library the songs are in on ``server``, so
+    def heard_counts_by_library(self, minimum, server=MAIN):
+        """``{label: {library: songs}}``: :meth:`heard_counts` split by the library the songs are in on ``server``, so
         the app can leave out a genre whose songs are all in libraries it hides."""
         out = {}
         for r in self._rows(
                 "SELECT g.label, COALESCE(l.folder, '') AS folder, COUNT(*) AS n FROM links l CROSS JOIN genres g "
-                "ON g.song_id = l.song_id AND g.source='vote' WHERE l.server = ? AND g.weight >= ? "
-                "GROUP BY g.label, l.folder", (server, minimum)):
+                f"ON g.song_id = l.song_id WHERE l.server = ? AND {self.HEARD} GROUP BY g.label, l.folder",
+                (server, minimum)):
             out.setdefault(r["label"], {})[str(r["folder"])] = r["n"]
         return out
 
-    def songs_voted(self, labels, minimum, limit, server=None):
-        """Song ids (random order) with any of ``labels`` in their vote at ``minimum`` or more, at most ``limit``: the
-        ids here, or ``server``'s own for the songs it has."""
+    def songs_heard(self, labels, minimum, limit=None, server=None):
+        """Every song id in the genre of any of ``labels`` by their sound, the ones that sound most like it first (the
+        first ``limit`` when given): the ids here, or ``server``'s own for the songs it has."""
         labels = list(labels)
         if not labels:
             return []
         marks = ", ".join("?" for _ in labels)
         if server is None:
-            return [r["song_id"] for r in self._rows(
-                f"SELECT DISTINCT song_id FROM genres WHERE source='vote' AND weight >= ? AND label IN ({marks}) "
-                "ORDER BY RANDOM() LIMIT ?", (minimum, *labels, limit))]
-        return [r["item_id"] for r in self._rows(
-            "SELECT DISTINCT l.item_id FROM genres g JOIN links l ON l.song_id = g.song_id AND l.server = ? "
-            f"WHERE g.source='vote' AND g.weight >= ? AND g.label IN ({marks}) ORDER BY RANDOM() LIMIT ?",
-            (server, minimum, *labels, limit))]
+            rows = self._rows(
+                f"SELECT g.song_id AS id, MAX(g.weight) AS w FROM genres g WHERE {self.HEARD} "
+                f"AND g.label IN ({marks}) GROUP BY g.song_id", (minimum, *labels))
+        else:
+            rows = self._rows(
+                "SELECT l.item_id AS id, MAX(g.weight) AS w FROM genres g JOIN links l ON l.song_id = g.song_id "
+                f"AND l.server = ? WHERE {self.HEARD} AND g.label IN ({marks}) GROUP BY l.item_id",
+                (server, minimum, *labels))
+        return [r["id"] for r in sorted(rows, key=lambda r: -r["w"])][:limit]
 
     def genres(self, song_id):
         return self._rows("SELECT source, label, weight FROM genres WHERE song_id=? ORDER BY source, weight DESC, label",
@@ -426,7 +518,7 @@ class Store:
         return [r["id"] for r in self._rows("SELECT id FROM songs")]
 
     GONE_WITH_A_SONG = (("songs", "id"), ("genres", "song_id"), ("jobs", "song_id"), ("results", "song_id"),
-                        ("marks", "song_id"), ("measures", "song_id"), ("links", "song_id"))
+                        ("marks", "song_id"), ("measures", "song_id"), ("links", "song_id"), ("sound", "song_id"))
 
     def remove(self, song_id):
         self.genre_changes += 1
@@ -443,6 +535,24 @@ class Store:
     def remove_server(self, server):
         """Forgets ``server``: as :meth:`remove_folder`, for all of its libraries."""
         return self._unlink("server=?", (server,))
+
+    def gone_from(self, server, folder, item_ids):
+        """The ids ``server``'s library ``folder`` had here that aren't among ``item_ids`` (what it has now)."""
+        now = set(item_ids)
+        return [r["item_id"] for r in self._rows("SELECT item_id FROM links WHERE server=? AND folder=?",
+                                                 (server, str(folder))) if r["item_id"] not in now]
+
+    def remove_items(self, server, item_ids):
+        """Forgets ``server``'s songs ``item_ids`` (gone from it): a song no server has any more goes with everything
+        known about it; one another server still has stays. How many songs went altogether."""
+        before = len(self._rows("SELECT id FROM songs"))
+        ids = list(dict.fromkeys(item_ids))
+        for start in range(0, len(ids), 400):
+            chunk = ids[start:start + 400]
+            self._unlink(f"server=? AND item_id IN ({', '.join('?' for _ in chunk)})", (server, *chunk))
+        if ids:
+            self.sound_changes += 1
+        return before - len(self._rows("SELECT id FROM songs"))
 
     def _unlink(self, where, args):
         self.genre_changes += 1
@@ -583,6 +693,16 @@ class Store:
         with self._write():
             self.db.execute(f"UPDATE results SET {', '.join(f'{k}=?' for k in keys)} WHERE song_id=? AND model=?",
                             (*[_column(k, values[k]) for k in keys], song_id, model))
+
+    def tempos(self, song_ids, model):
+        """``{song_id: bpm}`` of the songs among ``song_ids`` Beat This! has heard: the only tempo a song has here."""
+        out, ids = {}, list(dict.fromkeys(song_ids))
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            for r in self._rows("SELECT song_id, bpm FROM results WHERE model=? AND bpm IS NOT NULL AND song_id IN "
+                                f"({', '.join('?' for _ in chunk)})", (model, *chunk)):
+                out[r["song_id"]] = r["bpm"]
+        return out
 
     def ends(self, song_ids, model):
         """``{song_id: ends}`` (:func:`beats.grid.app_ends`) of the songs among ``song_ids`` that have them."""

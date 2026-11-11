@@ -294,7 +294,8 @@ class Service(Base):
                "BEATS_PASSWORD": password, "BEATS_API_KEY": api_key, "PORT": "0"}
         self.tracker = FakeTracker()
         self.app = App(Config(env), tracker=self.tracker, decode=fake_decode, style=style or FakeStyle(
-            os.path.join(self.tmp, "models"), on=False), sound=fake_sound)
+            os.path.join(self.tmp, "models"), on=False), sound=fake_sound, words=getattr(self, "words", None),
+                       hearer=getattr(self, "hearer", None))
         self.server = make_server(self.app, host="127.0.0.1", port=0)
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
         import threading
@@ -560,7 +561,7 @@ class ServiceTest(Service):
         spec = self.call("/api/v1/openapi.json")
         self.assertEqual(spec["info"]["version"], "1")
         for path in ("/api/v1/capabilities", "/api/v1/profiles", "/api/v1/genres", "/api/v1/genre", "/api/v1/genre/about",
-                     "/api/v1/bad-blends"):
+                     "/api/v1/bad-blends", "/api/v1/listens", "/api/v1/listens/now", "/api/v1/listens/top", "/api/v1/loves"):
             self.assertIn(path, spec["paths"])
 
     def test_v1_similar_albums_and_artists_asked_of_audiomuse(self):
@@ -672,31 +673,60 @@ class ServiceTest(Service):
         self.assertEqual(states["t140"], "done")
         self.assertEqual(states["bad"], "failed")  # its own error, not a fixed bug: left alone
 
-    def test_genres_are_voted_from_the_sound_and_the_tags(self):
+    def test_genres_come_from_the_sound_alone(self):
         style = FakeStyle(os.path.join(self.tmp, "models"))
         self.start(style=style)
         self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
         songs = {s["id"]: s for s in self.call("/api/songs")}
-        vote = lambda sid: [g["label"] for g in songs[sid]["genres"] if g["source"] == "vote"]
-        self.assertEqual(vote("t140")[0], "Electronic---Trance")  # its sound and its tag agree
-        self.assertEqual(vote("t96w")[0], "Electronic---Trance")  # its sound wins over its Pop tag
-        self.assertEqual(vote("t122")[:2], ["Electronic---House", "Electronic---Deep House"])  # its House tag tips it
+        self.assertEqual({g["source"] for s in songs.values() for g in s["genres"]} - {"tag", "sound"}, set())  # no vote
         self.assertEqual({sid for sid, _ in style.calls}, {"t140", "t122", "t96w"})  # from the samples on hand
         radio = self.call("/api/genre?name=" + urllib.parse.quote("Electronic / Trance"))
         self.assertEqual(radio["styles"], ["Electronic---Trance"])
-        self.assertEqual(set(radio["ids"]), {"t140", "t96w"})
+        self.assertEqual(radio["ids"], ["t140", "t96w"])  # the one that sounds most like it first
+        self.assertEqual(radio["songs"], 2)
         self.assertEqual(set(self.call("/api/genre?name=Electronic")["ids"]), {"t140", "t122", "t96w"})
         self.assertEqual(self.call("/api/genre?name=Opera")["ids"], [])
+        # Its House tag no longer tips the song: Deep House is what it sounds like most, House second.
+        self.assertEqual(self.call("/api/genre?name=House")["ids"], ["t122"])
+        # Tagged Pop, sounds like trance: in Trance, and in no genre it only scores 0.10 for.
+        self.assertEqual(self.call("/api/genre?name=Ballad")["ids"], [])
+        self.assertEqual(self.call("/api/genre?name=Pop")["ids"], [])
         listed = self.call("/api/genres")
         self.assertEqual(listed["genres"][0], {"label": "Electronic---Trance", "genre": "Electronic", "style": "Trance",
                                                "songs": 2, "name": "Trance", "libraries": {"1": 2}})
+        self.assertEqual({g["style"]: g["songs"] for g in listed["genres"]},
+                         {"Trance": 2, "Progressive Trance": 1, "Deep House": 1, "House": 1})
         status = self.call("/api/status")["styles"]
         self.assertTrue(status["available"])
         self.assertEqual(status["done"], 3)
         self.assertEqual(status["failed"], 0)  # the broken one failed before: not asked for its style
         _, csv_body = self.call("/api/export.csv", raw=True)
-        self.assertIn("Trance 0.71", csv_body.decode())
+        self.assertIn("Trance 0.71 / Progressive Trance 0.40", csv_body.decode())
+
+    def test_a_genre_gives_all_its_songs_and_a_song_is_always_in_its_best(self):
+        style = FakeStyle(os.path.join(self.tmp, "models"))
+        style.HEARD = dict(style.HEARD, t96w=[("Pop---Ballad", 0.08), ("Electronic---Trance", 0.05)])
+        self.start(style=style)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.assertEqual(self.call("/api/v1/genre?name=Ballad")["ids"], ["t96w"])  # its best, however low
+        self.assertEqual(self.call("/api/v1/genre?name=Trance")["ids"], ["t140"])
+        everything = self.call("/api/v1/genre?name=Electronic")  # no limit asked: all of them
+        self.assertEqual((set(everything["ids"]), everything["songs"]), ({"t140", "t122"}, 2))
+        one = self.call("/api/v1/genre?name=Electronic&limit=1")
+        self.assertEqual((len(one["ids"]), one["songs"]), (1, 2))
+
+    def test_genres_voted_before_are_removed(self):
+        style = FakeStyle(os.path.join(self.tmp, "models"))
+        self.start(style=style)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.app.store.set_genres("t96w", "vote", ["Pop---Ballad"], [0.45])  # as 0.27 kept it, from its Pop tag
+        self.assertEqual(self.app.store.drop_votes(), 1)
+        self.assertEqual(self.app.store.drop_votes(), 0)
+        self.assertEqual([g for g in self.app.store.genres("t96w") if g["source"] == "vote"], [])
+        self.assertEqual(self.call("/api/genre?name=Ballad")["ids"], [])
 
     def test_songs_analysed_before_get_their_styles_while_the_queue_is_empty(self):
         style = FakeStyle(os.path.join(self.tmp, "models"), on=False)

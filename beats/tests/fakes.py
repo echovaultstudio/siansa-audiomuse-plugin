@@ -33,6 +33,9 @@ def file_path(song):
     return f"{song['artist']}/{song.get('album', 'Test')}/{song['file']}"
 
 
+PICTURE = b"\x89PNG\r\n\x1a\n"  # how a picture starts: the tests' pictures are this and the id they're of
+
+
 def entry(song):
     e = {"id": song["id"], "title": song["title"], "artist": song["artist"], "album": song.get("album", "Test"),
          "duration": int(song.get("duration", 60)), "suffix": os.path.splitext(song["file"])[1].lstrip(".")}
@@ -41,6 +44,7 @@ def entry(song):
     if song.get("genre"):
         e["genre"] = song["genre"]
         e["genres"] = [{"name": g.strip()} for g in song["genre"].split("/")]
+    e["coverArt"], e["artistId"] = "mf-" + song["id"], "artist-of-" + song["id"]
     # Made up from the tags, as Navidrome's Subsonic path is unless the player reports real paths.
     e["path"] = f"{song['artist']}/{e['album']}/01 - {song['title']}.{e['suffix']}"
     return e
@@ -54,6 +58,15 @@ class FakeServer:
         self.requests = []
         self.search_all = True  # whether search3 finds every song for an empty query (else: album by album)
         self.native = True  # whether Navidrome's own API answers (else only Subsonic's made-up paths)
+        # AudioMuse-AI's export for apps (/api/sync): {song id: its track, as AudioMuse-AI gives it}; None: it has none.
+        self.sync = None
+        # AudioMuse-AI's music servers (/api/servers), each with the song ids its user sees; None: it has no list.
+        # [{"server_id", "name", "server_type", "is_default", "sees": {ids}}]
+        self.am_servers = None
+        self.played = {}  # song id -> plays, for Navidrome's own API's play counts
+        # Pictures (0.30): the cover ids ("mf-<song>") and artist ids ("ar-artist-of-<song>") that have one; any other
+        # is answered with the stand-in, as Navidrome does: an ordinary picture marked "don't keep", with no version.
+        self.pictures = set()
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -86,13 +99,46 @@ class FakeServer:
                     if len(self.requestline) > 4094:  # as AudioMuse-AI's web server (gunicorn's limit_request_line)
                         return self.reply(400, {"error": "Request Line is too large"})
                     return self.plugin(url.path, q)
+                if url.path == "/api/sync":
+                    if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+                        return self.reply(401, {"error": "login needed"})
+                    if fake.sync is None:
+                        return self.reply(404, {"error": "not found"})
+                    if len(self.requestline) > 4094:
+                        return self.reply(400, {"error": "Request Line is too large"})
+                    tracks = [fake.sync[i] for i in sorted(fake.sync)]
+                    if fake.am_servers is not None:  # only what the asked server's user sees; its default's without one
+                        asked = [m for m in fake.am_servers if q.get("server") in (m["server_id"], m["name"])] \
+                            if q.get("server") else [m for m in fake.am_servers if m["is_default"]]
+                        if not asked:
+                            return self.reply(400, {"error": "Invalid server selection."})
+                        tracks = [t for t in tracks if t["id"] in asked[0]["sees"]]
+                    if "ids" in q:
+                        tracks = [t for t in tracks if t["id"] in q["ids"].split(",")]
+                    total, limit, page = len(tracks), int(q.get("limit", 500)), int(q.get("page", 1))
+                    tracks = tracks[(page - 1) * limit:page * limit]
+                    if q.get("fields") == "index":
+                        tracks = [{"id": t["id"], "fp": t["fp"]} for t in tracks]
+                    more = page * limit < total and "ids" not in q
+                    return self.reply(200, {"tracks": tracks, "total_tracks": total, "has_more": more,
+                                            "next_page": page + 1 if more else None, "provider_type": "navidrome"})
+                if url.path == "/api/servers":
+                    if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+                        return self.reply(401, {"error": "login needed"})
+                    if fake.am_servers is None:
+                        return self.reply(404, {"error": "not found"})
+                    return self.reply(200, {"servers": [{k: v for k, v in m.items() if k != "sees"} | {"music_libraries": ""}
+                                                        for m in fake.am_servers], "multi_server_enabled": True})
                 if url.path == "/api/song" and fake.native:
                     if self.headers.get("X-ND-Authorization") not in [f"Bearer nd-{u}" for u in USERS]:
                         return self.reply(401, {"error": "login needed"})
                     rows = [s for s in fake.songs if "library_id" not in q or str(s.get("library", "1")) == q["library_id"]]
+                    if q.get("_sort") == "play_count":
+                        rows = sorted(rows, key=lambda s: -fake.played.get(s["id"], 0))
                     rows = rows[int(q.get("_start", 0)):int(q.get("_end", len(rows)))]
                     return self.reply(200, [{"id": s["id"], "libraryId": int(s.get("library", "1")),
-                                             "libraryPath": "/music", "path": file_path(s)} for s in rows])
+                                             "libraryPath": "/music", "path": file_path(s),
+                                             "playCount": fake.played.get(s["id"], 0)} for s in rows])
                 if not url.path.startswith("/rest/"):
                     return self.reply(404, {"error": "not found"})
                 if q.get("t") != hashlib.md5((USERS.get(q.get("u"), "\0") + q.get("s", "")).encode()).hexdigest() \
@@ -126,6 +172,11 @@ class FakeServer:
                     if q.get("id") not in by_id:
                         return self.subsonic(error="Song not found")
                     return self.subsonic({"song": entry(by_id[q["id"]])})
+                if method == "getCoverArt":
+                    if q.get("id") in fake.pictures:
+                        return self.reply(200, PICTURE + q["id"].encode(), "image/png",
+                                          {"ETag": '"v1"', "Cache-Control": "public, max-age=315360000"})
+                    return self.reply(200, PICTURE + b"stand-in", "image/webp", {"Cache-Control": "no-store"})
                 if method == "stream":
                     song = by_id.get(q.get("id"))
                     if not song:
@@ -195,6 +246,8 @@ class FakeMediaServer:
                  under_emby=False):
         self.folder, self.jellyfin, self.paths, self.root = folder, jellyfin, paths, root
         self.under_emby = under_emby  # an Emby set up to answer under /emby only (a reverse proxy's way)
+        self.pictures = set()  # the item ids (an album's, an artist's) that have a primary picture; the rest: HTTP 404
+        self.forbids = False  # whether it turns every request away (HTTP 403), as Emby does a caller it takes for remote
         self.prefix = "j-" if jellyfin else "e-"
         with open(os.path.join(folder, "catalog.json")) as f:
             self.songs = [s for s in json.load(f) if only is None or s["id"] in only] + list(extra)
@@ -258,9 +311,14 @@ class FakeMediaServer:
                      "Genres": [g.strip() for g in (song.get("genre") or "").split("/") if g.strip()]}
                 if fake.paths:
                     e["Path"] = f"{fake.root}/{file_path(song)}"
+                e["AlbumId"], e["ArtistItems"] = "album-of-" + song["id"], [{"Id": "artist-of-" + song["id"], "Name": song["artist"]}]
+                if e["AlbumId"] in fake.pictures:
+                    e["AlbumPrimaryImageTag"] = "tag1"
                 return e
 
             def do_GET(self):
+                if fake.forbids:  # an Emby that lets in local addresses only, asked from elsewhere
+                    return self.reply(403, b"Forbidden", "text/plain", {"Server": "UPnP/1.0 DLNADOC/1.50"})
                 if not self.unprefixed():
                     return self.reply(404, b"<html>Not found</html>", "text/html")
                 url = urllib.parse.urlparse(self.path)
@@ -285,6 +343,14 @@ class FakeMediaServer:
                     return self.reply(200, {"Items": [self.item(s) for s in fake.songs[start:start + count]],
                                             "TotalRecordCount": len(fake.songs)})
                 parts = url.path.strip("/").split("/")
+                if len(parts) == 4 and parts[0] == "Items" and parts[2:] == ["Images", "Primary"]:
+                    if parts[1] in fake.pictures:
+                        return self.reply(200, PICTURE + parts[1].encode(), "image/jpeg")
+                    return self.reply(404, b"", "text/plain")
+                one = parts[-1] if (parts[:1] == ["Items"] and len(parts) == 2) or (parts[:3] == ["Users", "u1", "Items"] and len(parts) == 4) else None
+                if one:
+                    song = next((s for s in fake.songs if fake.prefix + s["id"] == one), None)
+                    return self.reply(200, self.item(song)) if song else self.reply(404, b"", "text/plain")
                 if len(parts) == 3 and parts[0] == "Audio" and parts[2] == "stream" and q.get("Static") == "true":
                     song = next((s for s in fake.songs if fake.prefix + s["id"] == parts[1]), None)
                     if not song:
