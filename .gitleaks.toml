@@ -1,0 +1,11 @@
+# Secret scanning (see .github/workflows/checks.yml): gitleaks' own rules for API keys, tokens and passwords, with
+# these known, intentional exceptions.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known non-secrets"
+paths = [
+  # The stand-in music servers and AudioMuse-AI of the tests, with their made-up logins.
+  '''beats/tests/''',
+]

@@ -1,0 +1,19 @@
+# Weekly pull requests for outdated dependencies, and alerts for known vulnerabilities in them. They go to dev, to be
+# tried in the dev image first, as the Siansa app's do.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    target-branch: dev
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  # Siansa Beats' base image. The Python libraries are pinned in the Dockerfile's pip lines, which Dependabot can't
+  # read: they're updated by hand, and the image's checks (beats.yml) must pass with them.
+  - package-ecosystem: docker
+    directory: "/beats"
+    target-branch: dev
+    schedule:
+      interval: weekly
