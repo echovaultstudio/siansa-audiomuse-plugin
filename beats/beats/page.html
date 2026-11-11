@@ -230,6 +230,11 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 .form input, .form select { width: 100%; border-radius: 10px; padding: 9px 12px; }
 @media (max-width: 600px) { .form { grid-template-columns: minmax(0, 1fr); } }
 #key-text { overflow-wrap: anywhere; user-select: all; }
+/* A library being read: what, how far, and why (0.24.1). */
+.reading { display: flex; gap: 12px; align-items: flex-start; margin: 12px 0 4px; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--amber) 12%, transparent); }
+.spinner { flex: none; width: 18px; height: 18px; margin-top: 2px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--amber) 30%, transparent); border-top-color: var(--amber); animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 .picks { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 4px; }
 .picks button { width: 100%; justify-content: flex-start; border-radius: 10px; text-align: left; }
 .list { margin: 0; padding-left: 22px; font-size: 0.9rem; } .list li { margin: 4px 0; }
@@ -312,6 +317,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         <h3>Libraries to analyse</h3>
         <div class="libs" role="group" aria-label="Libraries to analyse"><span id="libs" class="controls"><span class="sub">Asking the server…</span></span></div>
         <div class="sub" id="libs-note" role="status"></div>
+        <div class="reading" id="reading" role="status" hidden><span class="spinner" aria-hidden="true"></span><div><b id="reading-what"></b><div class="sub" id="reading-step"></div></div></div>
         <div class="controls row-gap">
           <button class="primary" id="start" title="Analyse the ticked libraries: their songs are read from the server and queued">Start analysis</button>
           <button id="read" title="Read the chosen libraries now (it's done every 6 hours anyway)">Look for new songs</button>
@@ -524,7 +530,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
               <label>Name <input type="text" id="sf-name" placeholder="As you'd call it: Living room Emby" maxlength="60"></label>
               <label class="wide">Address <input type="url" id="sf-url" placeholder="http://192.168.1.10:8096" required></label>
               <label>User name <input type="text" id="sf-user" required autocapitalize="none" spellcheck="false"></label>
-              <label>Password <input type="password" id="sf-password" required autocomplete="new-password"></label>
+              <label>Password <input type="password" id="sf-password" autocomplete="new-password" placeholder="Empty if the user has none (Emby, Jellyfin)"></label>
             </div>
             <div class="controls">
               <button type="submit" class="primary" id="sf-add">Add</button>
@@ -666,6 +672,7 @@ async function refreshStatus() {
   }
   const s = status, c = s.counts, total = c.songs || 0;
   drawServers(s);
+  drawReading(s.reading);
   if (s.bad_blends !== badCount) { badCount = s.bad_blends; refreshBad(); }
   const done = c.done || 0, failed = c.failed || 0, queued = c.queued || 0;
   const busy = BUSY.reduce((n, k) => n + (c[k] || 0), 0);
@@ -674,6 +681,9 @@ async function refreshStatus() {
     $("now-what").textContent = `${s.current.artist} – ${s.current.title}`;
     $("now-step").textContent = `${s.current.step} for ${fmt(s.current.for_seconds)} s` +
       (s.next ? ` · next: ${s.next.artist} – ${s.next.title} (${s.next.step})` : "");
+  } else if (s.reading && !queued) {
+    $("now-what").textContent = `Reading ${s.reading.server_name}'s libraries`;
+    $("now-step").textContent = `${s.reading.library || "Starting"}: ${s.reading.songs == null ? "asking for its songs…" : `matching its ${num(s.reading.songs)} songs with those already here…`}`;
   } else if (s.regridding) {
     $("now-what").textContent = "Working out songs again from their saved beats";
     $("now-step").textContent = `${s.regridding.done} of ${s.regridding.total} (an update changed how; no model needed)`;
@@ -784,7 +794,7 @@ function drawLibraries() {
   const ticked = new Set(picked || savedIds());
   $("libs").innerHTML = libraries.map((l) => `<button data-lib="${esc(l.id)}" aria-pressed="${ticked.has(l.id)}" title="${ticked.has(l.id) ? "Ticked: tap to leave it out" : "Left out: tap to tick it"}">${esc(l.name)}<span class="n">${l.songs ? `${l.done} of ${l.songs}` : ""}</span></button>`).join("") || `<span class="sub">${esc(serverName())} has no music libraries.</span>`;
   const changed = picked && [...ticked].sort().join() !== savedIds().sort().join();
-  $("libs-note").textContent = changed ? "Not started yet: press Start analysis" : "";
+  $("libs-note").textContent = changed ? "Not started yet: press Start analysis" : readNote;
   const left = libraries.filter((l) => !l.on && l.songs);
   $("left-out").hidden = !left.length;
   $("left-out").innerHTML = left.map((l) => `<span class="sub">${esc(l.name)} is left out, but ${l.songs} of its songs are still here.</span><button data-remove="${esc(l.id)}" data-name="${esc(l.name)}" data-songs="${l.songs}">Remove them</button>`).join("");
@@ -797,13 +807,39 @@ $("libs").addEventListener("click", (e) => {
   picked = [...ticked];
   drawLibraries();
 });
+// Reading a library runs in the background (0.24.1): the page shows what's being read until it's done, then what came
+// of it, instead of waiting minutes on the button with nothing to show.
+let wasReading = false, readNote = "";
+function drawReading(r) {
+  $("reading").hidden = !r;
+  $("start").disabled = $("read").disabled = !!r;
+  $("start").textContent = r ? "Reading…" : "Start analysis";
+  if (r) {
+    wasReading = true; readNote = "";
+    const secs = Math.max(0, Math.round(Date.now() / 1000 - r.started));
+    $("reading-what").textContent = r.library ? `Reading ${r.library} on ${r.server_name}` + (r.libraries > 1 ? ` (library ${r.done + 1} of ${r.libraries})` : "") : `Reading ${r.server_name}'s libraries`;
+    $("reading-step").textContent = (r.songs == null ? `Asking for its songs… ${secs} s` : `Matching its ${num(r.songs)} songs with those already here, so none is analysed twice… ${secs} s`) +
+      (r.why === "first" ? ` · ${r.server_name} is read first, this once: its songs' file paths weren't kept before 0.23, and the new server's songs are found by those.` : "");
+    return;
+  }
+  if (wasReading) {  // just finished: what it found, from the activity, and the libraries' new counts
+    wasReading = false;
+    const last = ((status || {}).events || []).find((e) => /^Library .+: \d+ songs/.test(e.message));
+    readNote = last ? `Done. ${last.message}.` : "Done.";
+    $("libs-note").textContent = readNote;
+    refreshLibraries(); lastCounts = ""; songsAsked = 0;
+  }
+}
 $("start").addEventListener("click", async () => {
   const ids = picked || savedIds();
   if (!ids.length && !confirm("No library is ticked: stop analysing? Songs already done stay.")) return;
-  $("start").disabled = true; $("start").textContent = "Reading the libraries…";
-  try { await api("api/libraries", {method: "POST", body: JSON.stringify({ids})}); picked = null; banner(null); }
-  catch (err) { banner(err.message); }
-  finally { $("start").disabled = false; $("start").textContent = "Start analysis"; await refreshLibraries(); lastCounts = ""; songsAsked = 0; refreshStatus(); }
+  $("start").disabled = true; $("start").textContent = "Reading…";
+  try {
+    const r = await api("api/libraries", {method: "POST", body: JSON.stringify({ids, background: true})});
+    picked = null; banner(null);
+    if (r.reading === false) $("libs-note").textContent = "The libraries are already being read: this choice is read next time (or press Look for new songs when it's done).";
+  } catch (err) { banner(err.message); $("start").disabled = false; $("start").textContent = "Start analysis"; }
+  finally { await refreshLibraries(); statusLoop(); }
 });
 $("left-out").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-remove]");
@@ -815,8 +851,8 @@ $("left-out").addEventListener("click", async (e) => {
 });
 $("read").addEventListener("click", async () => {
   $("read").disabled = true;
-  try { await api("api/libraries/read", {method: "POST"}); banner(null); } catch (e) { banner(e.message); }
-  finally { $("read").disabled = false; await refreshLibraries(); refreshStatus(); }
+  try { await api("api/libraries/read", {method: "POST", body: JSON.stringify({background: true})}); banner(null); } catch (e) { banner(e.message); $("read").disabled = false; }
+  finally { statusLoop(); }
 });
 
 
@@ -1069,7 +1105,7 @@ $("all-again").addEventListener("click", async () => {
 // The status is asked every 2 s while songs are being analysed, every 6 s when nothing is, and not at all while the
 // page is in a tab nobody's looking at (0.23.0: it asked every 2 s whatever happened, with the log and the genres).
 let statusTimer = null;
-const working = () => { const c = (status || {}).counts || {}; return !!(status && (status.current || status.next || status.regridding || c.queued || BUSY.some((k) => c[k]))); };
+const working = () => { const c = (status || {}).counts || {}; return !!(status && (status.current || status.next || status.regridding || status.reading || c.queued || BUSY.some((k) => c[k]))); };
 async function statusLoop() {
   clearTimeout(statusTimer);
   if (!document.hidden) await refreshStatus();
@@ -1106,7 +1142,7 @@ function chooseServer(id) {
   server = id || null;
   try { if (server) localStorage.setItem("beats-server", server); else localStorage.removeItem("beats-server"); } catch (e) { /* private window */ }
   // Everything on show is this server's now.
-  songs = []; libraries = []; picked = null; lastCounts = ""; songsAsked = 0; genresShownAt = 0; serversDrawn = "";
+  songs = []; libraries = []; picked = null; readNote = ""; lastCounts = ""; songsAsked = 0; genresShownAt = 0; serversDrawn = "";
   $("genre-top").innerHTML = ""; $("libs").innerHTML = '<span class="sub">Asking the server…</span>';
   drawRows(); exportLinks();
   statusLoop(); refreshLibraries(); refreshSongs(); refreshGenres(true);
@@ -1139,8 +1175,7 @@ function editServer(id) {
   $("sf-title").textContent = x ? `Edit ${x.name}` : "Add a server or a user";
   $("sf-add").textContent = x ? "Save" : "Add";
   $("sf-kind").disabled = !!x; $("sf-test").hidden = !!x; $("sf-cancel").hidden = !x;
-  $("sf-password").required = !x;
-  $("sf-password").placeholder = x ? "Only to change the address or user, or to sign in again" : "";
+  $("sf-password").placeholder = x ? "Only to change the address or user, or to sign in again" : "Empty if the user has none (Emby, Jellyfin)";
   $("sf-note").textContent = "";
   if (x) { $("sf-kind").value = x.kind; $("sf-name").value = x.name; $("sf-url").value = x.url; $("sf-user").value = x.user; $("server-add").open = true; $("sf-name").focus(); }
 }
@@ -1149,7 +1184,7 @@ $("sf-test").addEventListener("click", async () => {
   $("sf-note").textContent = "Asking…";
   try {
     const r = await api("api/servers/test", {method: "POST", body: JSON.stringify(serverFields())});
-    $("sf-note").textContent = `${r.type || "It"} ${r.version || ""} answers and takes the login: ${r.libraries.length ? r.libraries.map((l) => l.name).join(", ") : "no music libraries"}.`;
+    $("sf-note").textContent = `${r.type || "It"} ${r.version || ""} answers at ${r.url} and takes the login: ${r.libraries.length ? r.libraries.map((l) => l.name).join(", ") : "no music libraries"}.`;
   } catch (err) { $("sf-note").textContent = err.message; }
 });
 $("server-form").addEventListener("submit", async (e) => {

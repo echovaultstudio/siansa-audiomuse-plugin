@@ -100,8 +100,15 @@ Each page has its own address (`#songs`, `#loudness`…), so Back and bookmarks 
 
 Siansa Beats reads **Navidrome, Emby and Jellyfin**, as many as you have (0.23.0). Add each under
 **Setup › Music servers**: its kind, a name, its address, a user name and password. **Edit** changes one (its name, or
-with its password its address, user or sign-in). It's only kept once it answers and takes the login (**Test** asks without adding). Then tick its
-libraries under **Libraries**.
+with its password its address, user or sign-in). It's only kept once it answers and takes the login (**Test** asks
+without adding, and says why when it can't). Then tick its libraries under **Libraries**: they're read in the
+background, and the page shows which library is being read and how far.
+
+- The address can be pasted as the browser shows it (`http://nas:8096/web/index.html#!/home`): it's cut back to the
+  server's own, and an Emby that answers under `/emby` only is found there.
+- An Emby or Jellyfin user without a password: leave the password empty.
+- When a test fails, the page and the log say why: nothing at that port, not that kind of server (Jellyfin chosen
+  for an Emby), an untrusted certificate, or the user name or password refused.
 
 - **A song two servers have is analysed once.** When a server's library is read, each song is looked for among the
   songs already here: by its file (the same path, or paths that end alike, as each server has the music folder under

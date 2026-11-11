@@ -140,6 +140,11 @@ def main(servers, library_path):
     check(counts.get("done") == len(wanted) and Tracker.calls == len(wanted), f"all analysed once: {counts}")
 
     for kind, url in servers.items():
+        # The address as the browser shows it: cut back to the server's own (0.24.1).
+        tested = call("/api/servers/test", "POST", {"kind": kind, "url": url + "/web/index.html#!/home", "user": USER,
+                                                    "password": PASSWORD})
+        check(tested["url"] in (url, url + "/emby") and tested["libraries"],
+              f"{kind}: found from the address the browser shows ({tested['url']})")
         added = call("/api/servers", "POST", {"kind": kind, "name": "", "url": url, "user": USER, "password": PASSWORD})
         libraries = call(f"/api/libraries?server={added['id']}")
         read = call(f"/api/libraries?server={added['id']}", "POST", {"ids": [f["id"] for f in libraries]})

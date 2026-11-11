@@ -30,10 +30,12 @@ FIELDS = "Path,Genres,MediaSources"
 
 
 class MediaBrowser:
-    def __init__(self, url, user, password, jellyfin=False, timeout=30.0):
+    def __init__(self, url, user, password, jellyfin=False, timeout=30.0, empty_password=False):
         self.url = (url or "").rstrip("/")
         self.user = user or ""
         self.password = password or ""
+        # A user without a password (common on a home Emby): signing in again needs none (0.24.1).
+        self.empty_password = empty_password
         self.jellyfin = jellyfin
         self.kind = "jellyfin" if jellyfin else "emby"
         self.label = "Jellyfin" if jellyfin else "Emby"
@@ -74,7 +76,7 @@ class MediaBrowser:
                 raise ServerError(f"{self.label} refused the user name or password") from None
             raise ServerError(f"{path.split('?')[0]}: HTTP {e.code}") from None
         except (urllib.error.URLError, OSError) as e:
-            raise ServerError(f"{path.split('?')[0]}: {getattr(e, 'reason', e)}") from None
+            raise ServerError(why_not(self.label, getattr(e, "reason", e))) from None
 
     def _json(self, path, token=None, body=None):
         started = time.monotonic()
@@ -90,7 +92,7 @@ class MediaBrowser:
         if not self.configured:
             raise ServerError(f"{self.label} isn't set up")
         if self._login is None or again:
-            if not self.password:
+            if not self.password and not self.empty_password:
                 # Signed in with a kept token (the password isn't kept) that the server no longer takes.
                 raise ServerError(f"{self.label} no longer takes the saved sign-in: enter the password again "
                                   "(Setup › Music servers › Edit)")
@@ -122,10 +124,28 @@ class MediaBrowser:
     # ---- what Siansa Beats asks ----
 
     def ping(self):
-        info = self._json("/System/Info/Public") or {}
-        if not info.get("Version"):
-            raise ServerError(f"That address doesn't look like {self.label}")
-        if self.password:
+        """What the server is: ``{"version", "type"}``, once it answers and takes the sign-in. Emby set up behind
+        ``/emby`` answers there only: that's tried too, and :attr:`url` is then the one that answered."""
+        info, problem = None, None
+        for base in dict.fromkeys([self.url, self.url + "/emby"] if not self.url.endswith("/emby") else [self.url]):
+            was, self.url = self.url, base
+            try:
+                info = self._json("/System/Info/Public") or {}
+            except ServerError as e:
+                problem, info = problem or e, None
+            if isinstance(info, dict) and info.get("Version"):
+                break
+            self.url = was
+        if not isinstance(info, dict) or not info.get("Version"):
+            if problem and not str(problem).startswith(("/", "That address")):
+                raise problem  # nothing answers there at all: said as it is
+            raise ServerError(f"No {self.label} answers at {self.url}: is it {self.label}'s own address and port, "
+                              "like http://192.168.1.10:8096?")
+        product = str(info.get("ProductName") or "")
+        other = "Emby" if self.jellyfin else "Jellyfin"
+        if other.lower() in product.lower():
+            raise ServerError(f"That's {other} ({product} {info.get('Version')}): choose {other} as its kind")
+        if self.password or self.empty_password:
             self._session(again=True)  # the login is checked too
         else:  # a kept sign-in: checked by asking for something only a signed-in user gets
             self.libraries()
@@ -196,6 +216,21 @@ class MediaBrowser:
         _log.debug("%s stream %s: %.1f MB (%s) in %.2fs", self.label, song_id, size / 1e6, kind or "no type",
                    time.monotonic() - started)
         return size
+
+
+def why_not(label, reason):
+    """Why a server couldn't be reached, in plain words."""
+    text = str(reason)
+    if "CERTIFICATE_VERIFY_FAILED" in text or "SSL" in text:
+        return (f"{label}'s certificate isn't trusted ({text}): use its local http:// address and port, or a "
+                "certificate the container trusts")
+    if "refused" in text.lower():
+        return f"Nothing answers at that address and port ({text}): is {label} running there, and is the port right?"
+    if "timed out" in text.lower() or "timeout" in text.lower():
+        return f"{label} didn't answer in time ({text}): can the container reach that address?"
+    if "Name or service not known" in text or "nodename" in text or "resolve" in text.lower():
+        return f"That name isn't known to the container ({text}): try the server's IP address"
+    return f"Couldn't reach {label}: {text}"
 
 
 class _Refused(Exception):
