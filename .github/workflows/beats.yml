@@ -37,7 +37,12 @@ jobs:
         run: cd beats && python3 -P tests/test_phrase.py && python3 -P tests/test_ends.py && python3 -P tests/test_genres.py && python3 -P tests/test_about.py
       - name: Loudness, fades and key (checked against scipy's filters and ffmpeg's own loudness meter)
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+          # ffmpeg from pip, put on the PATH: the runner's package mirrors can stall for minutes (11 Nov: the job ran
+          # out of its ten minutes twice waiting for apt), and the test only needs the program.
+          python3 -m pip install --quiet --break-system-packages --user imageio-ffmpeg==0.6.0 || python3 -m pip install --quiet --user imageio-ffmpeg==0.6.0
+          mkdir -p "$HOME/.local/bin" && ln -sf "$(python3 -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" "$HOME/.local/bin/ffmpeg"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH" && ffmpeg -version | head -1
           python3 -m pip install --break-system-packages --user scipy || python3 -m pip install --user scipy
           cd beats && python3 -P tests/test_loudness.py
       - name: CPU or GPU
