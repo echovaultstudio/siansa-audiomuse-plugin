@@ -134,7 +134,13 @@ background, and the page shows which library is being read and how far.
 
 Siansa asks for songs like a song, a path from one song to another, a blend of songs, mood radios, "your sound",
 similar albums and artists, and each song's tempo, key, moods and energy. Until 0.25 it asked AudioMuse-AI for all of
-that; Siansa Beats now answers them itself, from what AudioMuse-AI has already worked out about each song:
+that; Siansa Beats now answers them itself, from what AudioMuse-AI has already worked out about each song.
+
+**A song's tempo is never AudioMuse-AI's.** It's the one Beat This! finds here (AudioMuse-AI gave drum and bass as
+89 or 110 BPM): AudioMuse-AI's isn't taken over or kept, and a song not analysed here yet has no tempo. The key is
+this service's own measure where there is one. Moods, genres and energy are AudioMuse-AI's, until Siansa Beats makes
+them itself.
+
 
 1. Under **Setup › AudioMuse-AI**, connect AudioMuse-AI (its address and one of its API tokens). Its Siansa plugin is
    no longer needed: Siansa Beats reads AudioMuse-AI's own export for apps (`/api/sync`).
@@ -381,7 +387,7 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 | `POST /api/v1/audiomuse/api/alchemy` | `{"items": [{"id", "op": "ADD" or "SUBTRACT", "type": "song"}], "n"}`: songs near the ones to blend, away from the ones to avoid. |
 | `GET /api/v1/audiomuse/api/mood_centroids` | AudioMuse-AI's mood centres, each with its tags. |
 | `POST /api/v1/audiomuse/api/sonic_fingerprint/generate` | `{"n"}`: songs near what this server's user has played most (or near `ids`, when given). |
-| `GET /api/v1/audiomuse/api/sync?ids=` | Up to 500 songs' tempo, key, moods, genres and energy, without the vectors. |
+| `GET /api/v1/audiomuse/api/sync?ids=` | Up to 500 songs' tempo (Beat This!'s, `tempo_source`: `beat_this`; never AudioMuse-AI's), key, moods, genres and energy, without the vectors. |
 | `POST /api/v1/bad-blends` | A song change marked as bad in the app. |
 
 With several music servers, every one of these takes `?server=`: the id (or name) of the server the app plays from,

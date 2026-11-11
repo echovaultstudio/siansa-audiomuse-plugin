@@ -1,5 +1,6 @@
 """Takes over what AudioMuse-AI has worked out about each song (0.25, the owner, 11 Nov), so nothing is analysed
-twice: its vectors (how a song sounds; the one the search by words uses), tempo, key, moods, genres and energy.
+twice: its vectors (how a song sounds; the one the search by words uses), key, moods, genres and energy. Not its
+tempo: a song's tempo here is Beat This!'s alone (the owner, 11 Nov: "the big reason for moving to Beat This!").
 
 AudioMuse-AI has a read-only export for apps (``/api/sync``). Its index says, for every song it has analysed, the music
 server's id and a fingerprint of the analysis; only songs that are new here, or whose fingerprint moved, are asked for
@@ -43,7 +44,8 @@ def row_of(song_id, track):
             return None
 
     year = track.get("year")
-    return {"song_id": song_id, "musicnn": musicnn, "clap": vector("clap_embedding"), "tempo": number("tempo"),
+    # Not its tempo (the owner, 11 Nov): a song's tempo is the one Beat This! finds, never AudioMuse-AI's.
+    return {"song_id": song_id, "musicnn": musicnn, "clap": vector("clap_embedding"),
             "key": track.get("key"), "scale": track.get("scale"), "moods": track.get("mood_vector"),
             "other": track.get("other_features"), "energy": number("energy"), "album_artist": track.get("album_artist"),
             "year": year if isinstance(year, int) else None, "fp": track.get("fp")}

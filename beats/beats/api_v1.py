@@ -219,17 +219,27 @@ def similar_here(app, kind, asked, server):
 
 
 def features(app, ids, server):
-    """The analysis of the songs ``ids`` as AudioMuse-AI's ``/api/sync`` gives it, without the vectors."""
+    """The analysis of the songs ``ids`` as AudioMuse-AI's ``/api/sync`` gives it, without the vectors.
+
+    ``tempo`` is always Beat This!'s (the owner, 11 Nov: AudioMuse-AI's is never used, and isn't kept), null for a
+    song not analysed here yet. ``key`` and ``scale`` are this service's own measure where there is one, AudioMuse-AI's
+    otherwise; moods, genres and energy are AudioMuse-AI's."""
     here = app.store.resolve(ids, server)
     rows = app.store.sound_rows(here.values())
+    tempos = app.store.tempos(here.values(), app.config.model)
+    measured = app.store.measures(here.values())
     tracks = []
     for asked in ids:
         r = rows.get(here.get(asked))
         if r is None:
             continue
+        own = measured.get(r["song_id"]) or {}
+        tempo = tempos.get(r["song_id"])
         tracks.append({"id": asked, "title": r["title"], "artist": r["artist"], "album_artist": r["album_artist"],
-                       "album": r["album"], "year": r["year"], "tempo": r["tempo"], "key": r["key"],
-                       "scale": r["scale"], "mood_vector": r["moods"], "energy": r["energy"],
+                       "album": r["album"], "year": r["year"], "tempo": round(tempo, 2) if tempo else None,
+                       "tempo_source": "beat_this" if tempo else None,
+                       "key": own.get("key") or r["key"], "scale": (own.get("scale") if own.get("key") else r["scale"]),
+                       "mood_vector": r["moods"], "energy": r["energy"],
                        "other_features": r["other"], "fp": r["fp"]})
     return {"tracks": tracks, "total_tracks": len(tracks), "has_more": False, "next_page": None,
             "provider_type": (app.servers.get(server or app.servers.default_id) or {}).get("kind")}

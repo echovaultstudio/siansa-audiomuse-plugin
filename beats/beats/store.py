@@ -75,8 +75,9 @@ CREATE TABLE IF NOT EXISTS links (
     server TEXT, item_id TEXT, song_id TEXT, folder TEXT, PRIMARY KEY (server, item_id)
 );
 -- The sound of each song as AudioMuse-AI's models hear it (0.25): pulled from AudioMuse-AI, later made here.
+-- Never its tempo (the owner, 11 Nov): a song's tempo is Beat This!'s alone, in results.
 CREATE TABLE IF NOT EXISTS sound (
-    song_id TEXT PRIMARY KEY, musicnn BLOB, clap BLOB, tempo REAL, key TEXT, scale TEXT, moods TEXT, other TEXT,
+    song_id TEXT PRIMARY KEY, musicnn BLOB, clap BLOB, key TEXT, scale TEXT, moods TEXT, other TEXT,
     energy REAL, album_artist TEXT, year INTEGER, fp TEXT, source TEXT, at REAL
 );
 CREATE INDEX IF NOT EXISTS links_by_song ON links (song_id, server);
@@ -119,6 +120,12 @@ class Store:
         self.db.execute("PRAGMA synchronous=NORMAL")  # safe with WAL, and each change no longer waits for the disk twice
         with self._write():
             self.db.executescript(SCHEMA)
+            if "tempo" in {r[1] for r in self.db.execute("PRAGMA table_info(sound)")}:
+                # 0.25's first builds kept AudioMuse-AI's tempo: it goes, and is never asked for again.
+                try:
+                    self.db.execute("ALTER TABLE sound DROP COLUMN tempo")
+                except sqlite3.OperationalError:  # an SQLite from before columns could be dropped: emptied instead
+                    self.db.execute("UPDATE sound SET tempo=NULL")
             if "source" not in {r[1] for r in self.db.execute("PRAGMA table_info(measures)")}:
                 self.db.execute("ALTER TABLE measures ADD COLUMN source TEXT")  # 0.20.0's first builds had none
             if "folder" not in {r[1] for r in self.db.execute("PRAGMA table_info(songs)")}:
@@ -192,7 +199,7 @@ class Store:
 
     # ---- the sound of songs (0.25) ----
 
-    SOUND_FIELDS = ("musicnn", "clap", "tempo", "key", "scale", "moods", "other", "energy", "album_artist", "year", "fp")
+    SOUND_FIELDS = ("musicnn", "clap", "key", "scale", "moods", "other", "energy", "album_artist", "year", "fp")
 
     def save_sound(self, rows, source="audiomuse"):
         """Keeps the sound of songs: each row ``{"song_id", …SOUND_FIELDS}`` (vectors as float32 bytes). The number kept."""
@@ -222,7 +229,7 @@ class Store:
         out, ids = {}, list(dict.fromkeys(song_ids))
         for start in range(0, len(ids), 500):
             chunk = ids[start:start + 500]
-            for r in self._rows("SELECT o.song_id, o.tempo, o.key, o.scale, o.moods, o.other, o.energy, o.album_artist, "
+            for r in self._rows("SELECT o.song_id, o.key, o.scale, o.moods, o.other, o.energy, o.album_artist, "
                                 "o.year, o.fp, s.title, s.artist, s.album FROM sound o JOIN songs s ON s.id=o.song_id "
                                 f"WHERE o.song_id IN ({', '.join('?' for _ in chunk)})", chunk):
                 out[r["song_id"]] = r
@@ -639,6 +646,16 @@ class Store:
         with self._write():
             self.db.execute(f"UPDATE results SET {', '.join(f'{k}=?' for k in keys)} WHERE song_id=? AND model=?",
                             (*[_column(k, values[k]) for k in keys], song_id, model))
+
+    def tempos(self, song_ids, model):
+        """``{song_id: bpm}`` of the songs among ``song_ids`` Beat This! has heard: the only tempo a song has here."""
+        out, ids = {}, list(dict.fromkeys(song_ids))
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            for r in self._rows("SELECT song_id, bpm FROM results WHERE model=? AND bpm IS NOT NULL AND song_id IN "
+                                f"({', '.join('?' for _ in chunk)})", (model, *chunk)):
+                out[r["song_id"]] = r["bpm"]
+        return out
 
     def ends(self, song_ids, model):
         """``{song_id: ends}`` (:func:`beats.grid.app_ends`) of the songs among ``song_ids`` that have them."""

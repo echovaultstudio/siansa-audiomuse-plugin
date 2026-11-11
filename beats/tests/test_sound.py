@@ -158,6 +158,21 @@ class SoundTest(Base):
         self.assertEqual(self.sound.count(), len(LIBRARY) + 1)
         self.assertEqual(self.ids(self.sound.similar("r1", 1)), ["r2"])
 
+    def test_audiomuses_tempo_kept_by_the_first_builds_goes(self):
+        """0.25's first builds kept AudioMuse-AI's tempo beside the sound: opening the database removes it."""
+        self.store.close()
+        import sqlite3
+
+        path = os.path.join(self.tmp, "beats.db")
+        db = sqlite3.connect(path)
+        db.execute("ALTER TABLE sound ADD COLUMN tempo REAL")
+        db.execute("UPDATE sound SET tempo=89.0")
+        db.commit()
+        db.close()
+        self.store = Store(path)
+        self.assertNotIn("tempo", {r[1] for r in self.store.db.execute("PRAGMA table_info(sound)")})
+        self.assertEqual(sound.Sound(self.store).count(), len(LIBRARY))  # the sound itself stays
+
     def test_moods_as_audiomuse_writes_them(self):
         self.assertEqual(sound.pairs("rock:0.61, pop:0.2,bad,x:y"), {"rock": 0.61, "pop": 0.2})
         self.assertEqual(sound.pairs(None), {})
@@ -216,8 +231,12 @@ class PullTest(Service):
         self.assertEqual([s["item_id"] for s in like], ["t122", "t96w"])
         self.assertEqual(like[0]["author"], "House Test")
         feats = self.call(f"{am}/api/sync?ids=t122,t140,bad&include_embeddings=false")["tracks"]
-        self.assertEqual([(t["id"], t["tempo"], t["other_features"]) for t in feats],
-                         [("t122", 61.0, "danceable:0.7,happy:0.4"), ("t140", 128.0, "danceable:0.7,happy:0.4")])
+        # The tempo is Beat This!'s, never AudioMuse-AI's (which said 61 and 128 for these): the owner, 11 Nov.
+        self.assertEqual([(t["id"], t["tempo"], t["tempo_source"], t["other_features"]) for t in feats],
+                         [("t122", 122.0, "beat_this", "danceable:0.7,happy:0.4"),
+                          ("t140", 140.0, "beat_this", "danceable:0.7,happy:0.4")])
+        self.assertEqual({(t["key"], t["scale"]) for t in feats}, {("A", "minor")})  # this service's own measure
+        self.assertNotIn("tempo", {r[1] for r in self.app.store.db.execute("PRAGMA table_info(sound)")})
         self.assertNotIn("embedding", feats[0])
         path = self.call(f"{am}/api/find_path?start_song_id=t140&end_song_id=t96w&max_steps=3&path_fix_size=true")["path"]
         self.assertEqual([s["item_id"] for s in path], ["t140", "t122", "t96w"])
@@ -256,7 +275,8 @@ class PullTest(Service):
         self.assertIsNone(pull.row_of("x", {"embedding": None, "fp": "f"}))
         self.assertIsNone(pull.row_of("x", {"embedding": base64.b64encode(b"short").decode()}))
         row = pull.row_of("x", track(CATALOG[0], clap_embedding=None, year="1999"))
-        self.assertEqual((len(row["musicnn"]), row["clap"], row["year"], row["tempo"]), (800, None, None, 128.0))
+        self.assertEqual((len(row["musicnn"]), row["clap"], row["year"]), (800, None, None))
+        self.assertNotIn("tempo", row)  # AudioMuse-AI's tempo is never kept
 
 
 if __name__ == "__main__":
