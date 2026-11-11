@@ -91,6 +91,9 @@ class Worker:
         self.preparing = None  # the same, for the next song being downloaded and decoded
         self.last_error = None
         self.scan_lock = threading.Lock()
+        # What's being read right now, for the page (0.24.1: adding a library took minutes with nothing to show):
+        # {"server", "server_name", "library", "libraries", "done", "songs", "started", "why"}, or None.
+        self.reading = None
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._ready = queue.Queue(maxsize=1)
@@ -155,7 +158,7 @@ class Worker:
         found = self.servers.get(server)
         return f" on {found['name']}" if found and self.servers.several() else ""
 
-    def choose(self, ids, server=None):
+    def choose(self, ids, server=None, background=False):
         """Analyses ``server``'s libraries ``ids`` (and none of its others): reads them now; the others' songs not yet
         analysed leave the queue (those done stay). Returns ``{"songs", "queued"}``."""
         server = server or self.servers.default_id
@@ -173,9 +176,39 @@ class Worker:
                          + (f" ({taken} songs of the others left the queue)" if taken else ""))
         if not ids:
             return {"songs": 0, "queued": 0}
-        # Another server's songs are looked for among the default's, which were read before their files' paths were
-        # kept (0.23): the default is read again first, then this one.
-        return self.read_libraries(report=server) if server != self.servers.default_id else self.read_libraries(server)
+        if background:
+            return self.read_in_background(server)
+        return self.read_libraries(**self._what_to_read(server))
+
+    def _what_to_read(self, server):
+        """What reading ``server``'s libraries takes: itself alone, unless another server's songs are looked for among
+        the default's and those were read before their files' paths were kept (0.23); then the default once first."""
+        default = self.servers.default_id
+        if server == default or self.store.setting(f"paths_read:{default}"):
+            return {"only": server}
+        return {"report": server}
+
+    def read_in_background(self, server=None, every=False):
+        """Reads ``server``'s chosen libraries (every server's with ``every``) in a thread, so the page can show how
+        far it is (:attr:`reading`) instead of waiting: ``{"reading": True}``, or ``{"reading": False}`` when a read
+        is already going (it's the one shown)."""
+        if self.scan_lock.locked():
+            return {"reading": False}
+        server = server or self.servers.default_id
+        args = {} if every else self._what_to_read(server)
+        # Shown at once, before the thread has asked the server anything.
+        self.reading = {"server": server, "server_name": (self.servers.get(server) or {}).get("name", server),
+                        "library": None, "libraries": None, "done": 0, "songs": None, "started": time.time(), "why": None}
+
+        def run():
+            try:
+                self.read_libraries(**args)
+            except Exception as e:  # said in the activity; the page shows it
+                if not isinstance(e, ServerError):
+                    _log.exception("Reading the libraries went wrong")
+
+        threading.Thread(target=run, name="beats-read", daemon=True).start()
+        return {"reading": True}
 
     def remove_library(self, folder, server=None):
         """Forgets the songs of a library that's left out (its results too, unless another server has the song): the
@@ -195,49 +228,66 @@ class Worker:
         given), adds them and queues the new ones. Returns ``{"songs", "queued"}``: of all that was read, or of server
         ``report`` alone."""
         with self.scan_lock:
-            started = time.monotonic()
-            total, queued = 0, []
-            default = self.servers.default_id
-            order = sorted((s["id"] for s in self.servers.all()), key=lambda i: i != default)
-            for server in order:
-                if only is not None and server != only:
-                    continue
-                client = self.servers.client(server)
-                chosen = self.chosen(server)
-                if not chosen:
-                    continue
+            try:
+                return self._read_libraries(only, report)
+            finally:
+                self.reading = None
+
+    def _read_libraries(self, only, report):
+        started = time.monotonic()
+        total, queued = 0, []
+        default = self.servers.default_id
+        order = sorted((s["id"] for s in self.servers.all()), key=lambda i: i != default)
+        todo = [(s, self.chosen(s)) for s in order if (only is None or s == only)]
+        libraries, done = sum(len(c) for _, c in todo), 0
+        if report is not None and report != default and any(s == default and c for s, c in todo):
+            self.store.event(f"Reading {(self.servers.get(default) or {}).get('name', 'the default server')}'s libraries "
+                             "first, this once: its songs' file paths weren't kept before 0.23, and the new server's "
+                             "songs are found among them by those")
+        for server, chosen in todo:
+            client = self.servers.client(server)
+            if not chosen:
+                continue
+            name = (self.servers.get(server) or {}).get("name", server)
+            try:
+                names = {f["id"]: f["name"] for f in client.libraries()}
+            except ServerError as e:
+                self.store.event(f"Couldn't read the libraries{self._label(server)}: {e}", "error")
+                if only is not None or len(order) == 1:
+                    raise
+                continue
+            for folder in chosen:
+                self.reading = {"server": server, "server_name": name, "library": names.get(folder, folder),
+                                "libraries": libraries, "done": done, "songs": None, "started": time.time(),
+                                "why": None if report is None or server == report else "first"}
+                done += 1
                 try:
-                    names = {f["id"]: f["name"] for f in client.libraries()}
+                    songs = [s for s in client.all_songs(folder) if s.get("id")]
+                    self.reading = {**self.reading, "songs": len(songs)}
                 except ServerError as e:
-                    self.store.event(f"Couldn't read the libraries{self._label(server)}: {e}", "error")
+                    self.store.event(f"Couldn't read the library {names.get(folder, folder)}{self._label(server)}: {e}", "error")
                     if only is not None or len(order) == 1:
                         raise
                     continue
-                for folder in chosen:
-                    try:
-                        songs = [s for s in client.all_songs(folder) if s.get("id")]
-                    except ServerError as e:
-                        self.store.event(f"Couldn't read the library {names.get(folder, folder)}{self._label(server)}: {e}", "error")
-                        if only is not None or len(order) == 1:
-                            raise
-                        continue
-                    result = self.store.link_songs(server, folder, songs, self.servers.twins(server))
-                    if report is None or report == server:
-                        total += len(songs)
-                        queued += result["queued"]
-                    found = result["matched"]
-                    here = sum(found.values())
-                    self.store.event(
-                        f"Library {names.get(folder, folder)}{self._label(server)}: {len(songs)} songs, "
-                        f"{len(result['queued'])} new in the queue"
-                        + (f", {here} already analysed from another server ("
-                           + ", ".join(f"{n} by {'their file' if how == 'path' else 'their tags' if how == 'tags' else 'title and album' if how == 'title' else 'the same id'}"
-                                       for how, n in sorted(found.items())) + ")" if here else ""))
-            self.store.set_setting("library_read_at", time.time())
-            self.store.event(f"Read the libraries in {time.monotonic() - started:.0f}s")
-            self.revote()  # their tags may have changed
-            self.wake()
-            return {"songs": total, "queued": len(queued)}
+                result = self.store.link_songs(server, folder, songs, self.servers.twins(server))
+                if report is None or report == server:
+                    total += len(songs)
+                    queued += result["queued"]
+                found = result["matched"]
+                here = sum(found.values())
+                self.store.event(
+                    f"Library {names.get(folder, folder)}{self._label(server)}: {len(songs)} songs, "
+                    f"{len(result['queued'])} new in the queue"
+                    + (f", {here} already analysed from another server ("
+                       + ", ".join(f"{n} by {'their file' if how == 'path' else 'their tags' if how == 'tags' else 'title and album' if how == 'title' else 'the same id'}"
+                                   for how, n in sorted(found.items())) + ")" if here else ""))
+        if only is None or only == default:
+            self.store.set_setting(f"paths_read:{default}", True)  # its songs' paths are kept now
+        self.store.set_setting("library_read_at", time.time())
+        self.store.event(f"Read the libraries in {time.monotonic() - started:.0f}s")
+        self.revote()  # their tags may have changed
+        self.wake()
+        return {"songs": total, "queued": len(queued)}
 
     def _any_chosen(self):
         return any(self.store.setting(folders_key(s["id"])) for s in self.servers.all()) or bool(self.chosen(MAIN))

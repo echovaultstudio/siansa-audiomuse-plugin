@@ -517,6 +517,7 @@ class App:
             "loudness": {**self.store.measure_counts(loudness.VERSION, only),
                          "measuring": dict(worker.measuring) if worker.measuring else None},
             "regridding": dict(worker.regridding) if worker.regridding else None,
+            "reading": dict(worker.reading) if worker.reading else None,
             "libraries": {"chosen": self.store.setting(folders_key(server)) or [],
                           "read_at": self.store.setting("library_read_at")},
             # The server these numbers are of, and all of them (for the page's switch).
@@ -962,7 +963,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(ids, list):
                     return self._error(HTTPStatus.BAD_REQUEST, 'ids needed: a list of library ids ([] for none)')
                 try:
-                    return self._json(app.worker.choose(ids, server))
+                    # The page's: chosen now, read in a thread whose progress the status shows (0.24.1).
+                    return self._json(app.worker.choose(ids, server, background=bool(body.get("background"))))
                 except ValueError as e:
                     return self._error(HTTPStatus.BAD_REQUEST, str(e))
             if path.startswith("/api/v1/") and api_v1.post(self, path, body, server):
@@ -973,6 +975,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/genres/about/fetch":
                 return self._json(app.about.fetch_all())
             if path == "/api/libraries/read":
+                if body.get("background"):
+                    return self._json(app.worker.read_in_background(every=True))
                 return self._json(app.worker.read_libraries())
             if path == "/api/analyse-all":
                 queued = sum(app.store.queue(song_id, force=True) for song_id in app.store.song_ids())
@@ -1040,9 +1044,14 @@ class Handler(BaseHTTPRequestHandler):
         except KeyError:
             return self._error(HTTPStatus.NOT_FOUND, "no such server")
         except ValueError as e:
+            _log.warning("%s: %s", "Testing a server" if path.endswith("/test") else "A server change", e)
             return self._error(HTTPStatus.BAD_REQUEST, str(e))
         except ServerError as e:
-            return self._error(HTTPStatus.BAD_GATEWAY, f"The server didn't take it: {e}")
+            # Said in the log too (0.24.1: a failed test said only "-> 502"); never with the password.
+            _log.warning("%s %s at %s as %s: %s", "Testing" if path.endswith("/test") else "Signing in to",
+                         KINDS.get(str(body.get("kind") or "").lower(), "the server"), body.get("url") or "its address",
+                         body.get("user") or "its user", e)
+            return self._error(HTTPStatus.BAD_GATEWAY, str(e))
 
     def do_DELETE(self):
         if not self._guard():

@@ -191,8 +191,10 @@ class FakeMediaServer:
     """An Emby or Jellyfin with the catalogue's songs: ``only`` (ids) for some of them, ``extra`` for songs only it
     has (as the catalogue's entries), ``paths=False`` for one that doesn't say where its files are."""
 
-    def __init__(self, folder, jellyfin=False, port=0, only=None, extra=(), paths=True, root="/mnt/media/music"):
+    def __init__(self, folder, jellyfin=False, port=0, only=None, extra=(), paths=True, root="/mnt/media/music",
+                 under_emby=False):
         self.folder, self.jellyfin, self.paths, self.root = folder, jellyfin, paths, root
+        self.under_emby = under_emby  # an Emby set up to answer under /emby only (a reverse proxy's way)
         self.prefix = "j-" if jellyfin else "e-"
         with open(os.path.join(folder, "catalog.json")) as f:
             self.songs = [s for s in json.load(f) if only is None or s["id"] in only] + list(extra)
@@ -227,8 +229,17 @@ class FakeMediaServer:
                     return f'Token="{fake.token}"' in self.said()
                 return self.headers.get("X-Emby-Token") == fake.token
 
+            def unprefixed(self):
+                """The path as Emby takes it: with or without /emby (only with it, ``under_emby``); None for neither."""
+                if self.path.startswith("/emby/"):
+                    self.path = self.path[5:]
+                    return True
+                return not fake.under_emby
+
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+                if not self.unprefixed():
+                    return self.reply(404, b"<html>Not found</html>", "text/html")
                 fake.requests.append((self.path, {}))
                 if self.path == "/Users/AuthenticateByName":
                     if not self.said().startswith("MediaBrowser " if fake.jellyfin else "Emby "):
@@ -250,6 +261,8 @@ class FakeMediaServer:
                 return e
 
             def do_GET(self):
+                if not self.unprefixed():
+                    return self.reply(404, b"<html>Not found</html>", "text/html")
                 url = urllib.parse.urlparse(self.path)
                 q = {k: v[0] for k, v in urllib.parse.parse_qs(url.query, keep_blank_values=True).items()}
                 fake.requests.append((url.path, q))

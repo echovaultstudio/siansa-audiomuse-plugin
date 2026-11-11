@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import urllib.error
@@ -63,7 +64,7 @@ class ClientTest(Base):
         for media, _ in self.both():
             with self.assertRaisesRegex(ServerError, "refused the user name or password"):
                 MediaBrowser(media.url, USER, "wrong", jellyfin=media.jellyfin).libraries()
-        with self.assertRaisesRegex(ServerError, "System/Info/Public"):
+        with self.assertRaisesRegex(ServerError, "Nothing answers at that address and port"):
             MediaBrowser("http://127.0.0.1:1", USER, PASSWORD).ping()
         # A Navidrome isn't an Emby.
         with self.assertRaises(ServerError):
@@ -250,6 +251,103 @@ class ServersTest(Service):
             self.assertNotIn("tok-1", data.decode())
         self.call("/api/servers/jellyfin", "DELETE")
         self.assertEqual(self.call("/api/status")["server"], "main")
+
+    def test_the_page_reads_in_the_background_and_shows_how_far(self):
+        self.analysed()
+        emby = self.media()
+        self.add(emby)
+        slow = threading.Event()
+        real = self.app.worker.servers.client("emby").all_songs
+
+        def held(library, *a, **k):
+            slow.wait(10)
+            return real(library, *a, **k)
+
+        self.app.worker.servers.client("emby").all_songs = held
+        # Chosen at once, read in a thread: the answer doesn't wait for the read.
+        started = time.monotonic()
+        self.assertEqual(self.call("/api/libraries?server=emby", "POST", {"ids": ["lib1"], "background": True}), {"reading": True})
+        self.assertLess(time.monotonic() - started, 2)
+        reading = self.call("/api/status")["reading"]
+        self.assertIsNotNone(reading)  # shown at once, before the thread has asked anything
+        end = time.time() + 5
+        while reading.get("library") is None and time.time() < end:
+            time.sleep(0.05)
+            reading = self.call("/api/status")["reading"]
+        self.assertEqual({k: reading[k] for k in ("server", "library", "libraries", "done", "songs", "why")},
+                         {"server": "emby", "library": "Music", "libraries": 1, "done": 0, "songs": None, "why": None})
+        # Already reading: a second press doesn't start another.
+        self.assertEqual(self.call("/api/libraries/read", "POST", {"background": True}), {"reading": False})
+        slow.set()
+        end = time.time() + 10
+        while self.call("/api/status")["reading"] and time.time() < end:
+            time.sleep(0.05)
+        self.assertIsNone(self.call("/api/status")["reading"])
+        self.assertEqual(self.call("/api/status?server=emby")["counts"]["songs"], 4)
+        # Navidrome's songs were read in this run with their paths, so Emby was read alone: Navidrome wasn't again.
+        said = [e["message"] for e in self.call("/api/status")["events"]]
+        self.assertFalse(any("first, this once" in e for e in said))
+        self.assertEqual(sum(e.startswith("Library Music on") for e in said), 1)
+
+    def test_the_default_server_is_read_first_only_once(self):
+        self.analysed()
+        self.app.store.set_setting("paths_read:main", None)  # as a database from before 0.23 left it
+        emby, jellyfin = self.media(), self.media(jellyfin=True)
+        self.add(emby)
+        self.call("/api/libraries?server=emby", "POST", {"ids": ["lib1"]})
+        said = [e["message"] for e in self.call("/api/status")["events"]]
+        self.assertTrue(any("first, this once" in e for e in said))
+        self.assertTrue(self.app.store.setting("paths_read:main"))
+        self.add(jellyfin)
+        before = len([p for p, _ in self.fake.requests if "search3" in p])
+        self.call("/api/libraries?server=jellyfin", "POST", {"ids": ["lib1"]})
+        self.assertEqual(len([p for p, _ in self.fake.requests if "search3" in p]), before)  # Navidrome not read again
+
+    def test_emby_as_it_is_found_at_home(self):
+        """What made a real Emby fail (the owner, 11 Nov): the address as the browser shows it, Emby behind /emby only,
+        a user without a password, the other kind chosen, nothing at that port. Each is either taken or said plainly,
+        in the answer and in the log."""
+        self.start()
+        emby = self.media(under_emby=True)
+        fields = {"kind": "emby", "url": emby.url + "/web/index.html#!/home", "user": USER, "password": PASSWORD}
+        tested = self.call("/api/servers/test", "POST", fields)
+        self.assertEqual((tested["url"], tested["libraries"]), (emby.url + "/emby", [{"id": "lib1", "name": "Music"}]))
+        added = self.call("/api/servers", "POST", {**fields, "name": "Emby"})
+        self.assertEqual(added["url"], emby.url + "/emby")
+        self.call("/api/libraries?server=emby", "POST", {"ids": ["lib1"]})
+        self.assertEqual(self.call("/api/status?server=emby")["counts"]["songs"], 4)
+
+        def refused(body):
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                self.call("/api/servers/test", "POST", body)
+            return e.exception.code, json.loads(e.exception.read())["error"]
+
+        jellyfin = self.media(jellyfin=True)
+        self.assertEqual(refused({**fields, "url": jellyfin.url}),
+                         (502, "That's Jellyfin (Jellyfin Server 10.10.7): choose Jellyfin as its kind"))
+        code, why = refused({**fields, "url": self.fake.url})
+        self.assertEqual(code, 502)
+        self.assertIn("No Emby answers at", why)
+        code, why = refused({**fields, "url": "http://127.0.0.1:1"})
+        self.assertEqual(code, 502)
+        self.assertIn("Nothing answers at that address and port", why)
+        with self.assertLogs("siansa_beats.server", "WARNING") as said:
+            code, why = refused({**fields, "password": "wrong"})
+        self.assertEqual((code, why), (502, "Emby refused the user name or password"))
+        # Why is in the log too (it said only "-> 502" before), never with the password.
+        self.assertTrue(any("Testing Emby at " in m and "refused the user name or password" in m for m in said.output))
+        self.assertFalse(any("wrong" in m for m in said.output))
+
+        # A user without a password: taken, and signed in again with none when the token is refused.
+        bare = self.media()
+        bare.password = ""
+        added = self.call("/api/servers", "POST", {"kind": "emby", "name": "Bare", "url": bare.url, "user": USER, "password": ""})
+        bare.token = "tok-9"
+        self.assertEqual(self.call(f"/api/libraries?server={added['id']}")[0]["id"], "lib1")
+        self.assertEqual(bare.logins, 2)  # when it was added, and again with no password when the token was refused
+        # Navidrome still needs one.
+        self.assertEqual(refused({"kind": "navidrome", "url": self.fake.url, "user": USER, "password": ""}),
+                         (400, "Its password is needed"))
 
     def test_answers_are_squeezed_for_those_that_take_it(self):
         self.start()

@@ -58,7 +58,7 @@ class Subsonic:
 
     def _get(self, method, **extra):
         if not self.configured:
-            raise SubsonicError("Navidrome isn't set up (NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASSWORD)")
+            raise SubsonicError("Navidrome isn't set up: add it under Setup › Music servers")
         started = time.monotonic()
         shown = {k: v for k, v in extra.items() if v is not None}
         try:

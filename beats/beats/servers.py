@@ -30,12 +30,14 @@ KINDS = {"navidrome": "Navidrome", "emby": "Emby", "jellyfin": "Jellyfin"}
 MOST = 12  # servers and users: more is a mistake
 
 
-def make_client(kind, url, user, password, login=None):
-    """A server's client. ``login``: Emby's or Jellyfin's kept sign-in, ``(user id, token)``, in place of a password."""
+def make_client(kind, url, user, password, login=None, empty_password=False):
+    """A server's client. ``login``: Emby's or Jellyfin's kept sign-in, ``(user id, token)``, in place of a password;
+    ``empty_password``: its user has none."""
     if kind == "navidrome":
         return Subsonic(url, user, password)
     if kind in ("emby", "jellyfin"):
-        return MediaBrowser(url, user, password, jellyfin=kind == "jellyfin").signed_in(*(login or (None, None)))
+        return MediaBrowser(url, user, password, jellyfin=kind == "jellyfin",
+                            empty_password=empty_password).signed_in(*(login or (None, None)))
     raise ValueError(f"kind is one of: {', '.join(KINDS)}")
 
 
@@ -93,7 +95,8 @@ class Servers:
                 except ValueError:
                     login = None
             out.append({"id": s["id"], "kind": s["kind"], "name": s["name"], "url": s["url"], "user": s["user"],
-                        "password": self.vault.open(s.get("secret")), "login": login})
+                        "password": self.vault.open(s.get("secret")), "login": login,
+                        "empty_password": bool(s.get("empty_password"))})
         return out
 
     def get(self, server_id):
@@ -135,7 +138,8 @@ class Servers:
             server = self.get(server_id)
             if server is None:
                 return Subsonic("", "", "")
-            key = (server["kind"], server["url"], server["user"], server["password"], server["login"])
+            key = (server["kind"], server["url"], server["user"], server["password"], server["login"],
+                   server["empty_password"])
             kept = self._clients.get(server_id)
             if kept is None or kept[0] != key:
                 kept = (key, make_client(*key))
@@ -156,11 +160,13 @@ class Servers:
         kind = str(kind or "").strip().lower()
         if kind not in KINDS:
             raise ValueError(f"kind is one of: {', '.join(KINDS)}")
-        url, user = str(url or "").strip().rstrip("/"), str(user or "").strip()
+        url, user = clean_url(url), str(user or "").strip()
         if not re.match(r"^https?://[^\s/]+", url):
             raise ValueError("The address starts with http:// or https://")
-        if not user or not password:
-            raise ValueError("A user name and its password are needed")
+        if not user:
+            raise ValueError("A user name is needed")
+        if not password and kind == "navidrome":
+            raise ValueError("Its password is needed")
         name = " ".join(str(name or "").split())[:60] or f"{KINDS[kind]} ({user})"
         for s in self.all():
             if s["id"] == but:
@@ -173,23 +179,35 @@ class Servers:
         return kind, name, url, user
 
     def test(self, kind, url, user, password):
-        """Asks the server and logs in: ``{"version", "type", "libraries"}``. :class:`ServerError` says why not."""
-        return self._signed_in(kind, url, user, password)[0]
+        """Asks the server and logs in: ``{"version", "type", "libraries", "url"}`` (``url``: the address that answered,
+        which may have ``/emby`` added). :class:`ServerError` says why not."""
+        kind = str(kind or "").strip().lower()
+        if kind not in KINDS:
+            raise ValueError(f"kind is one of: {', '.join(KINDS)}")
+        url = clean_url(url)
+        if not re.match(r"^https?://[^\s/]+", url):
+            raise ValueError("The address starts with http:// or https://")
+        if not str(user or "").strip():
+            raise ValueError("A user name is needed")
+        if not password and kind == "navidrome":
+            raise ValueError("Its password is needed")
+        return self._signed_in(kind, url, str(user or "").strip(), password or "")[0]
 
     def _signed_in(self, kind, url, user, password):
         """Signs in to check a server: ``(what it is and has, what to keep for it)``. What's kept is never the password
         as it was typed: Navidrome's encrypted, or the encrypted token Emby or Jellyfin gave for it."""
-        client = make_client(kind, url, user, password)
+        client = make_client(kind, url, user, password, empty_password=not password)
         got = []
         if kind != "navidrome":
             client.on_login = lambda user_id, token: got.append({"user_id": user_id, "token": token})
         info = client.ping()
-        info = {**info, "libraries": client.libraries()}
+        info = {**info, "libraries": client.libraries(), "url": client.url}
         if kind == "navidrome":
-            return info, {"secret": self.vault.seal(password)}
+            return info, {"secret": self.vault.seal(password), "url": client.url}
         if not got:
             raise ServerError(f"{KINDS[kind]} refused the login")
-        return info, {"login": self.vault.seal(json.dumps(got[-1]))}
+        return info, {"login": self.vault.seal(json.dumps(got[-1])), "url": client.url,
+                      **({"empty_password": True} if not password else {})}
 
     def add(self, kind, name, url, user, password):
         """Adds a server (or another user of one) once it answers and takes the login: its public form."""
@@ -199,6 +217,7 @@ class Servers:
             if len(saved) >= MOST:
                 raise ValueError(f"At most {MOST} servers")
             _, keep = self._signed_in(kind, url, user, password)
+            url = keep.pop("url")
             taken = {s["id"] for s in saved}
             server_id = next(i for i in (kind if n == 1 else f"{kind}-{n}" for n in range(1, MOST * 2)) if i not in taken)
             self.store.set_setting("servers", saved + [{"id": server_id, "kind": kind, "name": name, "url": url,
@@ -223,6 +242,7 @@ class Servers:
             keep = {}
             if password:
                 _, keep = self._signed_in(kind, url, user, password)
+                url = keep.pop("url")
             self.store.set_setting("servers", [
                 {**{k: v for k, v in s.items() if k not in (("secret", "login") if keep else ())},
                  "name": name, "url": url, "user": user, **keep} if s["id"] == server_id else s
@@ -247,6 +267,13 @@ class Servers:
         if self.get(server_id) is None:
             raise KeyError(server_id)
         self.store.set_setting("default_server", server_id)
+
+
+def clean_url(url):
+    """A server's address as typed or pasted, cleaned: what the browser showed (``http://nas:8096/web/index.html#!/home``,
+    ``http://nas:4533/app/#/album``) is cut back to the server itself."""
+    url = re.split(r"[#?]", str(url or "").strip(), 1)[0].rstrip("/")
+    return re.sub(r"(/web(/index\.html)?|/app|/index\.html)$", "", url, flags=re.I).rstrip("/")
 
 
 def folders_key(server_id):
