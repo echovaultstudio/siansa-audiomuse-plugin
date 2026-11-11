@@ -1,0 +1,45 @@
+name: CodeQL
+
+# GitHub's code scanning (Security › Code scanning), set up as the Siansa app's: Siansa Beats' Python, the page's
+# JavaScript (in beats/beats/page.html) and the workflows. None of them needs a build. The default setup must stay
+# off (Settings › Code security › CodeQL analysis) for this one to report.
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  schedule:
+    # Weekly, so new queries also look at code nobody has changed.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
