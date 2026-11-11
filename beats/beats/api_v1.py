@@ -201,7 +201,8 @@ def post(handler, path, body, server=None):
         sent = handler.app.listens.love(body.get("user"), body.get("artist"), body.get("title"), body.get("loved", True) is not False)
         return handler._json({"passed_on": sent}) or True
     if path == "/api/v1/listens/now":  # what's playing now
-        if not handler.app.listens.set_playing(body.get("user"), body):
+        here = _here(handler.app, str(body["id"]), server) if body.get("id") else None
+        if not handler.app.listens.set_playing(body.get("user"), body, here):
             return handler._error(HTTPStatus.BAD_REQUEST, "artist and title needed") or True
         return handler._json({"playing": True}) or True
     if path == "/api/v1/bad-blends":

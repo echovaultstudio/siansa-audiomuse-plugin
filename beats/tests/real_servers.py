@@ -95,6 +95,12 @@ def main(servers, library_path):
             sizes.setdefault(match.tail(song["path"]) or match.meta(song), {})[kind] = size
         with client.audio(songs[0]["id"], "bytes=0-99") as r:
             check(r.status in (200, 206) and len(r.read()) > 0, f"the page's player gets the song (HTTP {r.status})")
+        # Pictures (0.30): asked the way the real server takes it. The test library's songs may have none: then it's
+        # None (Navidrome's stand-in told apart, Emby's and Jellyfin's 404), never an error or something else.
+        for of in ("cover", "artist"):
+            found = client.picture(songs[0]["id"], of, 300)
+            check(found is None or (len(found[0]) > 100 and found[1].startswith("image/")),
+                  f"{kind}: a song's {of} picture is a picture or none ({None if found is None else (len(found[0]), found[1])})")
     same = [by for by in sizes.values() if len(by) == len(servers) and len(set(by.values())) == 1]
     check(len(same) == len(wanted), f"every server sends the same file, whole: {len(same)} of {len(wanted)} songs "
           f"({[by for by in sizes.values() if by not in same][:2]})")

@@ -176,6 +176,11 @@ months, with the listens, hours, artists, songs and albums of that time, the mos
 months as bars (press one to go there), when in the day and the week you listen, records, the artists heard for
 the first time, what's playing now and the last listens. Days and hours are your browser's clock's.
 
+- **Pictures (0.30):** the favourites of a time (top artist, album and song), the number one of each list, the
+  lists' rows, what's playing and the last listens show the cover or the artist's picture. They're the music
+  server's own, asked through a song of that album or artist in the library and kept in the data folder (`art/`);
+  nothing is looked up on the internet. Music that isn't on the server shows a tile in its own colour with the
+  name's first letters. Navidrome's stand-in picture (its blue disc, its star) is never shown as a picture.
 - **From the app:** turn on **Scrobble to Siansa Beats** in Siansa (Settings › Scrobbling). Each listen is kept
   under the name the app scrobbles as (your music server's user name), so two people have a history each; the page
   has a listener switch when there's more than one.
@@ -463,7 +468,7 @@ and the rest are downloaded once more and measured here. New songs are measured 
 
 `GET /api/health`, `/api/status`, `/api/libraries`, `/api/songs`, `/api/songs/<id>` (with every beat),
 `/api/beats/<id>`, `/api/audio/<id>`, `/api/grids?ids=`, `/api/export.csv`, `/api/export.json`;
-`/api/bad-blends`, `/api/failed/export`, `/api/listens?user=&year=&month=&tz=`, `/api/listens/import` (`POST`: the export file as the body, `?user=&name=`), `POST /api/listens/lastfm`, `POST /api/listens/remove`, `/api/genres`, `/api/genre?name=&limit=`, `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`; `POST /api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
+`/api/bad-blends`, `/api/failed/export`, `/api/listens?user=&year=&month=&tz=`, `/api/art/cover/<song id>?size=` and `/api/art/artist/<song id>?size=` (a song's cover and its artist's picture), `/api/listens/import` (`POST`: the export file as the body, `?user=&name=`), `POST /api/listens/lastfm`, `POST /api/listens/remove`, `/api/genres`, `/api/genre?name=&limit=`, `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`; `POST /api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
 `beats/server.py`.
 
 Beat This! is by Francesco Foscarin, Jan Schlüter and Gerhard Widmer (ISMIR 2024), under the MIT licence.

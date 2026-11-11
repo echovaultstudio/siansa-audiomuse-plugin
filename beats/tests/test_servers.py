@@ -52,6 +52,26 @@ class ClientTest(Base):
                 # The token is in a header, never in an address (so never in a log).
                 self.assertFalse(any("tok-1" in json.dumps(r) for r in media.requests))
 
+    def test_a_songs_cover_and_its_artists_picture_on_every_server(self):
+        from fakes import PICTURE, FakeServer  # noqa: F401
+        from beats.subsonic import Subsonic
+
+        # Emby and Jellyfin: the album's picture, the first artist's; none is HTTP 404 there.
+        for media, client in self.both():
+            song = media.prefix + "t140"
+            self.assertIsNone(client.picture(song, "cover", 300), media.jellyfin)
+            self.assertIsNone(client.picture(song, "artist", 300))
+            media.pictures = {"album-of-t140", "artist-of-t140"}
+            self.assertEqual(client.picture(song, "cover", 300), (PICTURE + b"album-of-t140", "image/jpeg"))
+            self.assertEqual(client.picture(song, "artist", 640), (PICTURE + b"artist-of-t140", "image/jpeg"))
+            self.assertIn("maxWidth", [q for p, q in media.requests if p.endswith("/Images/Primary")][-1])
+        # Navidrome: its stand-in (an ordinary picture marked "don't keep", with no version) is none.
+        navidrome = Subsonic(self.fake.url, USER, PASSWORD)
+        self.assertIsNone(navidrome.picture("t140", "cover", 300))
+        self.fake.pictures = {"mf-t140", "ar-artist-of-t140"}
+        self.assertEqual(navidrome.picture("t140", "cover", 300), (PICTURE + b"mf-t140", "image/png"))
+        self.assertEqual(navidrome.picture("t140", "artist", 300), (PICTURE + b"ar-artist-of-t140", "image/png"))
+
     def test_a_login_the_server_stops_taking_is_made_again(self):
         for media, client in self.both():
             with self.subTest(client.label):

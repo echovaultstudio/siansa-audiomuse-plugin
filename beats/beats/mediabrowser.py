@@ -219,6 +219,34 @@ class MediaBrowser:
 
         return song_from(self._as_user(one))
 
+    def picture(self, song_id, of="cover", size=300):
+        """``(bytes, content type)`` of the song's cover (``of="cover"``: its album's, else its own) or its artist's
+        picture (``"artist"``), about ``size`` px wide; None when the server has none."""
+        def fetch(user_id, token):
+            item = urllib.parse.quote(str(song_id), safe="")
+            path = f"/Items/{item}?userId={user_id}" if self.jellyfin else f"/Users/{user_id}/Items/{item}"
+            song = self._json(path, token) or {}
+            if of == "artist":
+                ids = [a.get("Id") for a in (song.get("ArtistItems") or []) + (song.get("AlbumArtists") or []) if a.get("Id")]
+            else:
+                ids = [song.get("AlbumId") if song.get("AlbumPrimaryImageTag") else None,
+                       song.get("Id") if (song.get("ImageTags") or {}).get("Primary") else None, song.get("AlbumId")]
+            for one in dict.fromkeys(i for i in ids if i):
+                try:
+                    with self._open(f"/Items/{urllib.parse.quote(str(one), safe='')}/Images/Primary?maxWidth={int(size)}&quality=90",
+                                    token, headers={"Accept": "image/*"}) as response:
+                        kind = response.headers.get("Content-Type") or ""
+                        if kind.startswith("image/"):
+                            return response.read(), kind
+                except ServerError as e:
+                    if "HTTP 404" not in str(e):
+                        raise
+                if of == "artist":
+                    break  # the first artist's, or none: not a featured guest's picture for the song's artist
+            return None
+
+        return self._as_user(fetch)
+
     def _stream(self, song_id, token, byte_range=None, timeout=None):
         item = urllib.parse.quote(str(song_id), safe="")
         return self._open(f"/Audio/{item}/stream?Static=true", token,

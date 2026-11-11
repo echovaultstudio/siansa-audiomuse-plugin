@@ -33,6 +33,9 @@ def file_path(song):
     return f"{song['artist']}/{song.get('album', 'Test')}/{song['file']}"
 
 
+PICTURE = b"\x89PNG\r\n\x1a\n"  # how a picture starts: the tests' pictures are this and the id they're of
+
+
 def entry(song):
     e = {"id": song["id"], "title": song["title"], "artist": song["artist"], "album": song.get("album", "Test"),
          "duration": int(song.get("duration", 60)), "suffix": os.path.splitext(song["file"])[1].lstrip(".")}
@@ -41,6 +44,7 @@ def entry(song):
     if song.get("genre"):
         e["genre"] = song["genre"]
         e["genres"] = [{"name": g.strip()} for g in song["genre"].split("/")]
+    e["coverArt"], e["artistId"] = "mf-" + song["id"], "artist-of-" + song["id"]
     # Made up from the tags, as Navidrome's Subsonic path is unless the player reports real paths.
     e["path"] = f"{song['artist']}/{e['album']}/01 - {song['title']}.{e['suffix']}"
     return e
@@ -60,6 +64,9 @@ class FakeServer:
         # [{"server_id", "name", "server_type", "is_default", "sees": {ids}}]
         self.am_servers = None
         self.played = {}  # song id -> plays, for Navidrome's own API's play counts
+        # Pictures (0.30): the cover ids ("mf-<song>") and artist ids ("ar-artist-of-<song>") that have one; any other
+        # is answered with the stand-in, as Navidrome does: an ordinary picture marked "don't keep", with no version.
+        self.pictures = set()
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -165,6 +172,11 @@ class FakeServer:
                     if q.get("id") not in by_id:
                         return self.subsonic(error="Song not found")
                     return self.subsonic({"song": entry(by_id[q["id"]])})
+                if method == "getCoverArt":
+                    if q.get("id") in fake.pictures:
+                        return self.reply(200, PICTURE + q["id"].encode(), "image/png",
+                                          {"ETag": '"v1"', "Cache-Control": "public, max-age=315360000"})
+                    return self.reply(200, PICTURE + b"stand-in", "image/webp", {"Cache-Control": "no-store"})
                 if method == "stream":
                     song = by_id.get(q.get("id"))
                     if not song:
@@ -234,6 +246,7 @@ class FakeMediaServer:
                  under_emby=False):
         self.folder, self.jellyfin, self.paths, self.root = folder, jellyfin, paths, root
         self.under_emby = under_emby  # an Emby set up to answer under /emby only (a reverse proxy's way)
+        self.pictures = set()  # the item ids (an album's, an artist's) that have a primary picture; the rest: HTTP 404
         self.forbids = False  # whether it turns every request away (HTTP 403), as Emby does a caller it takes for remote
         self.prefix = "j-" if jellyfin else "e-"
         with open(os.path.join(folder, "catalog.json")) as f:
@@ -298,6 +311,9 @@ class FakeMediaServer:
                      "Genres": [g.strip() for g in (song.get("genre") or "").split("/") if g.strip()]}
                 if fake.paths:
                     e["Path"] = f"{fake.root}/{file_path(song)}"
+                e["AlbumId"], e["ArtistItems"] = "album-of-" + song["id"], [{"Id": "artist-of-" + song["id"], "Name": song["artist"]}]
+                if e["AlbumId"] in fake.pictures:
+                    e["AlbumPrimaryImageTag"] = "tag1"
                 return e
 
             def do_GET(self):
@@ -327,6 +343,14 @@ class FakeMediaServer:
                     return self.reply(200, {"Items": [self.item(s) for s in fake.songs[start:start + count]],
                                             "TotalRecordCount": len(fake.songs)})
                 parts = url.path.strip("/").split("/")
+                if len(parts) == 4 and parts[0] == "Items" and parts[2:] == ["Images", "Primary"]:
+                    if parts[1] in fake.pictures:
+                        return self.reply(200, PICTURE + parts[1].encode(), "image/jpeg")
+                    return self.reply(404, b"", "text/plain")
+                one = parts[-1] if (parts[:1] == ["Items"] and len(parts) == 2) or (parts[:3] == ["Users", "u1", "Items"] and len(parts) == 4) else None
+                if one:
+                    song = next((s for s in fake.songs if fake.prefix + s["id"] == one), None)
+                    return self.reply(200, self.item(song)) if song else self.reply(404, b"", "text/plain")
                 if len(parts) == 3 and parts[0] == "Audio" and parts[2] == "stream" and q.get("Static") == "true":
                     song = next((s for s in fake.songs if fake.prefix + s["id"] == parts[1]), None)
                     if not song:

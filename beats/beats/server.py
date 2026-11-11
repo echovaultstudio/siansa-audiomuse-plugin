@@ -242,6 +242,10 @@ class App:
         from .listens import Listens
 
         self.listens = Listens(self.store, self.vault)
+        # Covers and artists' pictures for the listening page (0.30): the music server's own, kept in the data folder.
+        from .art import Art
+
+        self.art = Art(self.store, self.servers, config.data_dir)
 
 
     PULL_EVERY = 6 * 3600  # AudioMuse-AI's new songs are taken over this often
@@ -280,8 +284,25 @@ class App:
         users = self.listens.users()
         if user is None:  # the first one with a name (the app's), else the first
             user = next((u["user"] for u in users if u["user"]), users[0]["user"] if users else "")
-        return {"users": users, "importing": dict(self.listens.importing), "playing": self.listens.all_playing(),
-                **self.listens.summary(user, year, month, tz)}
+        answer = {"users": users, "importing": dict(self.listens.importing), "playing": self.listens.all_playing(),
+                  **self.listens.summary(user, year, month, tz)}
+        # Which song's cover and which song's artist picture each row shows ("cover", "face": a song id here, or
+        # null for music that isn't in the library): the page asks /api/art for them as it shows them.
+        def pictured(row, cover=True, face=False):
+            row = dict(row)
+            if cover:
+                row["cover"] = self.art.song_for("cover", row.get("song"), row.get("artist"), row.get("album"))
+            if face:
+                row["face"] = self.art.song_for("artist", row.get("song"), row.get("artist"))
+            return row
+
+        top = answer["top"]
+        answer["top"] = {"songs": [pictured(r) for r in top["songs"]], "albums": [pictured(r) for r in top["albums"]],
+                         "artists": [pictured(r, cover=False, face=True) for r in top["artists"]]}
+        answer["recent"] = [pictured(r) for r in answer["recent"]]
+        answer["playing"] = [pictured(r, face=True) for r in answer["playing"]]
+        answer["new_artists"] = [pictured(r, cover=False, face=True) for r in answer["new_artists"]]
+        return answer
 
     def sound_status(self, server=None):
         """How much of ``server``'s music has its sound here, and how the pull from AudioMuse-AI is going."""
@@ -799,7 +820,7 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     # The page asks for these every few seconds: logged only when they fail, so the debug log stays readable.
-    POLLED = ("/api/status", "/api/songs", "/api/libraries", "/api/log", "/api/bad-blends", "/api/health")
+    POLLED = ("/api/status", "/api/songs", "/api/libraries", "/api/log", "/api/bad-blends", "/api/health", "/api/art/")
 
     def log_message(self, fmt, *args):  # http.server's own complaints (a malformed request); requests: log_request
         _log.debug("%s: %s", self.client_address[0], log.redact(fmt % args if args else fmt))
@@ -859,7 +880,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        if "Cache-Control" not in (headers or {}):  # a picture says how long it may be kept; nothing else is
+            self.send_header("Cache-Control", "no-store")
         if squeezed:
             self.send_header("Content-Encoding", "gzip")
             self.send_header("Vary", "Accept-Encoding")
@@ -982,6 +1004,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(app.listening(user, number("year"), month, (query.get("tz") or [None])[0]))
             if path == "/api/listens/import":
                 return self._json(dict(app.listens.importing))
+            m = re.fullmatch(r"/api/art/(cover|artist)/([^/]+)", path)
+            if m:  # a song's cover, or its artist's picture, from the music server (kept here once fetched)
+                size = (query.get("size") or ["300"])[0]
+                found = app.art.get(m[1], _id(m[2]), int(size) if size.isdigit() else 300)
+                if found is None:
+                    return self._send(HTTPStatus.NOT_FOUND, b"", "text/plain", {"Cache-Control": "private, max-age=3600"})
+                return self._send(HTTPStatus.OK, found[0], found[1], {"Cache-Control": "private, max-age=604800"})
             if path == "/api/genres":
                 return self._json({"styles": app.styles_status(server), "genres": app.genre_list(server),
                                    "about": app.about.status()})

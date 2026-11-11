@@ -384,8 +384,9 @@ class Listens:
         return [{"user": u, "listens": 0, "first": None, "last": None, **by.get(u, {}), "sources": sources.get(u, {}),
                  "lastfm": self.lastfm_status(u)} for u in names]
 
-    def set_playing(self, user, row):
-        """What the app says is playing for ``user`` now (shown on the page, and said to Last.fm)."""
+    def set_playing(self, user, row, song_id=None):
+        """What the app says is playing for ``user`` now (shown on the page, and said to Last.fm); ``song_id``: the
+        song here, for its cover."""
         user = str(user or "").strip()
         artist, title = str(row.get("artist") or "").strip(), str(row.get("title") or "").strip()
         if not artist or not title:
@@ -395,7 +396,7 @@ class Listens:
         except (TypeError, ValueError):
             duration = None
         playing = {"artist": artist, "title": title, "album": str(row.get("album") or "").strip() or None,
-                   "duration": duration, "at": int(self.now())}
+                   "duration": duration, "at": int(self.now()), "song": song_id}
         self.playing[user] = playing
         keys = self._keys(user)
         if keys:
@@ -528,26 +529,27 @@ class Listens:
         limit = max(1, min(1000, int(limit)))
         if kind == "artists":
             rows = self.store._rows(
-                "SELECT artist, COUNT(*) AS listens, MAX(at) AS last FROM listens WHERE user=? AND at>=? AND at<? "
-                "GROUP BY akey ORDER BY listens DESC, last DESC LIMIT ?", (user, start, end, limit))
-            return [{"artist": r["artist"], "listens": r["listens"]} for r in rows]
+                "SELECT artist, COUNT(*) AS listens, MAX(at) AS last, MAX(song_id) AS song_id FROM listens WHERE user=? "
+                "AND at>=? AND at<? GROUP BY akey ORDER BY listens DESC, last DESC LIMIT ?", (user, start, end, limit))
+            return [{"artist": r["artist"], "listens": r["listens"], "song": r["song_id"]} for r in rows]
         if kind == "albums":
             rows = self.store._rows(
-                "SELECT album, artist, COUNT(*) AS listens, MAX(at) AS last FROM listens WHERE user=? AND at>=? AND at<? "
-                "AND album IS NOT NULL GROUP BY akey, album COLLATE NOCASE ORDER BY listens DESC, last DESC LIMIT ?",
-                (user, start, end, limit))
-            return [{"album": r["album"], "artist": r["artist"], "listens": r["listens"]} for r in rows]
+                "SELECT album, artist, COUNT(*) AS listens, MAX(at) AS last, MAX(song_id) AS song_id FROM listens "
+                "WHERE user=? AND at>=? AND at<? AND album IS NOT NULL GROUP BY akey, album COLLATE NOCASE "
+                "ORDER BY listens DESC, last DESC LIMIT ?", (user, start, end, limit))
+            return [{"album": r["album"], "artist": r["artist"], "listens": r["listens"], "song": r["song_id"]} for r in rows]
         rows = self.store._rows(
             "SELECT artist, title, album, COUNT(*) AS listens, MAX(at) AS last, MAX(song_id) AS song_id FROM listens "
             "WHERE user=? AND at>=? AND at<? GROUP BY akey, tkey ORDER BY listens DESC, last DESC LIMIT ?",
             (user, start, end, limit))
         ids = self.store.item_ids([r["song_id"] for r in rows if r["song_id"]], server) if server else {}
         return [{"artist": r["artist"], "title": r["title"], "album": r["album"], "listens": r["listens"],
-                 "id": ids.get(r["song_id"]) if server else r["song_id"]} for r in rows]
+                 "id": ids.get(r["song_id"]) if server else r["song_id"], "song": r["song_id"]} for r in rows]
 
     def recent(self, user, limit=30):
         return [dict(r) for r in self.store._rows(
-            "SELECT at, artist, title, album, source FROM listens WHERE user=? ORDER BY at DESC LIMIT ?", (user, limit))]
+            "SELECT at, artist, title, album, source, song_id AS song FROM listens WHERE user=? ORDER BY at DESC LIMIT ?",
+            (user, limit))]
 
     def summary(self, user, year=None, month=None, tz_name=None, most=25):
         """Everything the page shows of ``user``'s listening in a month, a year or all time; kept until a listen is

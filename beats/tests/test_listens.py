@@ -19,6 +19,7 @@ from beats import listens as L  # noqa: E402
 from beats.store import Store  # noqa: E402
 from beats.vault import Vault  # noqa: E402
 from test_service import Service  # noqa: E402
+import fakes  # noqa: E402
 
 
 def at(text):
@@ -151,7 +152,7 @@ class History(unittest.TestCase):
         self.assertEqual([(s["artist"], s["title"], s["listens"]) for s in year["top"]["songs"]],
                          [("Moby", "Porcelain", 2), ("Röyksopp", "Eple", 2), ("Moby", "Honey", 1)])  # a tie: the later one first
         self.assertEqual([(a["artist"], a["listens"]) for a in year["top"]["artists"]], [("Moby", 3), ("Röyksopp", 2)])
-        self.assertEqual(year["top"]["albums"], [{"album": "Play", "artist": "Moby", "listens": 3}])
+        self.assertEqual(year["top"]["albums"], [{"album": "Play", "artist": "Moby", "listens": 3, "song": None}])
         self.assertEqual(year["hours"][0], 1)  # half past midnight, Helsinki's clock
         self.assertEqual(year["records"]["streak"], 2)
         self.assertEqual(year["records"]["busiest_day"], {"date": "2026-01-10", "listens": 2})
@@ -339,7 +340,7 @@ class ListeningService(Service):
 
         top = self.call("/api/v1/listens/top?user=max&kind=songs")
         self.assertEqual([(t["title"], t["listens"], t["id"]) for t in top["top"]], [("Control", 2, "t140"), ("Elsewhere", 1, None)])
-        self.assertEqual(self.call(f"/api/v1/listens/top?user=max&kind=artists&from={now - 200}")["top"], [{"artist": "Someone", "listens": 1}])
+        self.assertEqual(self.call(f"/api/v1/listens/top?user=max&kind=artists&from={now - 200}")["top"], [{"artist": "Someone", "listens": 1, "song": None}])
         page = self.call("/api/listens?tz=Europe/Helsinki")  # the first listener's, all time
         self.assertEqual((page["user"], page["totals"]["listens"], page["now"]["title"]), ("max", 3, "Deep"))
         self.assertEqual([u["user"] for u in page["users"]], ["max"])
@@ -397,6 +398,60 @@ class ListeningService(Service):
         self.assertEqual(self.call("/api/v1/loves", "POST", {"user": "max", "artist": "Moby", "title": "Honey", "loved": True}), {"passed_on": True})
         self.assertEqual(self.call("/api/v1/loves", "POST", {"user": "kids", "artist": "Moby", "title": "Honey"}), {"passed_on": False})
         self.assertFalse(self.call("/api/listens/lastfm", "POST", {"user": "max", "disconnect": True})["connected"])
+
+
+class Pictures(Service):
+    """Covers and artists' pictures for the listening page: the music server's own, never its stand-in."""
+
+    def started(self):
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+
+    def picture(self, path):
+        request = urllib.request.Request(self.base + path)
+        with urllib.request.urlopen(request, timeout=10) as r:
+            return r.read(), r.headers["Content-Type"], r.headers["Cache-Control"]
+
+    def test_a_rows_picture_is_the_servers_own_and_kept(self):
+        self.started()
+        self.fake.pictures = {"mf-t140", "ar-artist-of-t140"}
+        now = int(time.time())
+        self.call("/api/v1/listens", "POST", {"user": "max", "listens": [
+            {"id": "t140", "at": now - 600, "artist": "Ecsape", "title": "Control", "album": "Test"},
+            {"at": now - 300, "artist": "ECSAPE", "title": "Another of theirs, not in the library", "album": "Elsewhere"},
+            {"at": now - 200, "artist": "Nobody Here", "title": "Unknown", "album": "Nowhere"}]})
+        self.call("/api/v1/listens/now", "POST", {"user": "max", "id": "t140", "artist": "Ecsape", "title": "Control"})
+        page = self.call("/api/listens?user=max")
+        songs = {r["title"]: r["cover"] for r in page["top"]["songs"]}
+        self.assertEqual(songs, {"Control": "t140", "Another of theirs, not in the library": None, "Unknown": None})
+        # An artist's picture is asked through any song of theirs here, also for a listen that isn't linked itself.
+        self.assertEqual({r["artist"]: r["face"] for r in page["top"]["artists"]}, {"Ecsape": "t140", "Nobody Here": None})
+        self.assertEqual((page["playing"][0]["cover"], page["playing"][0]["face"]), ("t140", "t140"))
+        self.assertEqual(page["recent"][-1]["cover"], "t140")
+
+        data, kind, cache = self.picture("/api/art/cover/t140?size=300")
+        self.assertEqual((data, kind), (fakes.PICTURE + b"mf-t140", "image/png"))
+        self.assertIn("max-age", cache)  # the browser may keep it; nothing else on the page is kept
+        self.assertEqual(self.picture("/api/art/artist/t140?size=640")[0], fakes.PICTURE + b"ar-artist-of-t140")
+        # Kept in the data folder: the server isn't asked again.
+        before = len([p for p, q in self.fake.requests if p.endswith("getCoverArt")])
+        self.picture("/api/art/cover/t140?size=300")
+        self.assertEqual(len([p for p, q in self.fake.requests if p.endswith("getCoverArt")]), before)
+        self.assertEqual(self.app.art.kept()["pictures"], 2)
+
+    def test_the_servers_stand_in_is_no_picture(self):
+        self.started()  # no picture for anything: Navidrome answers with its blue disc, as an ordinary picture
+        for path in ("/api/art/cover/t122", "/api/art/artist/t122", "/api/art/cover/not-a-song"):
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                self.picture(path)
+            self.assertEqual(e.exception.code, 404, path)
+        self.assertEqual(self.app.art.kept()["pictures"], 0)
+        # "None" is remembered, so a page of rows doesn't ask the server for each again.
+        before = len(self.fake.requests)
+        with self.assertRaises(urllib.error.HTTPError):
+            self.picture("/api/art/cover/t122")
+        self.assertEqual(len(self.fake.requests), before)
 
 
 if __name__ == "__main__":
