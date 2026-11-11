@@ -1438,7 +1438,10 @@ function drawPull(sound) {
   const p = sound.pull || {};
   const model = sound.text_model || {};
   const have = `The sound of ${num(sound.sound)} of ${num(sound.songs)} songs is here` +
-    (model.available ? `; ${num(sound.words)} can be found by describing them in words` : "; this image has no text model, so music can't be found by words (0.26 has it)");
+    (model.available ? `; ${num(sound.words)} can be found by describing them in words` : "; this image has no text model, so music can't be found by words (0.26 has it)") +
+    (sound.sources ? ` (${num(sound.sources.audiomuse)} from AudioMuse-AI, ${num(sound.sources.beats)} heard here` + (sound.sources.failed ? `, ${num(sound.sources.failed)} couldn't be heard` : "") + ")" : "") +
+    (sound.hearing ? `. Hearing ${sound.hearing.artist || ""} – ${sound.hearing.title || ""} now` : "") +
+    (sound.hears === false ? ". This image can't hear songs itself (0.27 can)" : "");
   let text;
   if (p.running) text = p.total ? `Taking over from AudioMuse-AI: ${num(p.done || 0)} of ${num(p.total)} songs…` : "Asking AudioMuse-AI what it has…";
   else if (p.error) text = `${have}. The last try failed: ${p.error}`;

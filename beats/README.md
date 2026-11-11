@@ -156,7 +156,18 @@ first search, takes about 600 MB of memory while in use, and is let go after 10 
 small models and the catalogue of 109 concepts (genre, instrument, vocals, mood, production, tempo, era) that
 steering uses. Each song's vector for this was taken over from AudioMuse-AI with the rest.
 
-AudioMuse-AI still has to run for now: it's what listens to **new** songs. That moves into Siansa Beats next.
+**Siansa Beats hears songs itself (0.27).** Each new song's sound is worked out here while it's analysed, with
+AudioMuse-AI's own models and AudioMuse-AI's own recipe (its two vectors, its moods and tags, the six feelings,
+energy), so it lands where AudioMuse-AI would have put it, beside the songs taken over. Songs analysed before, whose
+sound AudioMuse-AI never had, are caught up on one at a time while nothing else is being done. The spectrograms are
+checked to be identical to AudioMuse-AI's own code. So **AudioMuse-AI no longer has to run**: connect it once to
+take over what it has (or don't, and every song is heard here), then it can be switched off. A song's tempo is
+still only ever Beat This!'s.
+
+**Songs gone from the server are forgotten (0.27).** When a library is read again (every few hours, or **Read
+again**), a song that's no longer on the server goes from here with its analysis, unless another server still has
+it. A library that suddenly lists far fewer songs (more than 25 songs and 10% missing at once) is left alone, with a
+warning: that's more often a server still scanning or a disk not mounted than a clear-out.
 
 The answers follow AudioMuse-AI's own rules and defaults (cosine distance between its MusiCNN vectors, at most three
 songs by one artist, the same recording never twice), so the two can be compared. The mood centres

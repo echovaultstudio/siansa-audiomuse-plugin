@@ -126,6 +126,8 @@ class Store:
                     self.db.execute("ALTER TABLE sound DROP COLUMN tempo")
                 except sqlite3.OperationalError:  # an SQLite from before columns could be dropped: emptied instead
                     self.db.execute("UPDATE sound SET tempo=NULL")
+            if "error" not in {r[1] for r in self.db.execute("PRAGMA table_info(sound)")}:
+                self.db.execute("ALTER TABLE sound ADD COLUMN error TEXT")  # 0.27: why a song couldn't be heard here
             if "source" not in {r[1] for r in self.db.execute("PRAGMA table_info(measures)")}:
                 self.db.execute("ALTER TABLE measures ADD COLUMN source TEXT")  # 0.20.0's first builds had none
             if "folder" not in {r[1] for r in self.db.execute("PRAGMA table_info(songs)")}:
@@ -211,6 +213,28 @@ class Store:
                 [(r["song_id"], *(r.get(f) for f in self.SOUND_FIELDS), source, now) for r in rows])
         self.sound_changes += 1
         return len(rows)
+
+    def sound_failed(self, song_id, error):
+        """Keeps why ``song_id`` couldn't be heard here, so it isn't tried again and again (a pull from AudioMuse-AI,
+        or hearing it after an update, replaces this)."""
+        with self._write():
+            self.db.execute("INSERT OR REPLACE INTO sound (song_id, source, at, error) VALUES (?, 'beats', ?, ?)",
+                            (song_id, time.time(), str(error)[:300]))
+
+    def without_sound(self, limit=20):
+        """Songs analysed for their beats whose sound isn't known (and that didn't fail to be heard), newest first."""
+        return [r["song_id"] for r in self._rows(
+            "SELECT j.song_id FROM jobs j LEFT JOIN sound o ON o.song_id = j.song_id WHERE j.state = 'done' AND "
+            "o.song_id IS NULL ORDER BY j.finished_at DESC LIMIT ?", (limit,))]
+
+    def sound_sources(self, server=None):
+        """``{"audiomuse": n, "beats": n, "failed": n}``: where each of ``server``'s songs' sound came from."""
+        of, args = self._of(server, "o.song_id")
+        out = {"audiomuse": 0, "beats": 0, "failed": 0}
+        for r in self._rows("SELECT CASE WHEN o.musicnn IS NULL THEN 'failed' ELSE COALESCE(o.source, 'audiomuse') END "
+                            f"AS source, COUNT(*) AS n FROM sound o WHERE 1=1{of} GROUP BY 1", args):
+            out[r["source"]] = out.get(r["source"], 0) + r["n"]
+        return out
 
     def sound_prints(self):
         """``{song id: fp}``: what AudioMuse-AI's analysis of each song looked like when it was pulled."""
@@ -506,6 +530,24 @@ class Store:
     def remove_server(self, server):
         """Forgets ``server``: as :meth:`remove_folder`, for all of its libraries."""
         return self._unlink("server=?", (server,))
+
+    def gone_from(self, server, folder, item_ids):
+        """The ids ``server``'s library ``folder`` had here that aren't among ``item_ids`` (what it has now)."""
+        now = set(item_ids)
+        return [r["item_id"] for r in self._rows("SELECT item_id FROM links WHERE server=? AND folder=?",
+                                                 (server, str(folder))) if r["item_id"] not in now]
+
+    def remove_items(self, server, item_ids):
+        """Forgets ``server``'s songs ``item_ids`` (gone from it): a song no server has any more goes with everything
+        known about it; one another server still has stays. How many songs went altogether."""
+        before = len(self._rows("SELECT id FROM songs"))
+        ids = list(dict.fromkeys(item_ids))
+        for start in range(0, len(ids), 400):
+            chunk = ids[start:start + 400]
+            self._unlink(f"server=? AND item_id IN ({', '.join('?' for _ in chunk)})", (server, *chunk))
+        if ids:
+            self.sound_changes += 1
+        return before - len(self._rows("SELECT id FROM songs"))
 
     def _unlink(self, where, args):
         self.genre_changes += 1

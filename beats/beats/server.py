@@ -190,7 +190,8 @@ class Kept:
 class App:
     """Everything the handler needs, so the tests can make one with stand-ins."""
 
-    def __init__(self, config, tracker=None, decode=None, measure=None, style=None, sound=None, words=None):
+    def __init__(self, config, tracker=None, decode=None, measure=None, style=None, sound=None, words=None,
+                 hearer=None):
         from . import analyser
         from . import style as style_module
 
@@ -205,8 +206,15 @@ class App:
         self.tracker = tracker or analyser.BeatThis(config.model, config.device, config.models_dir, config.threads,
                                                     config.float16)
         self.style = style if style is not None else style_module.StyleModel(config.models_dir, config.style_threads, config.device)
+        # Music found by describing it in words (0.26): the text model, loaded when first searched.
+        from .hear import Hearer
+        from .words import Words
+
+        self.words = words if words is not None else Words(config.models_dir)
+        # How a song sounds, heard here with AudioMuse-AI's models (0.27): new songs need no AudioMuse-AI.
+        self.hearer = hearer if hearer is not None else Hearer(config.models_dir, self.words, config.threads)
         self.worker = Worker(self.store, self.servers, self.tracker, decode or analyser.decode,
-                             config.data_dir, config.model, measure, self.style, sound)
+                             config.data_dir, config.model, measure, self.style, sound, self.hearer)
         self.started = time.time()
         # Answers the page and the app ask for often, kept ready: the genre list changes only when songs are voted,
         # the styles' counts with each song heard (the page asks every 2 s).
@@ -224,10 +232,7 @@ class App:
 
         self.sound = Sound(self.store)
         self.puller = Puller(self.store, lambda: self.audiomuse)
-        # Music found by describing it in words (0.26): the text model, loaded when first searched.
-        from .words import Words
 
-        self.words = words if words is not None else Words(config.models_dir)
 
     PULL_EVERY = 6 * 3600  # AudioMuse-AI's new songs are taken over this often
 
@@ -250,7 +255,10 @@ class App:
         counts = self.store.sound_counts(self.only(server))
         return {**counts, "pull": dict(self.puller.state), "audiomuse": self.audiomuse.configured,
                 "text_model": {"available": self.words.available, "steering": self.words.steers,
-                               "loaded": self.words.loaded, "load_seconds": self.words.load_seconds}}
+                               "loaded": self.words.loaded, "load_seconds": self.words.load_seconds},
+                # Heard here (0.27): whether this image can, where each song's sound came from, what's being heard.
+                "hears": self.hearer.available, "sources": self.store.sound_sources(self.only(server)),
+                "hearing": dict(self.worker.hearing) if self.worker.hearing else None}
 
     # ---- connections and access, set on the page (0.24.0) ----
 

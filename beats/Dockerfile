@@ -91,8 +91,35 @@ RUN pip install tokenizers==0.20.3 \
       test -s "/models/$(basename "$url")"; \
     done
 
+# How a song sounds, heard here (0.27): AudioMuse-AI's own models and its own recipe, so a new song needs no
+# AudioMuse-AI and lands where AudioMuse-AI would have put it. MusiCNN (its embedding and its 50 tags) and the distilled
+# CLAP audio model (AudioMuse-AI's DCLAP, AGPL-3.0), from AudioMuse-AI's releases; librosa makes the spectrograms, as
+# in AudioMuse-AI, so they're the same to the last digit (numba's wheels go with numpy 1.26).
+ARG AUDIOMUSE_DCLAP=https://github.com/NeptuneHub/AudioMuse-AI-DCLAP/releases/download/v1
+RUN pip install librosa==0.10.2.post1 soundfile==0.12.1 \
+ && python -c "import numpy, librosa, soxr; assert numpy.__version__ == '1.26.4', numpy.__version__; print('librosa', librosa.__version__)" \
+ && for url in "${AUDIOMUSE_MODELS}/musicnn_embedding.onnx" "${AUDIOMUSE_MODELS}/musicnn_prediction.onnx" \
+               "${AUDIOMUSE_DCLAP}/model_epoch_36.onnx" "${AUDIOMUSE_DCLAP}/model_epoch_36.onnx.data"; do \
+      for try in 1 2 3 4 5; do \
+        python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+          "$url" "/models/$(basename "$url")" && break || { echo "download $try failed, trying again"; sleep 15; }; \
+      done; \
+      test -s "/models/$(basename "$url")"; \
+    done
+
 WORKDIR /app
 COPY beats/ /app/beats/
+# A song heard for real: a made-up one, read through librosa and through ffmpeg, twice the same.
+RUN ffmpeg -v error -f lavfi -i "sine=frequency=220:duration=14,aformat=channel_layouts=stereo" -f lavfi -i "anoisesrc=d=14:c=pink:a=0.2" \
+      -filter_complex amix=inputs=2 -ar 44100 /tmp/heard.flac \
+ && python -c "import numpy; from beats.hear import Hearer; from beats.words import Words; \
+h = Hearer('/models', Words('/models')); assert h.available; a = h('/tmp/heard.flac'); b = h('/tmp/heard.flac'); \
+assert len(a['musicnn']) == 800 and len(a['clap']) == 2048, (len(a['musicnn']), len(a['clap'])); \
+assert a['musicnn'] == b['musicnn'] and a['clap'] == b['clap']; \
+c = numpy.frombuffer(a['clap'], numpy.float32); assert abs(float(numpy.linalg.norm(c)) - 1) < 1e-4; \
+assert a['moods'].count(':') == 5 and a['other'].startswith('danceable:0.') and 0 < a['energy'] < 1, a; \
+print('heard:', a['moods'], '|', a['other'], '| energy', round(a['energy'], 3), '| models loaded in', h.load_seconds, 's')" \
+ && rm /tmp/heard.flac
 # The text model for real: words that mean alike land together, and steering moves a query towards its concept.
 RUN python -c "import numpy; from beats.words import Words; w = Words('/models'); assert w.available and w.steers; \
 a, b, c = w.embed('calm quiet soft piano'), w.embed('gentle peaceful piano music'), w.embed('aggressive heavy metal'); \

@@ -173,6 +173,16 @@ class SoundTest(Base):
         self.assertNotIn("tempo", {r[1] for r in self.store.db.execute("PRAGMA table_info(sound)")})
         self.assertEqual(sound.Sound(self.store).count(), len(LIBRARY))  # the sound itself stays
 
+    def test_a_song_another_server_still_has_isnt_forgotten(self):
+        emby = [{**{k: s[k] for k in s if k not in ("vector", "other")}, "id": "e-" + s["id"]} for s in LIBRARY[:2]]
+        self.store.link_songs("emby", "lib", emby)
+        self.assertEqual(self.store.gone_from("main", "1", [s["id"] for s in LIBRARY[2:]]), ["t1", "t2"])
+        self.assertEqual(self.store.remove_items("main", ["t1", "t2"]), 0)  # Emby still has both
+        self.assertIsNotNone(self.store.song("t1"))
+        self.assertEqual(self.store.remove_items("emby", ["e-t1"]), 1)  # now nobody has t1
+        self.assertIsNone(self.store.song("t1"))
+        self.assertEqual(sound.Sound(self.store).count(), len(LIBRARY) - 1)
+
     def test_moods_as_audiomuse_writes_them(self):
         self.assertEqual(sound.pairs("rock:0.61, pop:0.2,bad,x:y"), {"rock": 0.61, "pop": 0.2})
         self.assertEqual(sound.pairs(None), {})
@@ -225,6 +235,25 @@ class FakeWords:
 
     def unload_if_idle(self, now=None):
         return False
+
+
+class FakeHearer:
+    """The stand-in for the models that hear a song: each of the catalogue's songs sounds like its own direction."""
+
+    loaded, load_seconds = True, 0.1
+
+    def __init__(self, available=True):
+        self.available, self.heard = available, []
+
+    def __call__(self, path):
+        with open(path) as f:
+            song_id = f.read().strip()
+        self.heard.append(song_id)
+        if song_id == "t96w":
+            raise RuntimeError("The song is too short to hear (under 3 seconds)")
+        at = [s["id"] for s in CATALOG].index(song_id)
+        return {"musicnn": vector("trance", wobble=at + 1).tobytes(), "clap": word_vector(at).tobytes(),
+                "moods": "electronic:0.600,dance:0.550", "other": "danceable:0.60,happy:0.50", "energy": 0.61}
 
 
 def track(s, **changes):
@@ -350,6 +379,86 @@ class PullTest(Service):
         self.assertEqual(e.exception.code, 400)
         self.assertEqual(self.call(f"{am}/api/clap/concepts")["categories"][0]["terms"][0]["term"], "deep")
         self.assertEqual(self.call("/api/status")["sound"]["text_model"]["available"], True)
+
+    def test_new_songs_are_heard_here_without_audiomuse(self):
+        """0.27: Siansa Beats hears each song's sound itself while it analyses it, with AudioMuse-AI's models; what
+        can't be heard is kept and not tried again; AudioMuse-AI's own, taken over later, replaces it."""
+        self.hearer, self.words = FakeHearer(), FakeWords()
+        self.start()
+        self.call("/api/audiomuse", "DELETE")
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        state = self.call("/api/status")["sound"]
+        self.assertEqual((state["hears"], state["sound"], state["words"], state["sources"]),
+                         (True, 2, 2, {"audiomuse": 0, "beats": 2, "failed": 1}))
+        self.assertEqual(sorted(self.hearer.heard), ["t122", "t140", "t96w"])  # "bad" can't even be decoded
+        am = "/api/v1/audiomuse"
+        self.assertEqual([s["item_id"] for s in self.call(f"{am}/api/similar_tracks?item_id=t140&n=5")], ["t122"])
+        feats = self.call(f"{am}/api/sync?ids=t140")["tracks"][0]
+        self.assertEqual((feats["tempo"], feats["mood_vector"], feats["energy"], feats["other_features"]),
+                         (140.0, "electronic:0.600,dance:0.550", 0.61, "danceable:0.60,happy:0.50"))
+        self.assertEqual(self.call(f"{am}/api/clap/search", "POST", {"query": "deep"})["results"][0]["item_id"], "t122")
+        # The one that couldn't be heard isn't tried again and again.
+        self.assertEqual(self.app.store.without_sound(), [])
+        # AudioMuse-AI's own analysis, taken over later, takes its place (and the place of what was heard here).
+        self.call("/api/audiomuse", "POST", {"url": self.fake.url, "token": TOKEN})
+        self.fake.sync = {s["id"]: track(s) for s in CATALOG if s["id"] != "bad"}
+        end = time.time() + 10
+        while time.time() < end and self.call("/api/status")["sound"]["pull"].get("running"):
+            time.sleep(0.05)
+        state = self.pulled()
+        self.assertEqual(state["sources"], {"audiomuse": 3, "beats": 0, "failed": 0})
+
+    def test_songs_analysed_before_are_heard_when_theres_nothing_else_to_do(self):
+        self.hearer = FakeHearer(available=False)  # an image from before 0.27
+        self.start()
+        self.call("/api/audiomuse", "DELETE")
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.assertEqual(self.call("/api/status")["sound"]["sound"], 0)
+        self.assertEqual(sorted(self.app.store.without_sound()), ["t122", "t140", "t96w"])
+        self.hearer.available = True  # after the update
+        self.app.worker.HEAR_IDLE_SECONDS = 0.2
+        end = time.time() + 90
+        while time.time() < end and self.app.store.without_sound():
+            time.sleep(0.2)
+        self.assertEqual(self.app.store.without_sound(), [])
+        self.assertEqual(self.call("/api/status")["sound"]["sources"], {"audiomuse": 0, "beats": 2, "failed": 1})
+
+    def read_again(self):
+        self.call("/api/libraries/read", "POST", {})
+        end = time.time() + 15
+        while time.time() < end and self.call("/api/status")["reading"]:
+            time.sleep(0.05)
+        return [e["message"] for e in self.call("/api/status")["events"]]
+
+    def test_songs_gone_from_the_server_are_forgotten(self):
+        """0.27's cleaning, as AudioMuse-AI's: a song removed from the server goes from here with its analysis when its
+        library is read again; a library that suddenly lists far fewer songs is left alone, and that's said."""
+        self.hearer = FakeHearer()
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.assertEqual(self.call("/api/status")["counts"]["songs"], 4)
+        everything = list(self.fake.songs)
+        self.fake.songs[:] = [s for s in everything if s["id"] != "t122"]
+        said = self.read_again()
+        self.assertTrue(any("1 songs are gone from the server; 1 forgotten here with their analysis" in m for m in said), said[:4])
+        self.assertEqual(self.call("/api/status")["counts"]["songs"], 3)
+        self.assertIsNone(self.app.store.song("t122"))
+        self.assertEqual(self.app.store.sound_rows(["t122"]), {})
+        self.assertEqual(list(self.app.store.tempos(["t122", "t140"], self.app.config.model)), ["t140"])
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/v1/audiomuse/api/similar_tracks?item_id=t122")
+        self.assertEqual(e.exception.code, 404)
+
+        # Half the library missing at once: more likely the server than a clear-out. Nothing goes.
+        self.app.worker.CLEAN_MOST = 0
+        self.fake.songs[:] = [s for s in everything if s["id"] == "t140"]
+        said = self.read_again()
+        self.assertTrue(any("too many to be sure of. Nothing was removed" in m for m in said), said[:4])
+        self.assertEqual(self.call("/api/status")["counts"]["songs"], 3)
+        self.fake.songs[:] = everything
 
     def test_a_pull_that_cant_be_done_says_why(self):
         self.start()

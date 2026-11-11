@@ -59,8 +59,11 @@ def measure_sound(path, samples, rate):
 class Worker:
     MEASURE_IDLE_SECONDS = 60.0  # between looks for songs to measure, when there were none
     def __init__(self, store, navidrome, tracker, decode, data_dir, model_name, measure=None, style=None,
-                 sound=None):
+                 sound=None, hearer=None):
         self.store = store
+        # How a song sounds (beats.hear.Hearer: AudioMuse-AI's vectors and moods, made here), or None.
+        self.hearer = hearer
+        self.hearing = None  # {"id", "title", "artist", "since"}: a song analysed before, being heard for its sound
         self.sound = sound or measure_sound  # (path, samples, rate) -> loudness, fades and key
         self.measuring = None  # {"id", "title", "artist", "since"}: a song analysed before, getting its loudness
         # (ids) -> {id: loudness, fades, key}: what AudioMuse-AI's Siansa plugin already measured, taken instead of
@@ -105,7 +108,7 @@ class Worker:
         if not self._threads:
             for target, name in ((self._prepare_loop, "beats-prepare"), (self._run, "beats-model"),
                                  (self._library_loop, "beats-library"), (self._style_loop, "beats-style"),
-                                 (self._measure_loop, "beats-loudness")):
+                                 (self._measure_loop, "beats-loudness"), (self._hear_loop, "beats-sound")):
                 thread = threading.Thread(target=target, name=name, daemon=True)
                 thread.start()
                 self._threads.append(thread)
@@ -270,6 +273,7 @@ class Worker:
                         raise
                     continue
                 result = self.store.link_songs(server, folder, songs, self.servers.twins(server))
+                self._clean(server, folder, songs, names.get(folder, folder))
                 if report is None or report == server:
                     total += len(songs)
                     queued += result["queued"]
@@ -288,6 +292,30 @@ class Worker:
         self.revote()  # their tags may have changed
         self.wake()
         return {"songs": total, "queued": len(queued)}
+
+    # A library that suddenly lists far fewer songs is more likely a server that's still scanning (or a disk that
+    # isn't mounted) than a clear-out: nothing is removed then, and it's said.
+    CLEAN_MOST = 25  # songs that may always go at once
+    CLEAN_SHARE = 0.10  # or this share of the library, when that's more
+
+    def _clean(self, server, folder, songs, name):
+        """Forgets the songs a library no longer has (0.27, as AudioMuse-AI's cleaning does): removed from the
+        server, they go from here too, with their analysis, unless another server still has them."""
+        gone = self.store.gone_from(server, folder, [s["id"] for s in songs])
+        if not gone:
+            return 0
+        had = len(gone) + len(songs)
+        if not songs or len(gone) > max(self.CLEAN_MOST, self.CLEAN_SHARE * had):
+            self.store.event(
+                f"Library {name}{self._label(server)} lists {len(songs)} songs where it had {had}: {len(gone)} would "
+                "be removed here, which is too many to be sure of. Nothing was removed; if they're really gone, untick "
+                "the library and tick it again", "warn")
+            return 0
+        removed = self.store.remove_items(server, gone)
+        self.store.event(f"Library {name}{self._label(server)}: {len(gone)} songs are gone from the server"
+                         + (f"; {removed} forgotten here with their analysis" if removed else "")
+                         + (f", {len(gone) - removed} kept (another server still has them)" if len(gone) - removed else ""))
+        return removed
 
     def _any_chosen(self):
         return any(self.store.setting(folders_key(s["id"])) for s in self.servers.all()) or bool(self.chosen(MAIN))
@@ -470,6 +498,65 @@ class Worker:
             _log.warning("%s – %s: couldn't measure its loudness: %s", song.get("artist"), song.get("title"), e)
             self.store.save_measure(song["id"], {}, loudness.VERSION, str(e) or e.__class__.__name__)
 
+    # ---- how a song sounds (0.27): AudioMuse-AI's vectors and moods, made here ----
+
+    HEAR_IDLE_SECONDS = 60.0
+
+    def _hear(self, song, path):
+        """Hears the song at ``path`` for its sound and keeps it (or why not): never stops its analysis. True when
+        it was heard."""
+        if self.hearer is None or not self.hearer.available:
+            return False
+        started, first = time.monotonic(), not self.hearer.loaded
+        try:
+            values = self.hearer(path)
+            self.store.save_sound([{"song_id": song["id"], **values}], source="beats")
+            if first:
+                self.store.event(f"The models that hear a song's sound loaded in {self.hearer.load_seconds or 0:.1f}s")
+            _log.debug("%s – %s: heard in %.2fs (%s)", song.get("artist"), song.get("title"),
+                       time.monotonic() - started, values.get("moods"))
+            return True
+        except Exception as e:
+            _log.warning("%s – %s: couldn't hear its sound: %s", song.get("artist"), song.get("title"), e)
+            self.store.sound_failed(song["id"], str(e) or e.__class__.__name__)
+            return False
+
+    def _hear_loop(self):
+        """Hears the songs whose sound isn't known (analysed before 0.27, and never by AudioMuse-AI), one at a time,
+        while nothing else is being done (new songs are heard on the way)."""
+        while not self._stop.wait(5.0):
+            if self.hearer is None or not self.hearer.available:
+                self._stop.wait(self.HEAR_IDLE_SECONDS)
+                continue
+            if self.paused or self.current or self.preparing or self.styling or self.measuring \
+                    or self.store.counts().get("queued"):
+                continue
+            waiting = self.store.without_sound(limit=20)
+            if not waiting:
+                self._stop.wait(self.HEAR_IDLE_SECONDS)
+                continue
+            for song_id in waiting:
+                if self._stop.is_set() or self.paused or self.store.counts().get("queued"):
+                    break
+                self._hear_again(song_id)
+
+    def _hear_again(self, song_id):
+        song = self.store.song(song_id) or {"id": song_id, "title": song_id, "artist": ""}
+        self.hearing = {"id": song_id, "title": song.get("title"), "artist": song.get("artist"), "since": time.time()}
+        path = None
+        try:
+            fd, path = tempfile.mkstemp(prefix="sound-", dir=self.data_dir)
+            os.close(fd)
+            self.download(song_id, path)
+            self._hear(song, path)
+        except Exception as e:  # the server away, a file gone: kept, so it isn't tried again and again
+            _log.warning("%s – %s: couldn't get the song to hear its sound: %s", song.get("artist"), song.get("title"), e)
+            self.store.sound_failed(song_id, str(e) or e.__class__.__name__)
+        finally:
+            self.hearing = None
+            if path and os.path.exists(path):
+                os.remove(path)
+
     def _measure_loop(self):
         """Measures the loudness, fades and key of songs analysed before 0.20, one at a time, while nothing else is
         being done (new songs get them on the way)."""
@@ -595,6 +682,7 @@ class Worker:
                        decode_seconds)
             self._style(song, samples, self.decode_rate)
             self._measure(song, path, samples, self.decode_rate)
+            self._hear(song, path)
             try:
                 levels = self.measure(samples)
                 _log.debug("%s: measured the sound", label)
