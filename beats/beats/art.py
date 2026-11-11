@@ -23,7 +23,7 @@ _log = log.get("art")
 
 SIZES = (96, 300, 640)  # thumbnails, cards, the big one
 KINDS = ("cover", "artist")
-NONE_FOR = 24 * 3600  # seconds "the server has none" is believed
+NONE_FOR = 30 * 60  # seconds "the server has none" is believed: a photo it's still fetching comes soon after
 MOST_BYTES = 8 * 1024 * 1024
 
 
@@ -110,6 +110,7 @@ class Art:
                 return None
             if found and found[0] and len(found[0]) <= MOST_BYTES:
                 return found
+        _log.info("No %s picture of %s: none of its servers has one now (asked again in %d min)", kind, song_id, NONE_FOR // 60)
         return None
 
     def kept(self):

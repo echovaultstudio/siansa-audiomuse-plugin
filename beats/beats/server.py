@@ -1009,7 +1009,7 @@ class Handler(BaseHTTPRequestHandler):
                 size = (query.get("size") or ["300"])[0]
                 found = app.art.get(m[1], _id(m[2]), int(size) if size.isdigit() else 300)
                 if found is None:
-                    return self._send(HTTPStatus.NOT_FOUND, b"", "text/plain", {"Cache-Control": "private, max-age=3600"})
+                    return self._send(HTTPStatus.NOT_FOUND, b"", "text/plain", {"Cache-Control": "private, max-age=600"})
                 return self._send(HTTPStatus.OK, found[0], found[1], {"Cache-Control": "private, max-age=604800"})
             if path == "/api/genres":
                 return self._json({"styles": app.styles_status(server), "genres": app.genre_list(server),
