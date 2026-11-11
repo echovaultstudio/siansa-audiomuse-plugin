@@ -96,7 +96,10 @@ RUN pip install tokenizers==0.20.3 \
 # CLAP audio model (AudioMuse-AI's DCLAP, AGPL-3.0), from AudioMuse-AI's releases; librosa makes the spectrograms, as
 # in AudioMuse-AI, so they're the same to the last digit (numba's wheels go with numpy 1.26).
 ARG AUDIOMUSE_DCLAP=https://github.com/NeptuneHub/AudioMuse-AI-DCLAP/releases/download/v1
-RUN pip install librosa==0.10.2.post1 soundfile==0.12.1 \
+# Everything librosa brings is pinned to versions that go with numpy 1.26.4 (0.27's first build let pip take the
+# newest, which brought numpy 2 and broke soxr).
+RUN pip install numpy==1.26.4 librosa==0.10.2.post1 soundfile==0.12.1 scipy==1.13.1 scikit-learn==1.5.2 \
+      numba==0.60.0 llvmlite==0.43.0 soxr==0.3.7 \
  && python -c "import numpy, librosa, soxr; assert numpy.__version__ == '1.26.4', numpy.__version__; print('librosa', librosa.__version__)" \
  && for url in "${AUDIOMUSE_MODELS}/musicnn_embedding.onnx" "${AUDIOMUSE_MODELS}/musicnn_prediction.onnx" \
                "${AUDIOMUSE_DCLAP}/model_epoch_36.onnx" "${AUDIOMUSE_DCLAP}/model_epoch_36.onnx.data"; do \
