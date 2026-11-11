@@ -71,7 +71,12 @@ def capabilities(app, server=None):
                         "source": "beats" if sound["sound"] else "audiomuse"},
             # What songs sound like, answered as AudioMuse-AI answers it, under /api/v1/audiomuse/… (0.25).
             "sound": {"available": bool(sound["sound"]), "songs": sound["sound"], "of": sound["songs"],
-                      "answers": list(SOUND_ANSWERS) if sound["sound"] else [], "prefix": AUDIOMUSE},
+                      "answers": (list(SOUND_ANSWERS) if sound["sound"] else [])
+                      + (list(WORD_ANSWERS) if sound["words"] and app.words.available else []),
+                      "prefix": AUDIOMUSE},
+            # The search by words (0.26): the songs that have the vector it needs, and whether the text model is here.
+            "words": {"available": bool(sound["words"]) and app.words.available, "songs": sound["words"],
+                      "steering": app.words.steers},
             "servers": {"available": True, "kinds": ["navidrome", "emby", "jellyfin"]},
         },
         "limits": {"profile_ids": MAX_IDS, "genre_songs": 2000},
@@ -177,6 +182,8 @@ AUDIOMUSE = "/api/v1/audiomuse"
 # AudioMuse-AI's paths answered here, under AUDIOMUSE: the app asks them of Siansa Beats as it asks AudioMuse-AI.
 SOUND_ANSWERS = ("/api/similar_tracks", "/api/mood_centroids", "/api/find_path", "/api/alchemy",
                  "/api/sonic_fingerprint/generate", "/api/sync")
+# The search by words (0.26), answered when the text model is in the image and songs have the vector it needs.
+WORD_ANSWERS = ("/api/clap/search", "/api/clap/concepts")
 
 
 def _of_server(app, songs, server):
@@ -260,6 +267,8 @@ def sound_get(handler, path, arg, server):
     try:
         if path == "/api/mood_centroids":
             return handler._json(app.sound.centre_list()) or True
+        if path == "/api/clap/concepts":
+            return handler._json(app.words.catalogue()) or True
         if path == "/api/similar_tracks":
             n = number("n", 50)
             if arg("mood") and arg("centroid_index"):
@@ -305,6 +314,34 @@ def sound_post(handler, path, body, server):
     except (TypeError, ValueError):
         n = 50
     try:
+        if path == "/api/clap/search":
+            from .words import NotThere
+
+            query = body.get("query")
+            if not isinstance(query, str) or not query.strip():
+                return handler._error(HTTPStatus.BAD_REQUEST, 'Missing "query" in request body') or True
+            try:
+                limit = max(1, int(body.get("limit") or 50))
+            except (TypeError, ValueError):
+                return handler._error(HTTPStatus.BAD_REQUEST, '"limit" must be a whole number') or True
+            if not app.sound.word_count():
+                return handler._error(HTTPStatus.SERVICE_UNAVAILABLE,
+                                      "No song has the vector the search by words needs yet: take AudioMuse-AI's "
+                                      "analysis over (Setup › AudioMuse-AI)") or True
+            steering, warnings = app.words.terms(body.get("steering"))
+            if body.get("steering") and not steering and warnings:
+                return handler._error(HTTPStatus.BAD_REQUEST, warnings[0]) or True
+            try:
+                vector = app.words.steer(app.words.embed(query.strip()), steering)
+            except NotThere as e:
+                return handler._error(HTTPStatus.SERVICE_UNAVAILABLE, str(e)) or True
+            found = _of_server(app, app.sound.described(vector, limit, only), server)
+            answer = {"query": query.strip(), "results": found, "count": len(found)}
+            if steering:
+                answer["steering"] = steering
+            if warnings:
+                answer["steering_warnings"] = warnings
+            return handler._json(answer) or True
         if path == "/api/alchemy":
             items = [i for i in body.get("items") or [] if isinstance(i, dict) and i.get("id")
                      and (i.get("type") or "song") == "song"]

@@ -149,8 +149,14 @@ them itself.
    how many songs' sound is here, and how many of AudioMuse-AI's songs aren't in the libraries chosen here.
 3. In Siansa, the answers then come from Siansa Beats; AudioMuse-AI needn't be set up in the app for them.
 
-AudioMuse-AI still has to run for now: it's what listens to **new** songs, and the search by words ("text to search",
-the vibes' sliders) is still its own. Both move into Siansa Beats next.
+**Music found by describing it (0.26).** "Chill relaxed mellow grooves", Siansa's mood radios, its vibes and their
+sliders, cards made from a sound: Siansa Beats answers these too, with AudioMuse-AI's own models, so a description
+lands among the songs exactly as it did there. The image holds LAION CLAP's text model (500 MB; it's loaded at the
+first search, takes about 600 MB of memory while in use, and is let go after 10 minutes without one) and the two
+small models and the catalogue of 109 concepts (genre, instrument, vocals, mood, production, tempo, era) that
+steering uses. Each song's vector for this was taken over from AudioMuse-AI with the rest.
+
+AudioMuse-AI still has to run for now: it's what listens to **new** songs. That moves into Siansa Beats next.
 
 The answers follow AudioMuse-AI's own rules and defaults (cosine distance between its MusiCNN vectors, at most three
 songs by one artist, the same recording never twice), so the two can be compared. The mood centres
@@ -387,6 +393,8 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 | `POST /api/v1/audiomuse/api/alchemy` | `{"items": [{"id", "op": "ADD" or "SUBTRACT", "type": "song"}], "n"}`: songs near the ones to blend, away from the ones to avoid. |
 | `GET /api/v1/audiomuse/api/mood_centroids` | AudioMuse-AI's mood centres, each with its tags. |
 | `POST /api/v1/audiomuse/api/sonic_fingerprint/generate` | `{"n"}`: songs near what this server's user has played most (or near `ids`, when given). |
+| `POST /api/v1/audiomuse/api/clap/search` | `{"query", "limit", "steering": [{"term", "direction": "more" or "less", "weight"}]}`: the songs that sound like the description (0.26), each with its `similarity`; `steering_warnings` names terms that aren't concepts. |
+| `GET /api/v1/audiomuse/api/clap/concepts` | The concepts a search can be steered by, in their groups. |
 | `GET /api/v1/audiomuse/api/sync?ids=` | Up to 500 songs' tempo (Beat This!'s, `tempo_source`: `beat_this`; never AudioMuse-AI's), key, moods, genres and energy, without the vectors. |
 | `POST /api/v1/bad-blends` | A song change marked as bad in the app. |
 

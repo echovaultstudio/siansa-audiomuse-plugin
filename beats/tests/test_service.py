@@ -294,7 +294,7 @@ class Service(Base):
                "BEATS_PASSWORD": password, "BEATS_API_KEY": api_key, "PORT": "0"}
         self.tracker = FakeTracker()
         self.app = App(Config(env), tracker=self.tracker, decode=fake_decode, style=style or FakeStyle(
-            os.path.join(self.tmp, "models"), on=False), sound=fake_sound)
+            os.path.join(self.tmp, "models"), on=False), sound=fake_sound, words=getattr(self, "words", None))
         self.server = make_server(self.app, host="127.0.0.1", port=0)
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
         import threading

@@ -190,7 +190,7 @@ class Kept:
 class App:
     """Everything the handler needs, so the tests can make one with stand-ins."""
 
-    def __init__(self, config, tracker=None, decode=None, measure=None, style=None, sound=None):
+    def __init__(self, config, tracker=None, decode=None, measure=None, style=None, sound=None, words=None):
         from . import analyser
         from . import style as style_module
 
@@ -224,6 +224,10 @@ class App:
 
         self.sound = Sound(self.store)
         self.puller = Puller(self.store, lambda: self.audiomuse)
+        # Music found by describing it in words (0.26): the text model, loaded when first searched.
+        from .words import Words
+
+        self.words = words if words is not None else Words(config.models_dir)
 
     PULL_EVERY = 6 * 3600  # AudioMuse-AI's new songs are taken over this often
 
@@ -234,14 +238,19 @@ class App:
             while True:
                 if self.audiomuse.configured:
                     self.puller.start()
-                time.sleep(self.PULL_EVERY)
+                # The text model goes when nobody has searched for a while (looked at every minute).
+                for _ in range(self.PULL_EVERY // 60):
+                    time.sleep(60)
+                    self.words.unload_if_idle()
 
         threading.Thread(target=loop, name="sound-pull-timer", daemon=True).start()
 
     def sound_status(self, server=None):
         """How much of ``server``'s music has its sound here, and how the pull from AudioMuse-AI is going."""
         counts = self.store.sound_counts(self.only(server))
-        return {**counts, "pull": dict(self.puller.state), "audiomuse": self.audiomuse.configured}
+        return {**counts, "pull": dict(self.puller.state), "audiomuse": self.audiomuse.configured,
+                "text_model": {"available": self.words.available, "steering": self.words.steers,
+                               "loaded": self.words.loaded, "load_seconds": self.words.load_seconds}}
 
     # ---- connections and access, set on the page (0.24.0) ----
 

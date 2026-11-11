@@ -76,8 +76,32 @@ m = convert(path).eval(); out = m(torch.from_numpy(x)); out = out if isinstance(
 diff = max(float(numpy.abs(a - b.detach().numpy()).max()) for a, b in zip(ref, out)); \
 assert diff < 1e-3, diff; print('onnx2torch matches ONNX Runtime within', diff)"
 
+# The search by words (0.26): AudioMuse-AI's own models, so a description lands among the songs as it does there.
+# LAION CLAP's text tower as ONNX (500 MB) and the two small models its concept steering uses (a sparse autoencoder
+# over CLAP's space), from AudioMuse-AI's releases; RoBERTa's tokenizer is in the repository (beats/roberta-tokenizer.json).
+ARG AUDIOMUSE_MODELS=https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v5.0.0-model
+ARG AUDIOMUSE_SAE=https://github.com/NeptuneHub/AudioMuse-AI-SAE/releases/download/v1
+RUN pip install tokenizers==0.20.3 \
+ && for url in "${AUDIOMUSE_MODELS}/clap_text_model.onnx" "${AUDIOMUSE_SAE}/dclap_sae_k20_d1024_best_encoder.onnx" \
+               "${AUDIOMUSE_SAE}/dclap_sae_k20_d1024_best_decoder.onnx"; do \
+      for try in 1 2 3 4 5; do \
+        python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+          "$url" "/models/$(basename "$url")" && break || { echo "download $try failed, trying again"; sleep 15; }; \
+      done; \
+      test -s "/models/$(basename "$url")"; \
+    done
+
 WORKDIR /app
 COPY beats/ /app/beats/
+# The text model for real: words that mean alike land together, and steering moves a query towards its concept.
+RUN python -c "import numpy; from beats.words import Words; w = Words('/models'); assert w.available and w.steers; \
+a, b, c = w.embed('calm quiet soft piano'), w.embed('gentle peaceful piano music'), w.embed('aggressive heavy metal'); \
+assert abs(float(numpy.linalg.norm(a)) - 1) < 1e-4 and a.shape == (512,), a.shape; \
+assert float(a @ b) > float(a @ c) + 0.2, (float(a @ b), float(a @ c)); \
+terms, problems = w.terms([{'term': 'piano', 'direction': 'more'}]); assert terms and not problems, problems; \
+q, p = w.embed('electronic music'), w.embed('solo piano'); s = w.steer(q, terms); \
+assert float(s @ p) > float(q @ p), (float(s @ p), float(q @ p)); \
+print('text model ok: alike', round(float(a @ b), 3), 'unlike', round(float(a @ c), 3), 'steered towards piano', round(float(s @ p) - float(q @ p), 3), 'in', w.load_seconds, 's')"
 RUN python -c "import torch, beat_this.inference, beats.server; print('imports ok, torch', torch.__version__, 'cuda', torch.version.cuda)" \
  && python -c "import numpy, beats.style as s; m = s.StyleModel('/models'); assert m.available; \
 r = m(numpy.zeros(16000 * 5, numpy.float32)); assert len(r) == 400 and 0 <= r[0][1] <= 1, r[:3]; print('style model ok:', r[0])"

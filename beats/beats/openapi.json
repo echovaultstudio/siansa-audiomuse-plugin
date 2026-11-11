@@ -820,6 +820,84 @@
           }
         }
       }
+    },
+    "/api/v1/audiomuse/api/clap/search": {
+      "post": {
+        "summary": "Songs that sound like a description in words, as AudioMuse-AI answers it (0.26).",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The music server the app plays from (its id or name, from the capabilities); the default one without it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "query"
+                ],
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  },
+                  "limit": {
+                    "type": "integer"
+                  },
+                  "steering": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "term": {
+                          "type": "string"
+                        },
+                        "direction": {
+                          "type": "string",
+                          "enum": [
+                            "more",
+                            "less"
+                          ]
+                        },
+                        "weight": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{query, count, results: [{item_id, title, author, album, similarity}], steering, steering_warnings}"
+          },
+          "400": {
+            "description": "No query, or nothing usable to steer by."
+          },
+          "503": {
+            "description": "No text model in this image, or no song has the vector for it yet."
+          }
+        }
+      }
+    },
+    "/api/v1/audiomuse/api/clap/concepts": {
+      "get": {
+        "summary": "The concepts a search by words can be steered by, in their groups.",
+        "responses": {
+          "200": {
+            "description": "{available, categories: [{category, label, terms: [{term, grounding}]}], max_terms, alpha_steps, default_alpha}"
+          }
+        }
+      }
     }
   },
   "components": {

@@ -178,13 +178,62 @@ class SoundTest(Base):
         self.assertEqual(sound.pairs(None), {})
 
 
+def word_vector(axis, lean=None):
+    """A vector in the space words share with songs: along ``axis``, a little towards ``lean``."""
+    v = np.zeros(sound.WORD_DIMENSIONS, np.float32)
+    v[axis] = 1.0
+    if lean is not None:
+        v[lean] = 0.4
+    return v
+
+
+class FakeWords:
+    """The text model's stand-in: "control", "deep" and "waltz" are the catalogue's three songs' directions."""
+
+    available = steers = True
+    loaded, load_seconds = True, 0.1
+    AXES = {"control": 0, "deep": 1, "waltz": 2}
+
+    def __init__(self):
+        self.steered = []
+
+    def embed(self, text):
+        v = np.zeros(sound.WORD_DIMENSIONS, np.float32)
+        for word, axis in self.AXES.items():
+            if word in text.lower():
+                v[axis] += 1.0
+        if not v.any():
+            v[100] = 1.0
+        return v / np.linalg.norm(v)
+
+    def terms(self, asked):
+        known = [{"term": t["term"], "weight": 3.0, "direction": t.get("direction", "more")}
+                 for t in asked or [] if t.get("term") in self.AXES]
+        return known, [f'"{t.get("term")}" is not a validated concept for this library'
+                       for t in asked or [] if t.get("term") not in self.AXES]
+
+    def steer(self, vector, terms):
+        self.steered.append(terms)
+        out = vector.copy()
+        for t in terms:
+            out[self.AXES[t["term"]]] += 5.0 if t["direction"] == "more" else -5.0
+        return out
+
+    def catalogue(self):
+        return {"available": True, "reason": None, "max_terms": 10, "alpha_steps": [1.0, 3.0], "default_alpha": 3.0,
+                "categories": [{"category": "genre", "label": "Genre", "terms": [{"term": "deep", "grounding": 0.4}]}]}
+
+    def unload_if_idle(self, now=None):
+        return False
+
+
 def track(s, **changes):
     """A song as AudioMuse-AI's export gives it."""
     return {"id": s["id"], "title": s["title"], "artist": s["artist"], "album_artist": s["artist"], "album": s.get("album", "Test"),
             "year": 2020, "tempo": 128.0, "key": "A", "scale": "minor", "mood_vector": "trance:0.6,house:0.2",
             "energy": 0.4, "other_features": "danceable:0.7,happy:0.4", "rating": None, "umap_x": None, "umap_y": None,
             "fp": "fp-" + s["id"], "embedding": base64.b64encode(vector("trance", wobble=CATALOG.index(s) + 1).tobytes()).decode(),
-            "clap_embedding": base64.b64encode(np.ones(512, np.float32).tobytes()).decode(), **changes}
+            "clap_embedding": base64.b64encode(word_vector(CATALOG.index(s)).tobytes()).decode(), **changes}
 
 
 class PullTest(Service):
@@ -262,6 +311,46 @@ class PullTest(Service):
             self.call(f"{am}/api/similar_tracks?item_id=who")
         self.assertEqual(e.exception.code, 404)
 
+    def test_music_is_found_by_describing_it(self):
+        """The search by words (0.26), as AudioMuse-AI answers it: the songs nearest the words, steered by concepts."""
+        self.words = FakeWords()
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        am = "/api/v1/audiomuse"
+        caps = self.call("/api/v1/capabilities")["features"]
+        self.assertEqual((caps["words"]["available"], caps["sound"]["answers"]), (False, []))  # nothing taken over yet
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call(f"{am}/api/clap/search", "POST", {"query": "deep"})
+        self.assertEqual(e.exception.code, 503)
+
+        self.fake.sync = {s["id"]: track(s) for s in CATALOG if s["id"] != "bad"}
+        self.pulled()
+        caps = self.call("/api/v1/capabilities")["features"]
+        self.assertEqual((caps["words"]["available"], caps["words"]["songs"], caps["words"]["steering"]), (True, 3, True))
+        self.assertIn("/api/clap/search", caps["sound"]["answers"])
+        self.assertIn("/api/clap/concepts", caps["sound"]["answers"])
+
+        found = self.call(f"{am}/api/clap/search", "POST", {"query": "something deep", "limit": 2})
+        self.assertEqual((found["query"], found["count"]), ("something deep", 2))
+        self.assertEqual(found["results"][0]["item_id"], "t122")
+        self.assertEqual(set(found["results"][0]), {"item_id", "title", "author", "album", "similarity"})
+        self.assertAlmostEqual(found["results"][0]["similarity"], 1.0, places=4)
+        # Steered towards another concept; one it doesn't know is left out and said.
+        steered = self.call(f"{am}/api/clap/search", "POST", {"query": "deep", "limit": 1, "steering": [
+            {"term": "waltz", "direction": "more"}, {"term": "bagpipes"}]})
+        self.assertEqual(steered["results"][0]["item_id"], "t96w")
+        self.assertEqual(steered["steering"], [{"term": "waltz", "weight": 3.0, "direction": "more"}])
+        self.assertEqual(steered["steering_warnings"], ['"bagpipes" is not a validated concept for this library'])
+        with self.assertRaises(urllib.error.HTTPError) as e:  # nothing usable to steer by: refused, as AudioMuse-AI
+            self.call(f"{am}/api/clap/search", "POST", {"query": "deep", "steering": [{"term": "bagpipes"}]})
+        self.assertEqual(e.exception.code, 400)
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call(f"{am}/api/clap/search", "POST", {"query": "  "})
+        self.assertEqual(e.exception.code, 400)
+        self.assertEqual(self.call(f"{am}/api/clap/concepts")["categories"][0]["terms"][0]["term"], "deep")
+        self.assertEqual(self.call("/api/status")["sound"]["text_model"]["available"], True)
+
     def test_a_pull_that_cant_be_done_says_why(self):
         self.start()
         self.call("/api/libraries", "POST", {"ids": ["1"]})
@@ -277,6 +366,49 @@ class PullTest(Service):
         row = pull.row_of("x", track(CATALOG[0], clap_embedding=None, year="1999"))
         self.assertEqual((len(row["musicnn"]), row["clap"], row["year"]), (800, None, None))
         self.assertNotIn("tempo", row)  # AudioMuse-AI's tempo is never kept
+
+
+class WordsTest(unittest.TestCase):
+    """The text model's own code, without the model (the image's check runs it for real): what's asked to steer by,
+    and the concepts' list."""
+
+    def setUp(self):
+        from beats.words import Words
+
+        self.words = Words("/nowhere")
+
+    def test_an_image_without_the_model_says_so(self):
+        from beats.words import NotThere
+
+        self.assertFalse(self.words.available)
+        with self.assertRaises(NotThere):
+            self.words.embed("chill")
+        self.assertEqual(self.words.catalogue()["available"], False)
+        self.assertEqual(self.words.terms([{"term": "piano"}]), ([], ["concept steering is unavailable"]))
+
+    def test_terms_are_cleaned_as_audiomuse_cleans_them(self):
+        self.words.models_dir = os.path.dirname(__file__)  # the two steering models' names, as empty files
+        made = [os.path.join(self.words.models_dir, n) for n in
+                ("clap_text_model.onnx", "dclap_sae_k20_d1024_best_encoder.onnx", "dclap_sae_k20_d1024_best_decoder.onnx")]
+        for path in made:
+            open(path, "w").close()
+        try:
+            terms, problems = self.words.terms([{"term": "piano", "weight": 4, "direction": "LESS"}, "trance",
+                                                {"term": "piano"}, {"term": "bagpipes"}, {"term": "choir", "weight": "x"},
+                                                {"term": "guitar", "direction": "sideways"}, 7, {"term": " "}])
+            self.assertEqual(terms, [{"term": "piano", "weight": 3.0, "direction": "less"},
+                                     {"term": "trance", "weight": 3.0, "direction": "more"}])
+            self.assertEqual(len(problems), 6)
+            self.assertIn('"bagpipes" is not a validated concept for this library', problems)
+            self.assertEqual(self.words.terms("piano")[1], ["steering must be a list of {term, weight, direction} objects"])
+            catalogue = self.words.catalogue()
+            self.assertEqual([c["category"] for c in catalogue["categories"]],
+                             ["genre", "instrument", "vocals", "mood", "production", "tempo", "era"])
+            self.assertEqual(sum(len(c["terms"]) for c in catalogue["categories"]), 109)
+            self.assertEqual((catalogue["max_terms"], catalogue["default_alpha"]), (10, 3.0))
+        finally:
+            for path in made:
+                os.remove(path)
 
 
 if __name__ == "__main__":

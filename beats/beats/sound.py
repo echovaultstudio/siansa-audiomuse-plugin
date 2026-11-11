@@ -35,6 +35,7 @@ from . import log, similarity
 _log = log.get("sound")
 
 DIMENSIONS = 200
+WORD_DIMENSIONS = 512  # CLAP's: the vector a description in words is compared with (beats.words)
 PER_ARTIST = 3  # AudioMuse-AI's MAX_SONGS_PER_ARTIST
 SAME_RECORDING = 0.01  # its DUPLICATE_DISTANCE_THRESHOLD_COSINE
 MOOD_APART = 0.15  # its MOOD_SIMILARITY_THRESHOLD
@@ -83,6 +84,7 @@ class Sound:
         self.moods = np.zeros((0, len(MOODS)), np.float32)
         self._albums = None  # (albums, artists) grouped, their lists made when first asked for
         self._centres_file, self._centres = centres, None
+        self._words = None  # (the store's sound_changes it was read at, ids, rows, matrix): read when first searched
 
     # ---- the songs in memory ----
 
@@ -272,6 +274,56 @@ class Sound:
             raise Unknown("The sound of none of your most played songs is known yet")
         weights = np.linspace(1.0, 0.5, len(rows), dtype=np.float32)[:, None]
         return self.around((self.matrix[rows] * weights).sum(axis=0), n, server)
+
+    # ---- by words (the vector comes from beats.words) ----
+
+    def _word_songs(self):
+        with self._lock:
+            if self._words is None or self._words[0] != self.store.sound_changes:
+                seen = self.store.sound_changes
+                rows = [r for r in self.store.sound_vectors("clap") if r["vector"] and len(r["vector"]) == WORD_DIMENSIONS * 4]
+                raw = np.frombuffer(b"".join(r["vector"] for r in rows), dtype=np.float32).reshape(-1, WORD_DIMENSIONS) \
+                    if rows else np.zeros((0, WORD_DIMENSIONS), np.float32)
+                self._words = (seen, [r["song_id"] for r in rows],
+                               [{k: r[k] for k in ("song_id", "title", "artist", "album")} for r in rows],
+                               unit(np.nan_to_num(raw)))
+                _log.info("The vectors of %d songs for the search by words are in memory", len(rows))
+            return self._words[1:]
+
+    def word_count(self):
+        return len(self._word_songs()[0])
+
+    def described(self, vector, n=50, server=None):
+        """The songs nearest ``vector`` (a description, from :meth:`beats.words.Words.embed`), as AudioMuse-AI's text
+        search gives them: ``{"item_id", "title", "author", "album", "similarity"}``, the most alike first, no song
+        twice (by title and artist), the same recording never twice, at most :data:`PER_ARTIST` by one artist (none
+        of that limit from 1000 songs up, as AudioMuse-AI)."""
+        ids, rows, matrix = self._word_songs()
+        if not ids:
+            return []
+        n = max(1, int(n))
+        scores = matrix @ unit(vector)[0]
+        if server is not None:
+            have = self.store.server_song_ids(server)
+            scores = np.where(np.array([song_id in have for song_id in ids], bool), scores, -np.inf)
+        wanted = min(len(ids), n * 8 + 50)
+        top = np.argpartition(-scores, wanted - 1)[:wanted]
+        top = top[np.argsort(-scores[top], kind="stable")]
+        per_artist = 0 if n >= 1000 else PER_ARTIST
+        picked, signatures, artists = [], set(), {}
+        for i in top:
+            if len(picked) >= n or not np.isfinite(scores[i]):
+                break
+            signature = (similarity.norm(rows[i]["title"]), similarity.norm(rows[i]["artist"]))
+            if signature in signatures or (per_artist and artists.get(signature[1], 0) >= per_artist):
+                continue
+            if picked and 1.0 - float((matrix[picked] @ matrix[i]).max()) < SAME_RECORDING:
+                continue
+            signatures.add(signature)
+            artists[signature[1]] = artists.get(signature[1], 0) + 1
+            picked.append(int(i))
+        return [{"item_id": rows[i]["song_id"], "title": rows[i]["title"] or "", "author": rows[i]["artist"] or "",
+                 "album": rows[i]["album"] or "", "similarity": round(float(scores[i]), 6)} for i in picked]
 
     # ---- moods ----
 

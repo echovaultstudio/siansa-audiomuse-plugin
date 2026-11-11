@@ -1436,7 +1436,9 @@ function drawPull(sound) {
   $("pull-box").hidden = !sound || !sound.audiomuse;
   if (!sound) return;
   const p = sound.pull || {};
-  const have = `The sound of ${num(sound.sound)} of ${num(sound.songs)} songs is here`;
+  const model = sound.text_model || {};
+  const have = `The sound of ${num(sound.sound)} of ${num(sound.songs)} songs is here` +
+    (model.available ? `; ${num(sound.words)} can be found by describing them in words` : "; this image has no text model, so music can't be found by words (0.26 has it)");
   let text;
   if (p.running) text = p.total ? `Taking over from AudioMuse-AI: ${num(p.done || 0)} of ${num(p.total)} songs…` : "Asking AudioMuse-AI what it has…";
   else if (p.error) text = `${have}. The last try failed: ${p.error}`;
