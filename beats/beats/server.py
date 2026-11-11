@@ -727,6 +727,21 @@ class App:
                         "libraries": by_library.get(label, {})})
         return out
 
+    def genres_of(self, ids, server=None):
+        """The genres each of the songs ``ids`` is in by its sound, its best first: ``{asked id: [{"name", "label",
+        "genre", "style", "score"}]}``, ``name`` as the genre list names it. Songs with none aren't in it."""
+        here = self.store.resolve(ids, server)
+        heard = self.store.heard_of(here.values(), genres_module.HEARD_MIN)
+        names = {g["label"]: g["name"] for g in self.genre_list(server)}
+        out = {}
+        for asked in ids:
+            rows = heard.get(here.get(asked))
+            if rows:
+                out[asked] = [{"name": names.get(label) or label.partition("---")[2] or label, "label": label,
+                               "genre": label.partition("---")[0], "style": label.partition("---")[2] or label,
+                               "score": round(weight, 4)} for label, weight in rows]
+        return out
+
     def genre_songs(self, name, limit=None, server=None):
         """The songs of the genre ``name`` (a tag as the app shows it: "Trance", "Electronic / Trance") by their sound
         (:mod:`beats.genres`), the ones that sound most like it first: ``{"name", "styles", "genres", "ids", "songs"}``,
