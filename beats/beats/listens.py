@@ -405,8 +405,12 @@ class Listens:
     def _say_playing(self, user, keys, playing):
         try:
             self.lastfm.now_playing(keys, playing)
+            if (self.relay_state.get(user) or {}).get("playing"):
+                self.relay_state.pop(user, None)
         except LastFmError as e:
-            _log.debug("Last.fm wasn't told what %s is playing: %s", user or "the listener", e)
+            # Said on the page's Last.fm line too, not only in the detailed log (the owner, 11 Nov).
+            self.relay_state[user] = {"error": f"Last.fm wasn't told what's playing: {e}", "at": self.now(), "playing": True}
+            _log.warning("Last.fm wasn't told what %s is playing: %s", user or "the listener", e)
 
     def all_playing(self):
         """``[{"user", "artist", "title", …}]``: what's playing now for each listener."""

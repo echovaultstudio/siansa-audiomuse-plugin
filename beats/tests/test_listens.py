@@ -273,6 +273,19 @@ class History(unittest.TestCase):
             time.sleep(0.02)
         self.assertEqual(self.lastfm.playing, [("Moby", "Honey")])
 
+    def test_a_refused_now_playing_is_said_on_the_page(self):
+        self.connect()
+
+        def refuse(keys, row):
+            raise L.LastFmError("Last.fm: Invalid session key", 9)
+
+        self.lastfm.now_playing = refuse
+        self.listens.set_playing("max", {"artist": "Moby", "title": "Honey"})
+        end = time.time() + 5
+        while time.time() < end and not self.listens.lastfm_status("max")["error"]:
+            time.sleep(0.02)
+        self.assertIn("wasn't told what's playing", self.listens.lastfm_status("max")["error"])
+
     def test_last_fms_requests_are_signed(self):
         seen = {}
 
