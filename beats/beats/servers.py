@@ -1,9 +1,14 @@
 """The music servers Siansa Beats reads (0.23.0, the owner, 10 Nov): Navidrome, Emby and Jellyfin, several of them,
 and several users of one (each sees the libraries that user may).
 
-The first is the one in the container's settings (``NAVIDROME_URL``, ``NAVIDROME_USER``, ``NAVIDROME_PASSWORD``), its
-id ``main``. The others are added on the page (Setup › Music servers) and kept in the data folder with their
-passwords, which are never sent back, logged or put in a report.
+All are added on the page (Setup › Music servers) and kept in the data folder. No password is kept as plain text
+(0.24.0, :mod:`beats.vault`): Navidrome's is encrypted (it has to be said to Navidrome each time); Emby's and
+Jellyfin's aren't kept at all, only the encrypted sign-in token the server gave. None is ever sent back, logged or put
+in a report.
+
+Until 0.24 the first server was the container's settings (``NAVIDROME_URL``, ``NAVIDROME_USER``,
+``NAVIDROME_PASSWORD``). They're taken over once, as the server ``main`` (:meth:`Servers.take_from_container`), and
+not read again: they can go from the YAML.
 
 One of them is the default: asked first when the libraries are read, and the one a request means when it names none
 (``?server=``), so an app that knows nothing of this keeps working.
@@ -12,6 +17,7 @@ Every server's songs share one catalogue: a song two of them have is analysed on
 keeps its own id for it (:meth:`beats.store.Store.link_songs`).
 """
 
+import json
 import re
 import threading
 import urllib.parse
@@ -24,11 +30,12 @@ KINDS = {"navidrome": "Navidrome", "emby": "Emby", "jellyfin": "Jellyfin"}
 MOST = 12  # servers and users: more is a mistake
 
 
-def make_client(kind, url, user, password):
+def make_client(kind, url, user, password, login=None):
+    """A server's client. ``login``: Emby's or Jellyfin's kept sign-in, ``(user id, token)``, in place of a password."""
     if kind == "navidrome":
         return Subsonic(url, user, password)
     if kind in ("emby", "jellyfin"):
-        return MediaBrowser(url, user, password, jellyfin=kind == "jellyfin")
+        return MediaBrowser(url, user, password, jellyfin=kind == "jellyfin").signed_in(*(login or (None, None)))
     raise ValueError(f"kind is one of: {', '.join(KINDS)}")
 
 
@@ -42,24 +49,52 @@ def same_place(a, b):
 
 
 class Servers:
-    def __init__(self, store, config):
-        self.store, self.config = store, config
+    def __init__(self, store, config, vault):
+        self.store, self.config, self.vault = store, config, vault
         self._clients = {}
         self._lock = threading.RLock()
+        self.take_from_container()
 
     # ---- which there are ----
 
     def _saved(self):
         return [s for s in self.store.setting("servers") or [] if isinstance(s, dict) and s.get("id")]
 
-    def all(self):
-        """Every server, the container's own first: ``[{"id", "kind", "name", "url", "user", "password", "env"}]``."""
-        c = self.config
-        out = []
+    def take_from_container(self):
+        """Once: the container's ``NAVIDROME_…`` settings become the server ``main``, its password encrypted, and a
+        password kept as plain text by 0.23 is encrypted. True when the container's settings were taken."""
+        saved, changed = self._saved(), False
+        for s in saved:  # 0.23 kept the page's servers' passwords as they were typed
+            if "password" in s:
+                s["secret"] = self.vault.seal(s.pop("password"))
+                changed = True
+        c, taken = self.config, False
+        if c.navidrome_url and not self.store.setting("container_taken") and not any(s["id"] == MAIN for s in saved):
+            saved.insert(0, {"id": MAIN, "kind": "navidrome", "name": self.store.setting("main_name") or "Navidrome",
+                             "url": c.navidrome_url.rstrip("/"), "user": c.navidrome_user,
+                             "secret": self.vault.seal(c.navidrome_password)})
+            changed = taken = True
+        if changed:
+            self.store.set_setting("servers", saved)
         if c.navidrome_url:
-            out.append({"id": MAIN, "kind": "navidrome", "name": self.store.setting("main_name") or "Navidrome",
-                        "url": c.navidrome_url, "user": c.navidrome_user, "password": c.navidrome_password, "env": True})
-        return out + [{**s, "env": False} for s in self._saved()]
+            self.store.set_setting("container_taken", True)
+        return taken
+
+    def all(self):
+        """Every server: ``[{"id", "kind", "name", "url", "user", "password", "login"}]``, the password and the
+        sign-in (Emby's and Jellyfin's ``(user id, token)``) as they're needed, never to be shown."""
+        out = []
+        for s in self._saved():
+            login = None
+            if s.get("login"):
+                try:
+                    kept = json.loads(self.vault.open(s["login"]) or "null") or {}
+                    login = (kept.get("user_id"), kept.get("token")) if kept.get("token") else None
+                except ValueError:
+                    login = None
+            out.append({"id": s["id"], "kind": s["kind"], "name": s["name"], "url": s["url"], "user": s["user"],
+                        "password": self.vault.open(s.get("secret")), "login": login})
+        return out
 
     def get(self, server_id):
         return next((s for s in self.all() if s["id"] == server_id), None)
@@ -89,7 +124,9 @@ class Servers:
     def public(self, server):
         """A server as the page and the app see it: never its password."""
         return {"id": server["id"], "kind": server["kind"], "name": server["name"], "url": server["url"],
-                "user": server["user"], "default": server["id"] == self.default_id, "env": bool(server.get("env"))}
+                "user": server["user"], "default": server["id"] == self.default_id,
+                # Whether it can still sign in: False when its secret was encrypted with a key that's gone.
+                "signed_in": bool(server.get("password") or server.get("login"))}
 
     def client(self, server_id=None):
         """The server's client (kept: it holds its login). A stand-in that says so for one that isn't there."""
@@ -98,7 +135,7 @@ class Servers:
             server = self.get(server_id)
             if server is None:
                 return Subsonic("", "", "")
-            key = (server["kind"], server["url"], server["user"], server["password"])
+            key = (server["kind"], server["url"], server["user"], server["password"], server["login"])
             kept = self._clients.get(server_id)
             if kept is None or kept[0] != key:
                 kept = (key, make_client(*key))
@@ -137,59 +174,68 @@ class Servers:
 
     def test(self, kind, url, user, password):
         """Asks the server and logs in: ``{"version", "type", "libraries"}``. :class:`ServerError` says why not."""
+        return self._signed_in(kind, url, user, password)[0]
+
+    def _signed_in(self, kind, url, user, password):
+        """Signs in to check a server: ``(what it is and has, what to keep for it)``. What's kept is never the password
+        as it was typed: Navidrome's encrypted, or the encrypted token Emby or Jellyfin gave for it."""
         client = make_client(kind, url, user, password)
+        got = []
+        if kind != "navidrome":
+            client.on_login = lambda user_id, token: got.append({"user_id": user_id, "token": token})
         info = client.ping()
-        return {**info, "libraries": client.libraries()}
+        info = {**info, "libraries": client.libraries()}
+        if kind == "navidrome":
+            return info, {"secret": self.vault.seal(password)}
+        if not got:
+            raise ServerError(f"{KINDS[kind]} refused the login")
+        return info, {"login": self.vault.seal(json.dumps(got[-1]))}
 
     def add(self, kind, name, url, user, password):
         """Adds a server (or another user of one) once it answers and takes the login: its public form."""
         with self._lock:
             kind, name, url, user = self._check(kind, name, url, user, password)
             saved = self._saved()
-            if len(saved) + 1 >= MOST:
+            if len(saved) >= MOST:
                 raise ValueError(f"At most {MOST} servers")
-            self.test(kind, url, user, password)
-            taken = {s["id"] for s in self.all()}
+            _, keep = self._signed_in(kind, url, user, password)
+            taken = {s["id"] for s in saved}
             server_id = next(i for i in (kind if n == 1 else f"{kind}-{n}" for n in range(1, MOST * 2)) if i not in taken)
-            server = {"id": server_id, "kind": kind, "name": name, "url": url, "user": user, "password": password}
-            self.store.set_setting("servers", saved + [server])
-            return self.public({**server, "env": False})
+            self.store.set_setting("servers", saved + [{"id": server_id, "kind": kind, "name": name, "url": url,
+                                                        "user": user, **keep}])
+            return self.public(self.get(server_id))
 
     def update(self, server_id, name=None, url=None, user=None, password=None):
-        """Changes a server added on the page (its name, address or login; an empty password keeps the one it has).
-        The container's own takes a new name only: the rest is its settings."""
+        """Changes a server: its name alone, or its address or login too. A new address or user needs the password
+        again (only Navidrome's is kept, and it isn't said to another address unasked); the password alone signs in
+        again, for a server that stopped taking the kept sign-in."""
         with self._lock:
             server = self.get(server_id)
             if server is None:
                 raise KeyError(server_id)
-            if server["env"]:
-                if any(v for v in (url, user, password)):
-                    raise ValueError("This server is set on the container (NAVIDROME_URL, NAVIDROME_USER, "
-                                     "NAVIDROME_PASSWORD): change it there")
-                new = " ".join(str(name or "").split())[:60]
-                if new and any(s["name"].casefold() == new.casefold() for s in self.all() if s["id"] != server_id):
-                    raise ValueError(f"There's already a server named {new}")
-                if new:
-                    self.store.set_setting("main_name", new)
-                return self.public(self.get(server_id))
-            password = password or server["password"]
-            kind, name, url, user = self._check(server["kind"], name or server["name"], url or server["url"],
-                                                user or server["user"], password, but=server_id)
-            self.test(kind, url, user, password)
-            changed = {"id": server_id, "kind": kind, "name": name, "url": url, "user": user, "password": password}
-            self.store.set_setting("servers", [changed if s["id"] == server_id else s for s in self._saved()])
+            url = str(url or "").strip().rstrip("/") or server["url"]
+            user = str(user or "").strip() or server["user"]
+            moved = url != server["url"] or user != server["user"]
+            if moved and not password:
+                raise ValueError("Its password is needed to change its address or user")
+            kind, name, url, user = self._check(server["kind"], name or server["name"], url, user,
+                                                password or "kept", but=server_id)
+            keep = {}
+            if password:
+                _, keep = self._signed_in(kind, url, user, password)
+            self.store.set_setting("servers", [
+                {**{k: v for k, v in s.items() if k not in (("secret", "login") if keep else ())},
+                 "name": name, "url": url, "user": user, **keep} if s["id"] == server_id else s
+                for s in self._saved()])
             self._clients.pop(server_id, None)
-            return self.public({**changed, "env": False})
+            return self.public(self.get(server_id))
 
     def remove(self, server_id):
-        """Takes a server added on the page away, with its songs' ids there; songs only it had go with it. The number
-        of songs forgotten."""
+        """Takes a server away, with its songs' ids there; songs only it had go with it. The number of songs
+        forgotten."""
         with self._lock:
-            server = self.get(server_id)
-            if server is None:
+            if self.get(server_id) is None:
                 raise KeyError(server_id)
-            if server["env"]:
-                raise ValueError("This server is set on the container: take NAVIDROME_URL away there")
             self.store.set_setting("servers", [s for s in self._saved() if s["id"] != server_id])
             self._clients.pop(server_id, None)
             if self.store.setting("default_server") == server_id:

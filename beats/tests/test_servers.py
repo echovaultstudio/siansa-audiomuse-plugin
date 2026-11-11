@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from beats.mediabrowser import MediaBrowser  # noqa: E402
 from beats.store import Store  # noqa: E402
 from beats.subsonic import ServerError, Subsonic  # noqa: E402
-from fakes import PASSWORD, USER, FakeMediaServer  # noqa: E402
+from fakes import PASSWORD, SECOND_PASSWORD, TOKEN, USER, FakeMediaServer  # noqa: E402
 from test_service import CATALOG, Base, FakeStyle, Service  # noqa: E402
 
 ONLY_EMBY = {"id": "t128", "title": "Only Here", "artist": "Emby Artist", "album": "Elsewhere", "genre": "Techno",
@@ -101,7 +101,7 @@ class ServersTest(Service):
         emby = self.media()
         added = self.add(emby, "Living room Emby")
         self.assertEqual(added, {"id": "emby", "kind": "emby", "name": "Living room Emby", "url": emby.url, "user": USER,
-                                 "default": False, "env": False})
+                                 "default": False, "signed_in": True})
         self.assertEqual(self.call("/api/libraries?server=emby"),
                          [{"id": "lib1", "name": "Music", "on": False, "songs": 0, "done": 0}])
         self.assertEqual(self.call("/api/libraries?server=emby", "POST", {"ids": ["lib1"]}), {"songs": 4, "queued": 0})
@@ -188,7 +188,7 @@ class ServersTest(Service):
     def test_a_second_user_of_the_same_server(self):
         self.analysed()
         added = self.call("/api/servers", "POST", {"kind": "navidrome", "name": "", "url": self.fake.url + "/",
-                                                   "user": "second", "password": "second"})
+                                                   "user": "second", "password": SECOND_PASSWORD})
         self.assertEqual((added["id"], added["name"]), ("navidrome", "Navidrome (second)"))
         self.assertEqual(self.call("/api/libraries?server=navidrome", "POST", {"ids": ["2", "1"]})["queued"], 0)
         self.assertTrue(any("4 already analysed from another server (4 by the same id)" in e for e in self.events()))
@@ -196,7 +196,7 @@ class ServersTest(Service):
         self.assertEqual(self.tracker.calls, 3)
         # The same user twice is a mistake.
         with self.assertRaises(urllib.error.HTTPError) as e:
-            self.call("/api/servers", "POST", {"kind": "navidrome", "url": self.fake.url, "user": "SECOND", "password": "second"})
+            self.call("/api/servers", "POST", {"kind": "navidrome", "url": self.fake.url, "user": "SECOND", "password": SECOND_PASSWORD})
         self.assertEqual(e.exception.code, 400)
         self.assertIn("already here", json.loads(e.exception.read())["error"])
 
@@ -220,7 +220,7 @@ class ServersTest(Service):
         self.assertEqual(refused("/api/servers", body={**fields, "url": "http://127.0.0.1:1"})[0], 502)
         self.assertEqual(self.call("/api/servers")["servers"], [
             {"id": "main", "kind": "navidrome", "name": "Navidrome", "url": self.fake.url, "user": USER, "default": True,
-             "env": True, "songs": 0, "libraries": []}])
+             "signed_in": True, "songs": 0, "libraries": []}])
         # Asked before it's added: what it is and what it has.
         self.assertEqual(self.call("/api/servers/test", "POST", fields)["libraries"], [{"id": "lib1", "name": "Music"}])
         self.assertEqual(self.add(jellyfin)["name"], "Jellyfin (test)")
@@ -233,8 +233,11 @@ class ServersTest(Service):
         self.assertEqual(self.call("/api/libraries?server=main")[0]["id"], "1")
         self.assertEqual(self.call("/api/servers/jellyfin", "POST", {"name": "Den"})["name"], "Den")
         self.assertEqual(self.call("/api/servers/main", "POST", {"name": "Home"})["name"], "Home")
-        self.assertIn("on the container", refused("/api/servers/main", body={"url": "http://elsewhere"})[1])
-        self.assertEqual(refused("/api/servers/main", "DELETE")[0], 409)
+        # The first server is like any other since 0.24: changed and removed on the page. A new address or user
+        # needs the password again (it isn't said to another address unasked).
+        self.assertIn("password is needed", refused("/api/servers/main", body={"url": "http://elsewhere"})[1])
+        self.assertEqual(refused("/api/servers/main", body={"url": "http://127.0.0.1:1", "password": PASSWORD})[0], 502)
+        self.assertEqual(self.call("/api/servers")["servers"][0]["url"], self.fake.url)  # not changed by a failed try
         self.assertEqual(refused("/api/servers/nope", "DELETE")[0], 404)
         self.assertEqual(refused("/api/servers/nope/default")[0], 404)
         code, why = refused("/api/status?server=nope", "GET")

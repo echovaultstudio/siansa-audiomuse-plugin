@@ -1,5 +1,6 @@
 # Siansa Beats on TrueNAS with an NVIDIA GPU: Apps › Discover Apps › ⋮ › Install via YAML, name it siansa-beats,
-# paste this, fill in the values marked <…>, and Save. See README.md ("On TrueNAS with a GPU").
+# paste this and Save. Then open http://<your TrueNAS>:8090 and add your music server under Setup: no password goes
+# in this YAML (0.24.0). See README.md ("On TrueNAS with a GPU").
 services:
   beats:
     image: ghcr.io/echovaultstudio/siansa-beats:cuda
@@ -8,16 +9,9 @@ services:
     ports:
       - "8090:8090"
     environment:
-      NAVIDROME_URL: "<http://navidrome.local:4533>"
-      NAVIDROME_USER: "<your Navidrome user>"
-      NAVIDROME_PASSWORD: "<its password>"
       BEATS_MODEL: "final0"
       BEATS_DEVICE: "auto"
       BEATS_FLOAT16: "0"
-      BEATS_PASSWORD: ""
-      BEATS_API_KEY: ""
-      AUDIOMUSE_URL: ""
-      AUDIOMUSE_TOKEN: ""
       LOG_LEVEL: "info"
       NVIDIA_VISIBLE_DEVICES: "all"
     volumes:

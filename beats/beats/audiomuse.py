@@ -1,6 +1,6 @@
 """Similar albums and artists, asked of AudioMuse-AI (the owner, 10 Nov: Beats answers the app for everything; at first by
 asking AudioMuse, later from Beats' own fingerprints). AudioMuse-AI's Siansa plugin works them out from its sound
-analysis; Siansa Beats passes the app's question on (``AUDIOMUSE_URL``, ``AUDIOMUSE_TOKEN``) and hands back the answer
+analysis; Siansa Beats passes the app's question on (its address and token, set on the page) and hands back the answer
 as it is: ``{"similar": [{"album"|"artist", "artist", "track_id", "score"}, …]}``.
 
 It asks the Siansa Beats (dev) plugin first, then the Siansa Analysis plugin (both answer the same way).
@@ -53,7 +53,7 @@ class AudioMuse:
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             raise AudioMuseError(f"Couldn't reach AudioMuse-AI: {getattr(e, 'reason', e)}") from None
         except ValueError:
-            raise AudioMuseError("AudioMuse-AI's answer isn't JSON: is AUDIOMUSE_URL its API port?") from None
+            raise AudioMuseError("AudioMuse-AI's answer isn't JSON: is the address its API port?") from None
         _log.debug("AudioMuse-AI %s (%.2fs)", path.split("?")[0], time.monotonic() - started)
         return answer
 
@@ -80,12 +80,32 @@ class AudioMuse:
                         out[p["track_id"]] = {k: p.get(k) for k in self.PROFILE_FIELDS}
         return out
 
+    def check(self):
+        """Asks AudioMuse-AI's Siansa plugin something harmless: the plugin that answered ("siansa_beats" or
+        "siansa_analysis"). :class:`AudioMuseError` says why not: unreachable, a token wanted or refused, no plugin."""
+        if not self.configured:
+            raise AudioMuseError("An address is needed")
+        for prefix in PLUGINS:
+            try:
+                answer = self._get(f"{prefix}api/profiles?ids=siansa-beats-check")
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    continue
+                if e.code in (401, 403):
+                    raise AudioMuseError("AudioMuse-AI didn't take the token" if self.token
+                                         else "AudioMuse-AI wants a token: one of its API tokens") from None
+                raise AudioMuseError(f"AudioMuse-AI answered HTTP {e.code}") from None
+            if isinstance(answer, dict) and "profiles" in answer:
+                self.plugin = prefix
+                return prefix.strip("/").split("/")[-1]
+        raise AudioMuseError("That address answers, but neither Siansa plugin is installed in AudioMuse-AI there")
+
     def similar(self, kind, query):
         """AudioMuse-AI's ``kind`` ("albums" or "artists") like ``query``'s ``track_id`` or ``artist``."""
         if kind not in KINDS:
             raise ValueError(kind)
         if not self.configured:
-            raise AudioMuseError("AudioMuse-AI isn't set up for Siansa Beats: set AUDIOMUSE_URL (and AUDIOMUSE_TOKEN)")
+            raise AudioMuseError("AudioMuse-AI isn't set up for Siansa Beats: add it on its page (Setup › AudioMuse-AI)")
         asked = urllib.parse.urlencode({k: query[k] for k in PASSED_ON if query.get(k)})
         tried = [self.plugin] + [p for p in PLUGINS if p != self.plugin] if self.plugin else list(PLUGINS)
         for prefix in tried:
@@ -95,7 +115,7 @@ class AudioMuse:
                 if e.code == 404:
                     continue  # this plugin isn't installed (or doesn't know the song): the other one may
                 if e.code in (401, 403):
-                    raise AudioMuseError("AudioMuse-AI wants a login: set AUDIOMUSE_TOKEN to one of its API tokens") from None
+                    raise AudioMuseError("AudioMuse-AI wants a login: give Siansa Beats one of its API tokens (Setup › AudioMuse-AI)") from None
                 raise AudioMuseError(f"AudioMuse-AI answered HTTP {e.code}") from None
             if isinstance(answer, dict) and isinstance(answer.get("similar"), list):
                 self.plugin = prefix

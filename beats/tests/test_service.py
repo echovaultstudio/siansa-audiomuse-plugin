@@ -522,7 +522,10 @@ class ServiceTest(Service):
         row = next(s for s in self.call("/api/songs") if s["id"] == "t96w")
         self.assertIn("nope", row["sound"]["error"])
         status = self.call("/api/status")
-        self.assertEqual(status["connections"], {"navidrome": True, "audiomuse": True, "api_key": False, "password": False})
+        self.assertEqual(status["connections"], {
+            "navidrome": True, "audiomuse": True, "audiomuse_url": self.fake.url, "audiomuse_token": True,
+            "api_key": False, "password": False, "secret_key": "data folder",
+            "left_in_container": ["NAVIDROME_PASSWORD", "AUDIOMUSE_TOKEN"]})
 
     def test_v1_genres_about_and_bad_blends(self):
         self.start(style=FakeStyle(os.path.join(self.tmp, "models"), on=True))
@@ -725,7 +728,8 @@ class ServiceTest(Service):
         self.assertIn("attachment", r.headers["Content-Disposition"])
         report = json.loads(body)
         self.assertEqual(report["versions"]["siansa_beats"], __version__)
-        self.assertEqual(report["setup"]["navidrome_password"], "set")
+        self.assertEqual([(s["id"], s["signed_in"]) for s in report["setup"]["servers"]], [("main", True)])
+        self.assertEqual(report["setup"]["secrets_left_in_container"], ["NAVIDROME_PASSWORD", "AUDIOMUSE_TOKEN", "BEATS_PASSWORD"])
         self.assertEqual(report["setup"]["page_password"], "set")
         self.assertEqual(report["setup"]["audiomuse_token"], "set")
         self.assertNotIn(f'"{TOKEN}"', body.decode())
