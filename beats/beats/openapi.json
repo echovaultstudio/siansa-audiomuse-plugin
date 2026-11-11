@@ -1126,6 +1126,54 @@
           }
         }
       }
+    },
+    "/api/v1/loves": {
+      "post": {
+        "summary": "A heart given or taken back in the app: passed on to the listener's Last.fm when Siansa Beats sends their listens on",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "artist",
+                  "title"
+                ],
+                "properties": {
+                  "user": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "artist": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "loved": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "passed_on: whether it goes on to Last.fm"
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}"
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        }
+      }
     }
   },
   "components": {

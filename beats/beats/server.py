@@ -278,9 +278,9 @@ class App:
         """The listening page: the listeners, and one's numbers for a month, a year or all time (the first listener's
         without one)."""
         users = self.listens.users()
-        if user is None:
-            user = users[0]["user"] if users else ""
-        return {"users": users, "importing": dict(self.listens.importing),
+        if user is None:  # the first one with a name (the app's), else the first
+            user = next((u["user"] for u in users if u["user"]), users[0]["user"] if users else "")
+        return {"users": users, "importing": dict(self.listens.importing), "playing": self.listens.all_playing(),
                 **self.listens.summary(user, year, month, tz)}
 
     def sound_status(self, server=None):
@@ -1106,6 +1106,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error(HTTPStatus.BAD_REQUEST, str(e))
                 except LastFmError as e:
                     return self._error(HTTPStatus.BAD_GATEWAY, str(e))
+            if path == "/api/listens/rename":  # {"from", "to"}: one listener's listens become another's
+                if "from" not in body or not str(body.get("to") or "").strip():
+                    return self._error(HTTPStatus.BAD_REQUEST, "from and to needed: whose listens, and whose they become")
+                return self._json({"moved": app.listens.rename(body["from"], body["to"])})
             if path == "/api/listens/remove":  # a listener's listens from one source (a file brought in by mistake)
                 if "user" not in body or body.get("source") not in ("koito", "lastfm", "listenbrainz", "siansa", "all"):
                     return self._error(HTTPStatus.BAD_REQUEST, "user and source needed: koito, lastfm, listenbrainz, siansa or all")

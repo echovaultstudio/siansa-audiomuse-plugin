@@ -31,7 +31,7 @@ class FakeLastFm(L.LastFm):
 
     def __init__(self):
         super().__init__()
-        self.sent, self.playing, self.signed_in, self.fail = [], [], [], None
+        self.sent, self.playing, self.signed_in, self.fail, self.loved = [], [], [], None, []
 
     def session(self, api_key, secret, name, password):
         if password != "right":
@@ -47,6 +47,9 @@ class FakeLastFm(L.LastFm):
 
     def now_playing(self, keys, row):
         self.playing.append((row["artist"], row["title"]))
+
+    def love(self, keys, artist, title, loved=True):
+        self.loved.append((artist, title, loved))
 
 
 class Files(unittest.TestCase):
@@ -166,6 +169,49 @@ class History(unittest.TestCase):
         # A new listen shows at once: the kept numbers are worked out again.
         self.listens.add("max", [self.row("2026-03-06T20:00:00", "Moby", "Honey")])
         self.assertEqual(self.listens.summary("max", 2026, 3, "Europe/Helsinki")["totals"]["listens"], 2)
+
+    def test_listens_without_a_name_become_the_apps_listeners(self):
+        # The owner's: Koito's export brought in without a name, then the app scrobbling as "max".
+        self.listens.add("", [self.row("2026-11-01T10:00:00"), self.row("2026-11-02T10:00:00")], source="koito")
+        self.listens.add("max", [self.row("2026-11-02T10:00:00")])
+        self.listens.connect_lastfm("", "key", "shh", "max", "right")
+        self.listens.set_playing("max", {"artist": "Moby", "title": "Honey"})
+        self.assertEqual([u["user"] for u in self.listens.users()], ["", "max"])
+        self.assertEqual(self.listens.rename("", "max"), 1)  # the one max had already is kept once
+        self.assertEqual([(u["user"], u["listens"]) for u in self.listens.users()], [("max", 2)])
+        self.assertTrue(self.listens.lastfm_status("max")["connected"])  # sending on moved with them
+        self.assertFalse(self.listens.relays(""))
+        self.assertEqual(self.listens.rename("max", "max"), 0)
+
+    def test_the_apps_listens_since_connecting_go_on_once_joined(self):
+        # Last.fm was connected while the listens without a name were shown; the app's came in as "max" meanwhile.
+        self.listens.add("", [self.row("2026-11-01T10:00:00")], source="koito")
+        self.now = at("2026-11-11T10:30:00")
+        self.listens.connect_lastfm("", "key", "shh", "max", "right")
+        self.listens.add("max", [self.row("2026-11-11T10:00:00", "Before", "Connecting")])  # not sent: from before
+        self.now = at("2026-11-11T12:00:00")
+        self.listens.add("max", [self.row("2026-11-11T11:00:00", "Moby", "Honey")])
+        self.assertEqual(self.listens.relay(), {"": 0})  # nothing of max's is sent to the account of ""
+        self.listens.rename("", "max")
+        self.assertEqual(self.listens.relay(), {"max": 1})
+        self.assertEqual(self.lastfm.sent, [[(at("2026-11-11T11:00:00"), "Moby", "Honey")]])
+
+    def test_hearts_go_on_to_last_fm(self):
+        self.assertFalse(self.listens.love("max", "Moby", "Honey"))  # not connected: nothing to pass on to
+        self.connect()
+        self.assertTrue(self.listens.love("max", "Moby", "Honey"))
+        self.assertTrue(self.listens.love("max", "Moby", "Honey", loved=False))
+        self.assertFalse(self.listens.love("max", "", "Honey"))
+        end = time.time() + 5
+        while time.time() < end and len(self.lastfm.loved) < 2:
+            time.sleep(0.02)
+        self.assertEqual(sorted(self.lastfm.loved), [("Moby", "Honey", False), ("Moby", "Honey", True)])
+
+    def test_the_app_listener_shows_before_it_has_a_listen(self):
+        self.listens.add("", [self.row("2026-11-01T10:00:00")], source="koito")
+        self.listens.set_playing("max", {"artist": "Moby", "title": "Honey", "duration": 200})
+        self.assertEqual([u["user"] for u in self.listens.users()], ["", "max"])
+        self.assertEqual([(p["user"], p["title"]) for p in self.listens.all_playing()], [("max", "Honey")])
 
     def test_whats_playing_shows_while_it_can_be(self):
         self.assertTrue(self.listens.set_playing("max", {"artist": "Moby", "title": "Honey", "duration": 200}))
@@ -335,6 +381,8 @@ class ListeningService(Service):
         _, report = self.call("/api/debug", raw=True)
         for secret in ("shh", "session-max"):
             self.assertNotIn(secret, report.decode())
+        self.assertEqual(self.call("/api/v1/loves", "POST", {"user": "max", "artist": "Moby", "title": "Honey", "loved": True}), {"passed_on": True})
+        self.assertEqual(self.call("/api/v1/loves", "POST", {"user": "kids", "artist": "Moby", "title": "Honey"}), {"passed_on": False})
         self.assertFalse(self.call("/api/listens/lastfm", "POST", {"user": "max", "disconnect": True})["connected"])
 
 

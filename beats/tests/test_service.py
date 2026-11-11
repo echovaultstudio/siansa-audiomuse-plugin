@@ -561,7 +561,7 @@ class ServiceTest(Service):
         spec = self.call("/api/v1/openapi.json")
         self.assertEqual(spec["info"]["version"], "1")
         for path in ("/api/v1/capabilities", "/api/v1/profiles", "/api/v1/genres", "/api/v1/genre", "/api/v1/genre/about",
-                     "/api/v1/bad-blends", "/api/v1/listens", "/api/v1/listens/now", "/api/v1/listens/top"):
+                     "/api/v1/bad-blends", "/api/v1/listens", "/api/v1/listens/now", "/api/v1/listens/top", "/api/v1/loves"):
             self.assertIn(path, spec["paths"])
 
     def test_v1_similar_albums_and_artists_asked_of_audiomuse(self):

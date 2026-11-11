@@ -189,6 +189,12 @@ the first time, what's playing now and the last listens. Days and hours are your
   listens from the app are sent on in the background, and again later when Last.fm can't be reached; listens from a
   file never are, nor ones older than two weeks (Last.fm turns those away). The key, secret and session are kept
   encrypted, the password not at all. Turn the app's own Last.fm scrobbling off then, so nothing is sent twice.
+  The app's hearts go on too, as loved tracks (0.29.2).
+- **A history brought in without a name** (the "whose listens" box left empty) is offered to the app's listener once
+  the app sends something: **Make them max's** joins them (a listen both have is kept once), and sending on to
+  Last.fm, if it was connected on the unnamed one, moves along, with the app's listens since then.
+- **On a phone** the page shows one part at a time (Overview, Top, When, History; the bar stays in view), long
+  lists show their first lines with **Show all**, the Setup cards open by their heading, and **↑ Top** goes back up.
 
 **Songs gone from the server are forgotten (0.27).** When a library is read again (every few hours, or **Read
 again**), a song that's no longer on the server goes from here with its analysis, unless another server still has

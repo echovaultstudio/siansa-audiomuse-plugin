@@ -138,6 +138,30 @@ main > section.on { display: grid; gap: 16px; }
 .tm-facts { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; margin: 0; }
 .tm-facts dt { color: var(--muted); } .tm-facts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .tm-empty { text-align: center; padding: 28px 16px; color: var(--muted); }
+.tm-tabs { position: sticky; top: var(--header-h); z-index: 4; display: flex; gap: 4px; padding: 6px; border-radius: 999px;
+  background: color-mix(in srgb, var(--raised) 92%, transparent); backdrop-filter: blur(10px); border: 1px solid var(--line); }
+.tm-tabs button { flex: 1 1 0; border: 0; padding: 8px 6px; font-weight: 600; color: var(--muted); background: none; }
+.tm-tabs button[aria-selected=true] { background: var(--amber); color: var(--on-amber); }
+.tm-panel { display: grid; gap: 16px; min-width: 0; }
+.tm-seg { margin-bottom: 12px; }
+.tm-seg button[aria-pressed=true] { background: var(--amber); color: var(--on-amber); }
+.tm-join { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.tm-join button.primary { color: var(--on-amber); background: var(--amber); border-color: var(--amber); }
+@media (max-width: 600px) {
+  .tm-hero { padding: 16px 14px 12px; }
+  .tm-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .tm-tiles .tile { padding: 10px; } .tm-tiles .tile .v { font-size: 1.15rem; } .tm-tiles .tile .s { display: none; }
+}
+/* Phones: long lists show their first lines with "Show all" (data-cap), cards marked data-fold open and close by
+   their heading, and a button goes back to the top: less scrolling, and the page's parts stay findable. */
+.cap-more { margin-top: 10px; width: 100%; }
+.card.foldable > h3, .card.foldable > .card-head h3 { cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 0; }
+.card.foldable > h3::after, .card.foldable > .card-head h3::after { content: "▾"; color: var(--faint); font-size: 0.85rem; transition: transform 0.15s ease; }
+.card.foldable:not(.folded) > h3, .card.foldable:not(.folded) > .card-head h3 { margin-bottom: 12px; }
+.card.foldable.folded > h3::after, .card.foldable.folded > .card-head h3::after { transform: rotate(-90deg); }
+.card.foldable.folded > :not(h3):not(.card-head) { display: none !important; }
+.to-top { position: fixed; right: 16px; bottom: 20px; z-index: 20; border-radius: 999px; padding: 10px 14px; font-weight: 600;
+  background: var(--raised-2); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); }
 .card-head { display: flex; align-items: baseline; gap: 12px; } .card-head .more { margin-left: auto; font-size: 0.88rem; }
 .kicker { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); margin-bottom: 2px; }
 .now { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 24px; align-items: center; }
@@ -350,7 +374,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       <div class="tiles" id="tiles"></div>
       <div class="card">
         <div class="card-head"><h3>Recent activity</h3><a href="#activity" class="more">All activity ›</a></div>
-        <ul class="events" id="events-recent"></ul>
+        <ul class="events" id="events-recent" data-cap="5"></ul>
       </div>
     </section>
 
@@ -459,7 +483,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         </div>
         <div class="card">
           <h3>Keys</h3>
-          <div class="hbars" id="l-keys"></div>
+          <div class="hbars" id="l-keys" data-cap="12"></div>
         </div>
         <div class="card">
           <h3>How songs start</h3>
@@ -474,9 +498,9 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
           <p class="sub" id="l-outro-note"></p>
         </div>
       </div>
-      <div class="card">
+      <div class="card" data-fold>
         <h3>Couldn't be measured</h3>
-        <ul class="events" id="l-failed"></ul>
+        <ul class="events" id="l-failed" data-cap="5"></ul>
       </div>
     </section>
 
@@ -488,7 +512,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         <div id="genre-progress" class="sub">Loading the genres…</div>
         <div id="genre-agree"></div>
       </div>
-      <div class="card">
+      <div class="card" data-fold>
         <div class="card-head"><h3>Descriptions</h3><button class="more" id="about-fetch">Fetch all now</button></div>
         <p class="sub">Each genre's page in the app opens with a short description from Wikipedia. They're fetched in the
           background and kept (a found one for 90 days, a genre Wikipedia has nothing on for a week, one it couldn't be
@@ -498,7 +522,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       <div class="card">
         <h3>Genres by songs</h3>
         <div class="tools"><input type="search" class="grow" id="genre-find" placeholder="Find a genre" aria-label="Find a genre"></div>
-        <div id="genre-top" class="hbars"></div>
+        <div id="genre-top" class="hbars" data-cap="15"></div>
       </div>
     </section>
 
@@ -523,7 +547,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       <div class="page-head"><h2>Bad blends</h2><p class="sub">Song changes marked as bad in Siansa Dev, with how the app blended them. Tap a song to check its beats.</p></div>
       <div class="card">
         <p><a class="btn" href="api/bad-blends/export" download title="Every bad blend with both songs' beats and sound levels: the one file to send">Download bad blends</a></p>
-        <ul class="events" id="bad"></ul>
+        <ul class="events" id="bad" data-cap="10"></ul>
       </div>
     </section>
 
@@ -542,25 +566,42 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         <div class="tm-strip" id="tm-months" role="group" aria-label="Month" hidden></div>
       </div>
       <div class="card tm-now" id="tm-now" hidden><span class="dot" aria-hidden="true"></span><div><div class="kicker">Playing now</div><div id="tm-now-what"></div></div></div>
+      <div class="banner warn tm-join" id="tm-join" hidden><span id="tm-join-text"></span><button type="button" class="primary" id="tm-join-go"></button></div>
+      <!-- One part at a time, chosen here (it stays in view while scrolling), so a phone never scrolls through all of it. -->
+      <div class="tm-tabs" role="tablist" aria-label="Part of your listening">
+        <button type="button" role="tab" data-tab="overview" aria-selected="true">Overview</button>
+        <button type="button" role="tab" data-tab="top" aria-selected="false">Top</button>
+        <button type="button" role="tab" data-tab="when" aria-selected="false">When</button>
+        <button type="button" role="tab" data-tab="history" aria-selected="false">History</button>
+      </div>
       <div class="card tm-empty" id="tm-empty" hidden></div>
-      <div id="tm-body" hidden style="display: grid; gap: 16px;">
-        <div class="tiles" id="tm-tiles"></div>
-        <div class="card"><h3 id="tm-chart-title">When</h3><div class="tm-chart" id="tm-chart"></div></div>
-        <div class="tm-cols">
-          <div class="card"><h3>Top songs</h3><ol class="tm-rank" id="tm-songs"></ol></div>
-          <div class="card"><h3>Top artists</h3><ol class="tm-rank" id="tm-artists"></ol></div>
-          <div class="card"><h3>Top albums</h3><ol class="tm-rank" id="tm-albums"></ol></div>
+      <div class="tm-panel" data-tab="overview" id="tm-body">
+        <div class="tiles tm-tiles" id="tm-tiles"></div>
+        <div class="card"><h3 id="tm-chart-title">When</h3><div class="tm-chart" id="tm-chart"></div><p class="sub">Press a bar to go there.</p></div>
+        <div class="card" id="tm-new-card"><h3>Heard for the first time</h3><div id="tm-new" data-cap="12"></div></div>
+      </div>
+      <div class="tm-panel" data-tab="top" hidden>
+        <div class="card">
+          <div class="seg tm-seg" role="group" aria-label="Most played">
+            <button type="button" data-top="songs" aria-pressed="true">Songs</button>
+            <button type="button" data-top="artists" aria-pressed="false">Artists</button>
+            <button type="button" data-top="albums" aria-pressed="false">Albums</button>
+          </div>
+          <ol class="tm-rank" id="tm-songs" data-cap="10"></ol>
+          <ol class="tm-rank" id="tm-artists" data-cap="10" hidden></ol>
+          <ol class="tm-rank" id="tm-albums" data-cap="10" hidden></ol>
         </div>
+      </div>
+      <div class="tm-panel" data-tab="when" hidden>
         <div class="tm-cols">
           <div class="card"><h3>Around the clock</h3><div class="tm-chart small" id="tm-hours"></div><p class="sub" id="tm-hours-note"></p></div>
           <div class="card"><h3>Through the week</h3><div class="tm-chart small" id="tm-weekdays"></div><p class="sub" id="tm-weekdays-note"></p></div>
           <div class="card"><h3>Records</h3><dl class="tm-facts" id="tm-records"></dl></div>
         </div>
-        <div class="card" id="tm-new-card"><h3>Heard for the first time</h3><div id="tm-new"></div></div>
       </div>
-      <div class="card" id="tm-recent-card" hidden><h3>Last listens</h3><ul class="events" id="tm-recent"></ul></div>
-      <div class="tm-cols">
-        <div class="card">
+      <div class="tm-panel" data-tab="history" hidden>
+        <div class="card" id="tm-recent-card" hidden><h3>Last listens</h3><ul class="events" id="tm-recent" data-cap="5"></ul></div>
+        <div class="card" data-fold>
           <h3>Bring in a history</h3>
           <p class="sub">An export of Koito, of Last.fm (the JSON or CSV of an export tool) or of ListenBrainz. A listen that's here already is kept once, so a file can be brought in again.</p>
           <form class="form" id="tm-import">
@@ -572,7 +613,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
           <p class="sub" id="tm-import-state" role="status"></p>
           <div class="controls" id="tm-remove-box" hidden><button type="button" id="tm-remove">Remove listens…</button></div>
         </div>
-        <div class="card">
+        <div class="card" data-fold>
           <h3>On to Last.fm</h3>
           <p class="sub" id="tm-lastfm-state" role="status"></p>
           <form class="form" id="tm-lastfm">
@@ -590,7 +631,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 
     <section data-view="activity">
       <div class="page-head"><h2>Activity</h2><p class="sub">What Siansa Beats did, newest first.</p></div>
-      <div class="card"><ul class="events tall" id="events"></ul></div>
+      <div class="card"><ul class="events tall" id="events" data-cap="25"></ul></div>
     </section>
 
     <!-- Log -->
@@ -620,7 +661,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         <p class="sub">These are still in the container's YAML and are no longer read: <strong id="left-names"></strong>. They were taken over
           once (hashed or encrypted) and are set on this page since, so you can delete those lines.</p>
       </div>
-      <div class="card" id="servers-card">
+      <div class="card" id="servers-card" data-fold="open">
         <h3>Music servers</h3>
         <p class="sub">Navidrome, Emby and Jellyfin, as many as you have, and more than one user of the same server (each
           sees the libraries that user may). A song two servers have is found by its file or its tags and analysed once.
@@ -649,7 +690,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         </details>
       </div>
       <div class="grid2">
-        <div class="card" id="audiomuse-card">
+        <div class="card" id="audiomuse-card" data-fold>
           <h3>AudioMuse-AI</h3>
           <p class="sub">What it has worked out about each song (how it sounds, its moods and genres) is taken over
             from it, so nothing is analysed twice; Siansa Beats then answers similar songs, albums and artists, song paths,
@@ -675,7 +716,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
             </div>
           </div>
         </div>
-        <div class="card" id="access-card">
+        <div class="card" id="access-card" data-fold>
           <h3>Access</h3>
           <dl class="kv" id="setup-connections"></dl>
           <form id="pw-form" autocomplete="off">
@@ -699,8 +740,8 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
           </form>
         </div>
       </div>
-      <div class="card"><h3>The model</h3><dl class="kv" id="setup-model"></dl></div>
-      <div class="card">
+      <div class="card" data-fold><h3>The model</h3><dl class="kv" id="setup-model"></dl></div>
+      <div class="card" data-fold>
         <h3>Connect the Siansa app</h3>
         <ol class="steps">
           <li>In Siansa Dev: Settings › Connections › <strong>Siansa Beats</strong>.</li>
@@ -710,7 +751,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         </ol>
         <p class="sub">The app's API is described in <a href="api/v1/openapi.json" target="_blank" rel="noopener">openapi.json</a>; <a href="api/v1/capabilities" target="_blank" rel="noopener">capabilities</a> shows what it answers now.</p>
       </div>
-      <div class="card">
+      <div class="card" data-fold>
         <h3>When something's wrong</h3>
         <p class="sub">The debug report has the versions, the setup (no passwords), where each part is right now, the queue and the log: the one file to send.</p>
         <a class="btn" href="api/debug" download>Download debug report</a>
@@ -1364,6 +1405,57 @@ $("scrim").addEventListener("click", () => menu(false));
 $("nav").addEventListener("click", (e) => { if (e.target.closest("a")) menu(false); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.body.classList.contains("menu-open")) { menu(false); $("menu").focus(); } });
 
+// ---- for phones: shorter lists, folding cards, back to the top ----
+const PHONE = window.matchMedia("(max-width: 700px)");
+const capOpen = new Set();  // lists shown in full, by id: a refresh doesn't shorten them again
+function capList(el) {
+  const n = +el.dataset.cap, items = [...el.children].filter((c) => !c.classList.contains("cap-more"));
+  const all = !PHONE.matches || capOpen.has(el.id) || items.length <= n + 2;
+  items.forEach((c, i) => { c.hidden = !all && i >= n; });
+  let more = el.nextElementSibling && el.nextElementSibling.classList.contains("cap-more") ? el.nextElementSibling : null;
+  if (all || el.hidden) { if (more) more.hidden = true; if (all) return; }
+  if (!more) {
+    more = document.createElement("button");
+    more.type = "button";
+    more.className = "cap-more";
+    more.addEventListener("click", () => { capOpen.add(el.id); capList(el); });
+    el.after(more);
+  }
+  more.hidden = el.hidden;  // a list not shown now (another tab's) shows no button either
+  more.textContent = `Show all ${num(items.length)}`;
+}
+document.querySelectorAll("[data-cap]").forEach((el) => {
+  new MutationObserver(() => capList(el)).observe(el, {childList: true});
+  capList(el);
+});
+PHONE.addEventListener?.("change", () => document.querySelectorAll("[data-cap]").forEach(capList));
+// A card marked data-fold opens and closes by its heading; on a phone it starts closed (data-fold="open": open).
+function foldKey(card) { return "beats-fold-" + (card.id || card.querySelector("h3")?.textContent.trim()); }
+document.querySelectorAll(".card[data-fold]").forEach((card) => {
+  const head = card.querySelector(":scope > h3, :scope > .card-head h3");
+  if (!head) return;
+  card.classList.add("foldable");
+  let kept = null;
+  try { kept = localStorage.getItem(foldKey(card)); } catch (e) { /* private window */ }
+  card.classList.toggle("folded", kept ? kept === "folded" : PHONE.matches && card.dataset.fold !== "open");
+  head.setAttribute("role", "button");
+  head.tabIndex = 0;
+  const flip = () => {
+    const folded = card.classList.toggle("folded");
+    head.setAttribute("aria-expanded", String(!folded));
+    try { localStorage.setItem(foldKey(card), folded ? "folded" : "open"); } catch (e) { /* private window */ }
+  };
+  head.setAttribute("aria-expanded", String(!card.classList.contains("folded")));
+  head.addEventListener("click", flip);
+  head.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); } });
+});
+const toTop = document.createElement("button");
+toTop.type = "button"; toTop.className = "to-top"; toTop.textContent = "↑ Top"; toTop.hidden = true;
+toTop.setAttribute("aria-label", "Back to the top of the page");
+toTop.addEventListener("click", () => window.scrollTo({top: 0, behavior: "smooth"}));
+document.body.append(toTop);
+window.addEventListener("scroll", () => { toTop.hidden = window.scrollY < window.innerHeight * 1.5; }, {passive: true});
+
 // ---- pages ----
 // One page at a time, chosen in the side menu (tabs on a phone) and kept in the address (#songs, #song=<id>), so Back
 // and a bookmark work.
@@ -1414,14 +1506,47 @@ function tmRank(id, rows, title, under) {
     '<li style="display:block" class="sub">Nothing in this time.</li>';
 }
 function tmGo(year, month) { tm.year = year; tm.month = month; refreshListening(); }
+// The part shown (Overview, Top, When, History) and the top list's kind, kept in this browser.
+tm.tab = (() => { try { return localStorage.getItem("beats-tm-tab") || "overview"; } catch (e) { return "overview"; } })();
+tm.top = "songs";
+function tmTab(tab) {
+  tm.tab = tab;
+  try { localStorage.setItem("beats-tm-tab", tab); } catch (e) { /* private window */ }
+  document.querySelectorAll(".tm-tabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
+  document.querySelectorAll(".tm-panel").forEach((p) => { p.hidden = p.dataset.tab !== tab || (tab !== "history" && !(tm.data && tm.data.totals.listens)); });
+}
+document.querySelectorAll(".tm-tabs [data-tab]").forEach((b) => b.addEventListener("click", () => { tmTab(b.dataset.tab); window.scrollTo({top: 0}); }));
+document.querySelectorAll(".tm-seg [data-top]").forEach((b) => b.addEventListener("click", () => {
+  tm.top = b.dataset.top;
+  document.querySelectorAll(".tm-seg [data-top]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  ["songs", "artists", "albums"].forEach((k) => { $("tm-" + k).hidden = k !== tm.top; capList($("tm-" + k)); });
+}));
 function drawListening(d) {
   tm.data = d;
   tm.user = d.user;
+  // Where you are, in the header too: "Listening · May 2024".
+  if (currentView === "listening") $("page-name").textContent = `Listening · ${d.all && d.all.listens ? d.period.label : ""}`.replace(/ · $/, "");
+  // What's playing, for every listener (the app's listener may not be the one shown).
+  const playing = d.playing || [];
+  $("tm-now").hidden = !playing.length;
+  $("tm-now-what").innerHTML = playing.map((p) => `${esc(p.artist)} – ${esc(p.title)}` + (playing.length > 1 || p.user !== d.user ? ` <span class="sub">· ${esc(p.user || "no name")}</span>` : "")).join("<br>");
+  // Listens without a listener's name (a file brought in with none) beside a named listener (the app's): join them.
+  const users0 = d.users || [], blank = users0.find((u) => !u.user && u.listens), named = users0.filter((u) => u.user);
+  $("tm-join").hidden = !(blank && named.length);
+  if (blank && named.length) {
+    const to = (playing.find((p) => p.user) || named[0]).user;
+    $("tm-join-text").textContent = `${num(blank.listens)} listens have no listener's name (a file brought in without one). The app sends yours as ${to}.`;
+    $("tm-join-go").textContent = `Make them ${to}'s`;
+    $("tm-join-go").onclick = async () => {
+      try { await api("api/listens/rename", {method: "POST", body: JSON.stringify({from: "", to})}); tm.user = to; tm.year = tm.month = null; refreshListening(); }
+      catch (e) { banner(e.message); }
+    };
+  }
   const users = d.users || [];
   $("tm-who").hidden = users.length < 2;
   $("tm-user").innerHTML = users.map((u) => `<option value="${esc(u.user)}"${u.user === d.user ? " selected" : ""}>${esc(u.user || "(no name)")} · ${num(u.listens)}</option>`).join("");
   $("tm-user-names").innerHTML = users.map((u) => `<option value="${esc(u.user)}"></option>`).join("");
-  if (!$("tm-import-user").value && d.user) $("tm-import-user").value = d.user;
+  if (!$("tm-import-user").value) $("tm-import-user").value = d.user || (users.find((u) => u.user) || {}).user || ((d.playing || []).find((p) => p.user) || {}).user || "";
   const t = d.totals, all = d.all || {};
   $("tm-label").textContent = all.listens ? d.period.label : "Listening";
   $("tm-sub").textContent = !all.listens ? "No listens yet." :
@@ -1437,12 +1562,11 @@ function drawListening(d) {
       TM_MONTHS.map((m, i) => `<button type="button" data-month="${i + 1}" class="${d.months[i] ? "" : "empty"}" aria-pressed="${d.period.month === i + 1}" title="${num(d.months[i])} listens">${m}</button>`).join("");
     $("tm-months").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => tmGo(d.period.year, +b.dataset.month || null)));
   }
-  $("tm-now").hidden = !d.now;
-  if (d.now) $("tm-now-what").textContent = `${d.now.artist} – ${d.now.title}`;
   $("tm-empty").hidden = !!t.listens;
+  $("tm-empty").hidden = !!t.listens || tm.tab === "history";
   $("tm-empty").textContent = all.listens ? `Nothing was played in ${d.period.label}.` :
-    "Nothing here yet. Turn on Scrobble to Siansa Beats in the Siansa app (Settings › Scrobbling), or bring in a history below.";
-  $("tm-body").hidden = !t.listens;
+    "Nothing here yet. Turn on Scrobble to Siansa Beats in the Siansa app (Settings › Scrobbling), or bring in a history under History.";
+  tmTab(tm.tab);
   if (t.listens) {
     const tile = (k, v, s) => `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${v}</div><div class="s sub">${esc(s || "")}</div></div>`;
     $("tm-tiles").innerHTML = tile("Listens", num(t.listens), `${d.records.per_day} a day you listened`) +
@@ -1472,7 +1596,7 @@ function drawListening(d) {
     $("tm-new-card").hidden = !d.period.year || !(d.new_artists || []).length;
     $("tm-new").innerHTML = (d.new_artists || []).map((a) => `<span class="chip" title="${num(a.listens)} listens since">${esc(a.artist)}</span>`).join("");
   }
-  $("tm-recent-card").hidden = !(d.recent || []).length;
+  $("tm-recent-card").hidden = !(d.recent || []).length;  // History: always there, also in a month with nothing
   $("tm-recent").innerHTML = (d.recent || []).map((l) => `<li><span class="sub">${esc(new Date(l.at * 1000).toLocaleString(undefined, {dateStyle: "medium", timeStyle: "short"}))}</span> ${esc(l.artist)} – ${esc(l.title)}</li>`).join("");
   drawImport(d.importing);
   $("tm-remove-box").hidden = !users.some((u) => u.user === d.user && u.listens);

@@ -290,6 +290,11 @@ class LastFm:
                 params[f"duration[{i}]"] = str(r["duration"])
         return self.call(params, keys["secret"])
 
+    def love(self, keys, artist, title, loved=True):
+        """Loves a song on Last.fm (or takes the love back)."""
+        return self.call({"method": "track.love" if loved else "track.unlove", "api_key": keys["api_key"],
+                          "sk": keys["session"], "artist": artist, "track": title}, keys["secret"])
+
     def now_playing(self, keys, row):
         params = {"method": "track.updateNowPlaying", "api_key": keys["api_key"], "sk": keys["session"],
                   "artist": row["artist"], "track": row["title"]}
@@ -372,7 +377,9 @@ class Listens:
         for r in self.store._rows("SELECT user, source, COUNT(*) AS n FROM listens GROUP BY user, source"):
             sources.setdefault(r["user"], {})[r["source"] or "siansa"] = r["n"]
         relays = self._relays()
-        names = [r["user"] for r in rows] + [u for u in relays if u not in {r["user"] for r in rows}]
+        # Also who's playing now or sends on to Last.fm without a listen kept yet: the app's listener shows at once.
+        names = [r["user"] for r in rows]
+        names += [u for u in list(self.playing) + list(relays) if u not in names]
         by = {r["user"]: dict(r) for r in rows}
         return [{"user": u, "listens": 0, "first": None, "last": None, **by.get(u, {}), "sources": sources.get(u, {}),
                  "lastfm": self.lastfm_status(u)} for u in names]
@@ -400,6 +407,34 @@ class Listens:
             self.lastfm.now_playing(keys, playing)
         except LastFmError as e:
             _log.debug("Last.fm wasn't told what %s is playing: %s", user or "the listener", e)
+
+    def all_playing(self):
+        """``[{"user", "artist", "title", …}]``: what's playing now for each listener."""
+        return [dict(self.now_playing(u), user=u) for u in list(self.playing) if self.now_playing(u)]
+
+    def rename(self, old, new):
+        """Makes ``old``'s listens ``new``'s (a history brought in without a name, then the app's listens under the
+        music server's user name: the owner, 11 Nov). A listen both have is kept once; sending on to Last.fm moves
+        too unless ``new`` has its own. How many listens moved."""
+        old, new = str(old or "").strip(), str(new or "").strip()
+        if old == new:
+            return 0
+        with self.store._write():
+            moved = self.store.db.execute("UPDATE OR IGNORE listens SET user=? WHERE user=?", (new, old)).rowcount
+            self.store.db.execute("DELETE FROM listens WHERE user=?", (old,))  # the ones new had already
+        relays = dict(self._relays())
+        if old in relays:
+            mine = relays.pop(old)
+            relays.setdefault(new, mine)
+            self.store.set_setting("lastfm_relay", relays)
+        since = (relays.get(new) or {}).get("since")
+        if since:  # the app's listens since sending on was connected (under the other name) go on now
+            with self.store._write():
+                self.store.db.execute("UPDATE listens SET relayed=0 WHERE user=? AND source='siansa' AND relayed IS NULL "
+                                      "AND at>=?", (new, since))
+        self.changes += 1
+        self.store.event(f"The listens of {old or 'no name'} are {new or 'no name'}'s now ({moved} moved)")
+        return moved
 
     def now_playing(self, user):
         """What's playing for ``user``, while it can still be: said within the song's length (10 minutes without)."""
@@ -642,6 +677,24 @@ class Listens:
         self.relay_state.pop(user, None)
         self.store.event(f"Listens{' of ' + user if user else ''} are sent on to Last.fm ({name}) from now on")
         return self.lastfm_status(user)
+
+    def love(self, user, artist, title, loved=True):
+        """Passes a heart from the app on to ``user``'s Last.fm, in the background; False when they don't send on."""
+        keys = self._keys(user)
+        artist, title = str(artist or "").strip(), str(title or "").strip()
+        if not keys or not all(keys.values()) or not artist or not title:
+            return False
+
+        def send():
+            try:
+                self.lastfm.love(keys, artist, title, loved)
+                _log.info("%s %s – %s on Last.fm for %s", "Loved" if loved else "Unloved", artist, title, user or "the listener")
+            except LastFmError as e:
+                self.relay_state[user] = {"error": f"A heart wasn't passed on: {e}", "at": self.now()}
+                _log.warning("Last.fm didn't take a heart for %s: %s", user or "the listener", e)
+
+        threading.Thread(target=send, name="lastfm-love", daemon=True).start()
+        return True
 
     def disconnect_lastfm(self, user):
         saved = dict(self._relays())

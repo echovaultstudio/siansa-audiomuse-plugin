@@ -10,6 +10,7 @@ that would break that is v2, next to v1. The full description is ``openapi.json`
     GET  /api/v1/genre/about?name=     a short description of a genre, from Wikipedia: {"name", "about"}
     POST /api/v1/listens               finished listens of a listener: {"user", "listens": [{"id", "at", "artist", …}]}
     POST /api/v1/listens/now           what's playing now: {"user", "artist", "title", "album", "duration"}
+    POST /api/v1/loves                 a heart given or taken back: {"user", "artist", "title", "loved"}, on to Last.fm
     GET  /api/v1/listens/top?user=&kind=&from=&to=&limit=   a listener's most listened songs, artists or albums
     GET  /api/v1/similar/albums?track_id=          albums that sound like that song's album (asked of AudioMuse-AI)
     GET  /api/v1/similar/artists?track_id=|artist= artists that sound like that one (asked of AudioMuse-AI)
@@ -194,6 +195,11 @@ def post(handler, path, body, server=None):
             return handler._error(HTTPStatus.BAD_REQUEST, f"at most {listens_module.MOST_AT_ONCE} listens at a time") or True
         answer = handler.app.listens.add(body.get("user"), rows, "siansa", server or handler.app.servers.default_id)
         return handler._json(answer) or True
+    if path == "/api/v1/loves":  # a heart from the app: on to Last.fm for a listener who sends listens on
+        if not str(body.get("artist") or "").strip() or not str(body.get("title") or "").strip():
+            return handler._error(HTTPStatus.BAD_REQUEST, "artist and title needed") or True
+        sent = handler.app.listens.love(body.get("user"), body.get("artist"), body.get("title"), body.get("loved", True) is not False)
+        return handler._json({"passed_on": sent}) or True
     if path == "/api/v1/listens/now":  # what's playing now
         if not handler.app.listens.set_playing(body.get("user"), body):
             return handler._error(HTTPStatus.BAD_REQUEST, "artist and title needed") or True
