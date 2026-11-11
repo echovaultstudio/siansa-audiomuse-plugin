@@ -278,6 +278,38 @@ class PullTest(Service):
             time.sleep(0.05)
         self.fail("the pull didn't finish")
 
+    def test_every_music_server_of_audiomuse_is_taken_over_under_its_one_login(self):
+        # The owner's: his own and his kids' are the same Navidrome under two users, two servers in AudioMuse-AI. Its
+        # export gives the default server's songs alone unless a server is named (0.28 heard the kids' songs itself).
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.fake.sync = {s["id"]: track(s) for s in CATALOG if s["id"] != "bad"}
+        self.fake.am_servers = [
+            {"server_id": "srv-kids", "name": "Kids", "server_type": "navidrome", "is_default": False, "sees": {"t96w", "t140"}},
+            {"server_id": "srv-main", "name": "Navidrome", "server_type": "navidrome", "is_default": True, "sees": {"t140", "t122"}},
+        ]
+        state = self.pulled()
+        self.assertEqual(state["sound"], 3)
+        pull = state["pull"]
+        self.assertEqual({k: pull[k] for k in ("total", "kept", "unknown", "same")}, {"total": 4, "kept": 3, "unknown": 0, "same": 1})
+        self.assertEqual([(s["name"], s["total"], s["kept"], s["same"]) for s in pull["servers"]],
+                         [("Navidrome", 2, 2, 0), ("Kids", 2, 1, 1)])  # its default first; a shared song once
+        asked = [q.get("server") for p, q in self.fake.requests if p == "/api/sync"]
+        self.assertEqual(set(asked), {"srv-main", "srv-kids"})
+        # Again: nothing new on either.
+        again = self.pulled()["pull"]
+        self.assertEqual((again["kept"], again["same"]), (0, 4))
+
+    def test_an_audiomuse_without_a_list_of_servers_is_asked_as_before(self):
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.fake.sync = {s["id"]: track(s) for s in CATALOG if s["id"] != "bad"}
+        pull = self.pulled()["pull"]
+        self.assertEqual((pull["kept"], [s["name"] for s in pull["servers"]]), (3, [None]))
+        self.assertFalse([q for p, q in self.fake.requests if p == "/api/sync" and "server" in q])
+
     def test_audiomuses_analysis_is_taken_over_and_answers_the_app(self):
         self.start()
         self.call("/api/libraries", "POST", {"ids": ["1"]})

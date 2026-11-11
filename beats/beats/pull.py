@@ -6,9 +6,12 @@ AudioMuse-AI has a read-only export for apps (``/api/sync``). Its index says, fo
 server's id and a fingerprint of the analysis; only songs that are new here, or whose fingerprint moved, are asked for
 in full. So the first pull takes a few minutes for a big library and every later one seconds.
 
-A song is matched by its id on the music server: AudioMuse-AI gives the ids of its default server, and this service
-knows every song by the ids of each of its servers. A song this service doesn't have (a library not chosen here) is
-left out and counted.
+A song is matched by its id on the music server, and this service knows every song by the ids of each of its servers.
+AudioMuse-AI may analyse several music servers under its one login (0.29; the owner, 11 Nov: his own and his kids' are
+the same Navidrome under two users, added to AudioMuse-AI as two servers). Asked without a server, its export gives only
+the songs its default server's user can see, so each of its servers is asked in turn, with that server's own ids; the
+server here of the same name is preferred when two servers here use the same id. A song this service doesn't have (a
+library not chosen here) is left out and counted.
 """
 
 import base64
@@ -91,30 +94,50 @@ class Puller:
 
     def pull(self, everything=False):
         """One pull, in this thread: ``{"total" (AudioMuse-AI's songs), "kept" (taken over now), "unknown" (not
-        here), "same" (already here, unchanged), "no_vector"}``."""
+        here), "same" (already here, unchanged), "no_vector", "servers"}``; ``servers``: the same numbers for each of
+        AudioMuse-AI's music servers, by its name (one, unnamed, when it has no list of them)."""
         have = {} if everything else self.store.sound_prints()
+        audiomuse = self.audiomuse()
+        theirs = audiomuse.servers() or [{"id": None, "name": None}]
+        here = {str(s.get("name") or "").strip().lower(): s["id"] for s in self.store.setting("servers") or []
+                if isinstance(s, dict) and s.get("id")}
+        sums = {"total": 0, "kept": 0, "unknown": 0, "same": 0, "no_vector": 0}
+        servers, taken = [], set()
+        for their in theirs:
+            prefer = here.get(str(their["name"] or "").strip().lower())
+            one = self._pull_server(audiomuse, their["id"], prefer, have, taken)
+            servers.append({"name": their["name"], **one})
+            for k in sums:
+                sums[k] += one[k]
+            _log.info("Pulled from AudioMuse-AI%s: %d of its %d songs taken over, %d unchanged, %d not here, "
+                      "%d without a vector", f"'s {their['name']}" if their["name"] else "", one["kept"], one["total"],
+                      one["same"], one["unknown"], one["no_vector"])
+        return {**sums, "servers": servers}
+
+    def _pull_server(self, audiomuse, server, prefer, have, taken):
+        """One of AudioMuse-AI's music servers (``server``: its id there; ``None``: its default). ``taken``: the songs
+        here taken over from a server before it in this pull, which aren't asked for twice."""
         wanted, total, unknown, same = [], 0, 0, 0
-        for tracks, total in self.audiomuse().sync_index():
-            here = self.store.resolve([t["id"] for t in tracks if t.get("id")])
+        for tracks, total in audiomuse.sync_index(server):
+            known = self.store.resolve([t["id"] for t in tracks if t.get("id")], prefer)
             for t in tracks:
-                song_id = here.get(t.get("id"))
+                song_id = known.get(t.get("id"))
                 if song_id is None:
                     unknown += 1
-                elif have.get(song_id) == t.get("fp") and t.get("fp"):
+                elif song_id in taken or (have.get(song_id) == t.get("fp") and t.get("fp")):
                     same += 1
                 else:
                     wanted.append((t["id"], song_id))
+                    taken.add(song_id)
             self.state.update(total=total, unknown=unknown)
         kept = no_vector = 0
         self.state.update(total=len(wanted), done=0)
         for start in range(0, len(wanted), BATCH):
             chunk = dict(wanted[start:start + BATCH])
-            rows = [row_of(chunk[t["id"]], t) for t in self.audiomuse().sync_songs(list(chunk)) if t.get("id") in chunk]
+            rows = [row_of(chunk[t["id"]], t) for t in audiomuse.sync_songs(list(chunk), server) if t.get("id") in chunk]
             no_vector += sum(1 for r in rows if r is None)
             rows = [r for r in rows if r is not None]
             if rows:
                 kept += self.store.save_sound(rows)
             self.state.update(done=min(start + BATCH, len(wanted)), kept=kept)
-        _log.info("Pulled from AudioMuse-AI: %d of its %d songs taken over, %d unchanged, %d not here, %d without a vector",
-                  kept, total, same, unknown, no_vector)
         return {"total": total, "kept": kept, "unknown": unknown, "same": same, "no_vector": no_vector}

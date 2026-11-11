@@ -187,6 +187,13 @@ class Kept:
             self._done.wait(wait)
 
 
+def _remove(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 class App:
     """Everything the handler needs, so the tests can make one with stand-ins."""
 
@@ -231,6 +238,10 @@ class App:
 
         self.sound = Sound(self.store)
         self.puller = Puller(self.store, lambda: self.audiomuse)
+        # What was listened to (0.29): from the app as it happens, from exports, and on to Last.fm.
+        from .listens import Listens
+
+        self.listens = Listens(self.store, self.vault)
 
 
     PULL_EVERY = 6 * 3600  # AudioMuse-AI's new songs are taken over this often
@@ -248,6 +259,29 @@ class App:
                     self.words.unload_if_idle()
 
         threading.Thread(target=loop, name="sound-pull-timer", daemon=True).start()
+
+    RELAY_EVERY = 30  # seconds between tries to send waiting listens on to Last.fm
+
+    def relay_now_and_then(self):
+        """Sends listens on to Last.fm in the background, for the listeners who connected it."""
+        def loop():
+            while True:
+                time.sleep(self.RELAY_EVERY)
+                try:
+                    self.listens.relay()
+                except Exception:  # nothing here may take the service down
+                    _log.exception("Sending listens on to Last.fm went wrong")
+
+        threading.Thread(target=loop, name="lastfm-relay", daemon=True).start()
+
+    def listening(self, user=None, year=None, month=None, tz=None):
+        """The listening page: the listeners, and one's numbers for a month, a year or all time (the first listener's
+        without one)."""
+        users = self.listens.users()
+        if user is None:
+            user = users[0]["user"] if users else ""
+        return {"users": users, "importing": dict(self.listens.importing),
+                **self.listens.summary(user, year, month, tz)}
 
     def sound_status(self, server=None):
         """How much of ``server``'s music has its sound here, and how the pull from AudioMuse-AI is going."""
@@ -841,12 +875,51 @@ class Handler(BaseHTTPRequestHandler):
     def _error(self, status, message):
         self._json({"error": message}, status)
 
+    IMPORT_MOST = 2 * 1024 ** 3  # bytes: no export of a listening history comes near
+
+    def _import_listens(self):
+        """Takes an export file as the request's body (``?user=`` whose it is, ``?name=`` its name) and brings it in
+        in the background."""
+        import tempfile
+
+        app, query = self.app, self._query()
+        length = int(self.headers.get("Content-Length") or 0)
+        if not length:
+            return self._error(HTTPStatus.BAD_REQUEST, "Choose a file: an export of Koito, Last.fm or ListenBrainz")
+        if length > self.IMPORT_MOST:
+            return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "That file is too big")
+        if app.listens.importing.get("running"):
+            return self._error(HTTPStatus.CONFLICT, "A file is being brought in already")
+        folder = os.path.join(app.config.data_dir, "tmp")
+        os.makedirs(folder, exist_ok=True)
+        handle, path = tempfile.mkstemp(prefix="listens-", dir=folder)
+        try:
+            with os.fdopen(handle, "wb") as out:
+                left = length
+                while left:
+                    piece = self.rfile.read(min(left, 1 << 20))
+                    if not piece:
+                        break
+                    out.write(piece)
+                    left -= len(piece)
+            if left:
+                raise OSError("the file didn't arrive whole")
+        except OSError as e:
+            _remove(path)
+            return self._error(HTTPStatus.BAD_REQUEST, f"The file couldn't be taken: {e}")
+        user = (query.get("user") or [""])[0].strip()
+        name = (query.get("name") or ["the file"])[0][:120]
+        if not app.listens.start_import(path, user, name, done=lambda: _remove(path)):
+            _remove(path)
+            return self._error(HTTPStatus.CONFLICT, "A file is being brought in already")
+        return self._json({"started": True, "importing": dict(app.listens.importing)})
+
     def _body(self):
         length = int(self.headers.get("Content-Length") or 0)
         if not length:
             return {}
         try:
-            return json.loads(self.rfile.read(min(length, 65536)) or b"{}")
+            return json.loads(self.rfile.read(min(length, 1 << 20)) or b"{}")
         except ValueError:
             return {}
 
@@ -898,6 +971,17 @@ class Handler(BaseHTTPRequestHandler):
                 return None
             if path.startswith("/api/v1/") and api_v1.get(self, path, query, server):
                 return None
+            if path == "/api/listens":
+                def number(name):
+                    value = (query.get(name) or [""])[0]
+                    return int(value) if value.isdigit() and int(value) else None
+                user = (query.get("user") or [None])[0]
+                month = number("month")
+                if month is not None and not 1 <= month <= 12:
+                    return self._error(HTTPStatus.BAD_REQUEST, "month is 1 to 12")
+                return self._json(app.listening(user, number("year"), month, (query.get("tz") or [None])[0]))
+            if path == "/api/listens/import":
+                return self._json(dict(app.listens.importing))
             if path == "/api/genres":
                 return self._json({"styles": app.styles_status(server), "genres": app.genre_list(server),
                                    "about": app.about.status()})
@@ -989,6 +1073,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guard():
             return
         path = self.path.split("?", 1)[0]
+        if path == "/api/listens/import":  # a file, as it is: it can be far bigger than any other request
+            return self._import_listens()
         app, body = self.app, self._body()
         try:
             if path.startswith("/api/servers"):
@@ -1007,6 +1093,25 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error(HTTPStatus.BAD_REQUEST, "Connect AudioMuse-AI first (Setup › AudioMuse-AI)")
                 started = app.puller.start(bool(body.get("everything")))
                 return self._json({"started": started, "pull": dict(app.puller.state)})
+            if path == "/api/listens/lastfm":  # on to Last.fm, with the listener's own API account
+                from .listens import LastFmError
+                user = str(body.get("user") or "")
+                try:
+                    if body.get("disconnect"):
+                        app.listens.disconnect_lastfm(user)
+                        return self._json(app.listens.lastfm_status(user))
+                    return self._json(app.listens.connect_lastfm(user, body.get("api_key"), body.get("secret"),
+                                                                 body.get("name"), body.get("password")))
+                except ValueError as e:
+                    return self._error(HTTPStatus.BAD_REQUEST, str(e))
+                except LastFmError as e:
+                    return self._error(HTTPStatus.BAD_GATEWAY, str(e))
+            if path == "/api/listens/remove":  # a listener's listens from one source (a file brought in by mistake)
+                if "user" not in body or body.get("source") not in ("koito", "lastfm", "listenbrainz", "siansa", "all"):
+                    return self._error(HTTPStatus.BAD_REQUEST, "user and source needed: koito, lastfm, listenbrainz, siansa or all")
+                gone = app.listens.remove(str(body["user"]), None if body["source"] == "all" else body["source"])
+                app.store.event(f"Removed {gone} listens of {body['user'] or 'the listener'} ({body['source']})")
+                return self._json({"removed": gone})
             if path == "/api/access/password":
                 try:
                     app.set_password(body.get("password"))
@@ -1243,6 +1348,7 @@ def main():
     app.worker.start()
     app.about.start()
     app.pull_now_and_then()
+    app.relay_now_and_then()
     app.store.event(f"Started: model {config.model}, device {config.device}"
                     f"{' (half precision on a GPU)' if config.float16 else ''}")
     if not app.servers.all():

@@ -32,6 +32,7 @@ header { position: sticky; top: 0; z-index: 6; background: color-mix(in srgb, va
 h1 { font-size: 1.15rem; margin: 0; letter-spacing: -0.01em; }
 h1 b { color: var(--amber); }
 h1 a { color: inherit; text-decoration: none; }
+h1 .version { font-size: 0.72rem; font-weight: 500; color: var(--faint); margin-left: 6px; letter-spacing: 0; }
 h2 { font-size: 1.35rem; margin: 0 0 4px; letter-spacing: -0.01em; }
 h3 { font-size: 1rem; margin: 0 0 12px; }
 h4 { font-size: 0.82rem; margin: 18px 0 8px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.05em; }
@@ -98,6 +99,42 @@ main > section.on { display: grid; gap: 16px; }
 @media (prefers-reduced-motion: reduce) { .nav, .scrim { transition: none; } }
 
 .card { background: var(--raised); border: 1px solid var(--line); border-radius: 14px; padding: 16px; min-width: 0; }
+/* Listening: the time machine. A period in big letters, the years and months to travel to, then its numbers. */
+.tm-hero { border-radius: 18px; padding: 22px 20px 18px; border: 1px solid var(--line);
+  background: radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--amber) 22%, transparent), transparent 60%), var(--raised); min-width: 0; }
+.tm-kicker { font-size: 0.74rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--amber-text); font-weight: 700; }
+.tm-hero h2 { font-size: clamp(2rem, 7vw, 3.4rem); line-height: 1.05; letter-spacing: -0.03em; margin: 6px 0 4px; }
+.tm-hero .sub { font-size: 0.95rem; color: var(--muted); }
+.tm-who { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
+.tm-strip { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 6px; margin-top: 12px; scrollbar-width: thin; }
+.tm-strip button { flex: 0 0 auto; padding: 6px 12px; font-variant-numeric: tabular-nums; }
+.tm-strip button[aria-pressed=true] { background: var(--amber); color: var(--on-amber); border-color: var(--amber); font-weight: 700; }
+.tm-strip button.empty { opacity: 0.45; }
+.tm-now { display: flex; gap: 12px; align-items: center; }
+.tm-now .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--amber); flex: 0 0 auto; animation: tm-pulse 1.6s ease-in-out infinite; }
+@keyframes tm-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .tm-now .dot { animation: none; } }
+.tm-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.tm-chart { display: flex; align-items: flex-end; gap: 3px; height: 150px; }
+.tm-chart .col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px;
+  border: 0; background: none; padding: 0; border-radius: 6px; color: var(--faint); font-size: 0.68rem; cursor: default; }
+.tm-chart button.col { cursor: pointer; }
+.tm-chart .col i { display: block; width: 100%; min-height: 2px; border-radius: 4px 4px 1px 1px; background: var(--amber); }
+.tm-chart .col.none i { background: var(--line-strong); }
+.tm-chart button.col:hover i { filter: brightness(1.15); }
+.tm-chart .col span { white-space: nowrap; overflow: hidden; max-width: 100%; }
+.tm-chart.small { height: 90px; }
+.tm-rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: rank; }
+.tm-rank li { counter-increment: rank; display: grid; grid-template-columns: 2ch minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 8px;
+  border-radius: 8px; position: relative; isolation: isolate; }
+.tm-rank li::before { content: counter(rank); color: var(--faint); font-variant-numeric: tabular-nums; text-align: right; font-size: 0.82rem; }
+.tm-rank li::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--w, 0%); background: color-mix(in srgb, var(--amber) 16%, transparent); border-radius: 8px; z-index: -1; }
+.tm-rank .t { min-width: 0; } .tm-rank .t b, .tm-rank .t span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tm-rank .t b { font-weight: 600; } .tm-rank .t span { font-size: 0.8rem; color: var(--faint); }
+.tm-rank .n { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.86rem; }
+.tm-facts { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; margin: 0; }
+.tm-facts dt { color: var(--muted); } .tm-facts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.tm-empty { text-align: center; padding: 28px 16px; color: var(--muted); }
 .card-head { display: flex; align-items: baseline; gap: 12px; } .card-head .more { margin-left: auto; font-size: 0.88rem; }
 .kicker { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); margin-bottom: 2px; }
 .now { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 24px; align-items: center; }
@@ -245,7 +282,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 <header>
   <div class="bar">
     <button class="menu-button" id="menu" aria-label="Menu" aria-controls="nav" aria-expanded="false">☰</button>
-    <h1><a href="#overview" id="home" title="Overview"><b>Siansa</b> Beats</a></h1>
+    <h1><a href="#overview" id="home" title="Overview"><b>Siansa</b> Beats</a><span class="version" id="header-version" title="This Siansa Beats' version"></span></h1>
     <span class="page-name" id="page-name"></span>
     <div class="status">
       <button class="status-button" id="status-button" aria-haspopup="true" aria-expanded="false" aria-controls="status-panel">
@@ -271,6 +308,10 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       <a href="#overview" data-view="overview">Overview</a>
       <a href="#libraries" data-view="libraries">Libraries</a>
       <a href="#songs" data-view="songs">Songs</a>
+    </div>
+    <div class="group">
+      <div class="group-name">Your music</div>
+      <a href="#listening" data-view="listening">Listening</a>
     </div>
     <div class="group">
       <div class="group-name">For the Siansa app</div>
@@ -484,6 +525,66 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
     </section>
 
     <!-- Activity -->
+    <!-- Listening: the history, a month or a year at a time -->
+    <section data-view="listening">
+      <div class="tm-hero">
+        <div class="tm-kicker">Time machine</div>
+        <h2 id="tm-label">Listening</h2>
+        <p class="sub" id="tm-sub" role="status">Loading…</p>
+        <div class="tm-who" id="tm-who" hidden>
+          <label for="tm-user" class="sub">Listener</label>
+          <select id="tm-user" title="Whose listening is shown"></select>
+        </div>
+        <div class="tm-strip" id="tm-years" role="group" aria-label="Year"></div>
+        <div class="tm-strip" id="tm-months" role="group" aria-label="Month" hidden></div>
+      </div>
+      <div class="card tm-now" id="tm-now" hidden><span class="dot" aria-hidden="true"></span><div><div class="kicker">Playing now</div><div id="tm-now-what"></div></div></div>
+      <div class="card tm-empty" id="tm-empty" hidden></div>
+      <div id="tm-body" hidden style="display: grid; gap: 16px;">
+        <div class="tiles" id="tm-tiles"></div>
+        <div class="card"><h3 id="tm-chart-title">When</h3><div class="tm-chart" id="tm-chart"></div></div>
+        <div class="tm-cols">
+          <div class="card"><h3>Top songs</h3><ol class="tm-rank" id="tm-songs"></ol></div>
+          <div class="card"><h3>Top artists</h3><ol class="tm-rank" id="tm-artists"></ol></div>
+          <div class="card"><h3>Top albums</h3><ol class="tm-rank" id="tm-albums"></ol></div>
+        </div>
+        <div class="tm-cols">
+          <div class="card"><h3>Around the clock</h3><div class="tm-chart small" id="tm-hours"></div><p class="sub" id="tm-hours-note"></p></div>
+          <div class="card"><h3>Through the week</h3><div class="tm-chart small" id="tm-weekdays"></div><p class="sub" id="tm-weekdays-note"></p></div>
+          <div class="card"><h3>Records</h3><dl class="tm-facts" id="tm-records"></dl></div>
+        </div>
+        <div class="card" id="tm-new-card"><h3>Heard for the first time</h3><div id="tm-new"></div></div>
+      </div>
+      <div class="card" id="tm-recent-card" hidden><h3>Last listens</h3><ul class="events" id="tm-recent"></ul></div>
+      <div class="tm-cols">
+        <div class="card">
+          <h3>Bring in a history</h3>
+          <p class="sub">An export of Koito, of Last.fm (the JSON or CSV of an export tool) or of ListenBrainz. A listen that's here already is kept once, so a file can be brought in again.</p>
+          <form class="form" id="tm-import">
+            <label class="wide">The file<input type="file" id="tm-file" accept=".json,.jsonl,.csv,.txt,application/json,text/csv" required></label>
+            <label class="wide">Whose listens they are<input type="text" id="tm-import-user" autocomplete="off" placeholder="The name the app scrobbles as (your music server's user name)" list="tm-user-names"></label>
+            <datalist id="tm-user-names"></datalist>
+            <div class="controls"><button type="submit" class="primary" id="tm-import-go">Bring in</button></div>
+          </form>
+          <p class="sub" id="tm-import-state" role="status"></p>
+          <div class="controls" id="tm-remove-box" hidden><button type="button" id="tm-remove">Remove listens…</button></div>
+        </div>
+        <div class="card">
+          <h3>On to Last.fm</h3>
+          <p class="sub" id="tm-lastfm-state" role="status"></p>
+          <form class="form" id="tm-lastfm">
+            <label>API key<input type="text" id="tm-lf-key" autocomplete="off" required></label>
+            <label>Shared secret<input type="password" id="tm-lf-secret" autocomplete="off" required></label>
+            <label>Last.fm user name<input type="text" id="tm-lf-name" autocomplete="off" required></label>
+            <label>Password<input type="password" id="tm-lf-password" autocomplete="off" required></label>
+            <div class="controls"><button type="submit" class="primary">Connect</button></div>
+            <p class="sub wide">Your own Last.fm API account (last.fm/api/account/create). The key, secret and sign-in are kept encrypted; the password isn't kept. New listens of this listener are then sent on; turn the app's own Last.fm off, so they aren't sent twice.</p>
+          </form>
+          <div class="controls" id="tm-lf-off-box" hidden><button type="button" id="tm-lf-off">Disconnect</button></div>
+        </div>
+      </div>
+    </section>
+
     <section data-view="activity">
       <div class="page-head"><h2>Activity</h2><p class="sub">What Siansa Beats did, newest first.</p></div>
       <div class="card"><ul class="events tall" id="events"></ul></div>
@@ -1237,6 +1338,7 @@ function drawStatus(s) {
   $("status-button").title = rows.map((r) => `${r[1]}: ${r[2]}`).join("\n");
   $("status-rows").innerHTML = rows.map(([st, name, detail]) => `<div class="status-row"><span class="dot ${st}"></span><span class="name">${esc(name)}</span><span class="detail">${esc(detail)}</span></div>`).join("");
   $("status-version").textContent = `Siansa Beats ${s.version}`;
+  $("header-version").textContent = s.version || "";
 }
 function statusMenu(open) {
   $("status-panel").hidden = !open;
@@ -1262,7 +1364,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document
 // ---- pages ----
 // One page at a time, chosen in the side menu (tabs on a phone) and kept in the address (#songs, #song=<id>), so Back
 // and a bookmark work.
-const VIEWS = ["overview", "libraries", "songs", "loudness", "genres", "similar", "blends", "activity", "log", "setup"];
+const VIEWS = ["overview", "libraries", "songs", "listening", "loudness", "genres", "similar", "blends", "activity", "log", "setup"];
 let currentView = null;
 function showView(view, keepHash) {
   if (!VIEWS.includes(view)) view = "overview";
@@ -1278,6 +1380,7 @@ function showView(view, keepHash) {
   if (view === "log") refreshLog(true);
   if (view === "loudness") refreshLoudness();
   if (view === "similar") drawSimilarStatus();
+  if (view === "listening") refreshListening();
 }
 function route() {
   const m = location.hash.match(/^#song=(.+)$/);
@@ -1285,6 +1388,159 @@ function route() {
   showView(location.hash.slice(1) || "overview", true);
 }
 window.addEventListener("hashchange", () => { route(); window.scrollTo({top: 0}); });
+
+// ---- listening: the time machine ----
+// A listener's history a month or a year at a time (or all of it). The days and hours are this browser's clock's.
+const tm = {user: null, year: null, month: null, data: null, timer: null};
+const TM_ZONE = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { return ""; } })();
+const TM_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function tmHours(seconds) { const h = seconds / 3600; return h >= 100 ? num(Math.round(h)) : h >= 10 ? h.toFixed(0) : h.toFixed(1); }
+function tmBars(id, points, pick) {
+  const most = Math.max(1, ...points.map((p) => p.listens));
+  $(id).innerHTML = points.map((p, i) => {
+    const tag = pick && p.listens ? "button" : "div";
+    return `<${tag} class="col${p.listens ? "" : " none"}" ${tag === "button" ? `type="button" data-i="${i}"` : ""} title="${esc(p.title || p.label)}: ${num(p.listens)} listens">` +
+      `<i style="height:${p.listens ? Math.max(3, Math.round(p.listens / most * 100)) : 0}%"></i><span>${esc(p.short ?? p.label)}</span></${tag}>`;
+  }).join("");
+  if (pick) $(id).querySelectorAll("button.col").forEach((b) => b.addEventListener("click", () => pick(points[+b.dataset.i])));
+}
+function tmRank(id, rows, title, under) {
+  const most = Math.max(1, ...rows.map((r) => r.listens));
+  $(id).innerHTML = rows.map((r) => `<li style="--w:${Math.round(r.listens / most * 100)}%"><div class="t"><b>${esc(title(r))}</b>` +
+    `${under && under(r) ? `<span>${esc(under(r))}</span>` : ""}</div><span class="n">${num(r.listens)}</span></li>`).join("") ||
+    '<li style="display:block" class="sub">Nothing in this time.</li>';
+}
+function tmGo(year, month) { tm.year = year; tm.month = month; refreshListening(); }
+function drawListening(d) {
+  tm.data = d;
+  tm.user = d.user;
+  const users = d.users || [];
+  $("tm-who").hidden = users.length < 2;
+  $("tm-user").innerHTML = users.map((u) => `<option value="${esc(u.user)}"${u.user === d.user ? " selected" : ""}>${esc(u.user || "(no name)")} · ${num(u.listens)}</option>`).join("");
+  $("tm-user-names").innerHTML = users.map((u) => `<option value="${esc(u.user)}"></option>`).join("");
+  if (!$("tm-import-user").value && d.user) $("tm-import-user").value = d.user;
+  const t = d.totals, all = d.all || {};
+  $("tm-label").textContent = all.listens ? d.period.label : "Listening";
+  $("tm-sub").textContent = !all.listens ? "No listens yet." :
+    `${num(t.listens)} listens · ${tmHours(t.seconds)} hours` + (d.period.year ? "" : ` · since ${new Date(all.first * 1000).toLocaleDateString(undefined, {year: "numeric", month: "long"})}`);
+  // The years to travel to, then the months of the chosen one.
+  $("tm-years").hidden = !all.listens;
+  $("tm-years").innerHTML = `<button type="button" data-year="" aria-pressed="${!d.period.year}">All time</button>` +
+    (d.years || []).slice().reverse().map((y) => `<button type="button" data-year="${y.year}" aria-pressed="${d.period.year === y.year}" title="${num(y.listens)} listens">${y.year}</button>`).join("");
+  $("tm-years").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => tmGo(+b.dataset.year || null, null)));
+  $("tm-months").hidden = !d.period.year;
+  if (d.period.year) {
+    $("tm-months").innerHTML = `<button type="button" data-month="" aria-pressed="${!d.period.month}">Whole year</button>` +
+      TM_MONTHS.map((m, i) => `<button type="button" data-month="${i + 1}" class="${d.months[i] ? "" : "empty"}" aria-pressed="${d.period.month === i + 1}" title="${num(d.months[i])} listens">${m}</button>`).join("");
+    $("tm-months").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => tmGo(d.period.year, +b.dataset.month || null)));
+  }
+  $("tm-now").hidden = !d.now;
+  if (d.now) $("tm-now-what").textContent = `${d.now.artist} – ${d.now.title}`;
+  $("tm-empty").hidden = !!t.listens;
+  $("tm-empty").textContent = all.listens ? `Nothing was played in ${d.period.label}.` :
+    "Nothing here yet. Turn on Scrobble to Siansa Beats in the Siansa app (Settings › Scrobbling), or bring in a history below.";
+  $("tm-body").hidden = !t.listens;
+  if (t.listens) {
+    const tile = (k, v, s) => `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${v}</div><div class="s sub">${esc(s || "")}</div></div>`;
+    $("tm-tiles").innerHTML = tile("Listens", num(t.listens), `${d.records.per_day} a day you listened`) +
+      tile("Hours", tmHours(t.seconds), t.guessed ? `${num(t.guessed)} songs' lengths aren't known: counted as 3½ min` : "of music") +
+      tile("Artists", num(t.artists), d.period.year ? `${num(t.new_artists)} for the first time` : "") +
+      tile("Songs", num(t.songs), "different ones") + tile("Albums", num(t.albums), "") + tile("Days", num(t.days), "with music");
+    const unit = d.chart.unit;
+    $("tm-chart-title").textContent = unit === "year" ? "Year by year" : unit === "month" ? "Month by month" : "Day by day";
+    tmBars("tm-chart", d.chart.points.map((p) => ({...p, short: unit === "day" && d.chart.points.length > 16 && +p.label % 5 && +p.label !== 1 ? "" : p.label})),
+      unit === "year" ? (p) => tmGo(p.year, null) : unit === "month" ? (p) => tmGo(d.period.year, p.month) : null);
+    tmRank("tm-songs", d.top.songs, (r) => r.title, (r) => r.artist);
+    tmRank("tm-artists", d.top.artists, (r) => r.artist);
+    tmRank("tm-albums", d.top.albums, (r) => r.album, (r) => r.artist);
+    tmBars("tm-hours", d.hours.map((n, h) => ({label: `${String(h).padStart(2, "0")}:00`, short: h % 6 ? "" : String(h), listens: n})));
+    const peak = d.hours.indexOf(Math.max(...d.hours));
+    $("tm-hours-note").textContent = `Most around ${String(peak).padStart(2, "0")}:00.`;
+    tmBars("tm-weekdays", d.weekdays.map((w) => ({label: w.day, listens: w.listens})));
+    const day = d.weekdays.slice().sort((a, b) => b.listens - a.listens)[0];
+    $("tm-weekdays-note").textContent = `Most on ${({Mon: "Mondays", Tue: "Tuesdays", Wed: "Wednesdays", Thu: "Thursdays", Fri: "Fridays", Sat: "Saturdays", Sun: "Sundays"})[day.day]}.`;
+    const r = d.records, when = (iso) => new Date(iso + "T12:00:00").toLocaleDateString(undefined, {day: "numeric", month: "long", year: "numeric"});
+    $("tm-records").innerHTML = [
+      ["Busiest day", r.busiest_day ? `${when(r.busiest_day.date)} · ${num(r.busiest_day.listens)}` : "–"],
+      ["Longest run of days", r.streak ? `${num(r.streak)} in a row` : "–"],
+      ["First listen", r.first ? `${r.first.artist} – ${r.first.title}` : "–"],
+      ["", r.first ? new Date(r.first.at * 1000).toLocaleString(undefined, {dateStyle: "medium", timeStyle: "short"}) : ""],
+    ].map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+    $("tm-new-card").hidden = !d.period.year || !(d.new_artists || []).length;
+    $("tm-new").innerHTML = (d.new_artists || []).map((a) => `<span class="chip" title="${num(a.listens)} listens since">${esc(a.artist)}</span>`).join("");
+  }
+  $("tm-recent-card").hidden = !(d.recent || []).length;
+  $("tm-recent").innerHTML = (d.recent || []).map((l) => `<li><span class="sub">${esc(new Date(l.at * 1000).toLocaleString(undefined, {dateStyle: "medium", timeStyle: "short"}))}</span> ${esc(l.artist)} – ${esc(l.title)}</li>`).join("");
+  drawImport(d.importing);
+  $("tm-remove-box").hidden = !users.some((u) => u.user === d.user && u.listens);
+  const lf = (users.find((u) => u.user === d.user) || {}).lastfm || {};
+  $("tm-lastfm").hidden = !!lf.connected;
+  $("tm-lf-off-box").hidden = !lf.connected;
+  $("tm-lastfm-state").textContent = lf.connected
+    ? `${d.user || "This listener"}'s new listens are sent on to ${lf.name} on Last.fm: ${num(lf.sent)} sent` + (lf.waiting ? `, ${num(lf.waiting)} waiting` : "") +
+      (lf.turned_away ? `, ${num(lf.turned_away)} not taken (too old, or turned away)` : "") + (lf.error ? `. ${lf.error}` : ".")
+    : `Send ${d.user ? d.user + "'s" : "this listener's"} new listens on to a Last.fm account, as they come in. Listens from a file aren't sent.`;
+}
+function drawImport(state) {
+  state = state || {};
+  $("tm-import-go").disabled = !!state.running;
+  const when = state.first ? ` (${new Date(state.first * 1000).getFullYear()} to ${new Date(state.last * 1000).getFullYear()})` : "";
+  $("tm-import-state").textContent = state.running ? `Bringing in ${state.file || "the file"}… ${num(state.read || 0)} listens read` :
+    state.error ? `${state.file || "The file"} wasn't brought in: ${state.error}` :
+    state.finished ? `${state.file || "The file"}: ${num(state.kept)} listens brought in${when}` + (state.known ? `, ${num(state.known)} were here already` : "") +
+      (state.skipped ? `, ${num(state.skipped)} without a date, artist or title left out` : "") + "." : "";
+  clearTimeout(tm.timer);
+  if (state.running) tm.timer = setTimeout(async () => {
+    try { const now = await api("api/listens/import"); if (now.running) drawImport(now); else refreshListening(); } catch (e) { drawImport({...state, running: false, error: e.message}); }
+  }, 1000);
+}
+async function refreshListening() {
+  const q = new URLSearchParams();
+  if (tm.user != null) q.set("user", tm.user);
+  if (tm.year) q.set("year", tm.year);
+  if (tm.month) q.set("month", tm.month);
+  if (TM_ZONE) q.set("tz", TM_ZONE);
+  try { drawListening(await api("api/listens?" + q)); }
+  catch (e) { $("tm-sub").textContent = e.message; }
+}
+$("tm-user").addEventListener("change", () => { tm.user = $("tm-user").value; tm.year = tm.month = null; $("tm-import-user").value = tm.user; refreshListening(); });
+$("tm-import").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const file = $("tm-file").files[0];
+  if (!file) return;
+  const user = $("tm-import-user").value.trim();
+  $("tm-import-go").disabled = true;
+  $("tm-import-state").textContent = `Sending ${file.name}…`;
+  try {
+    const r = await fetch(`api/listens/import?user=${encodeURIComponent(user)}&name=${encodeURIComponent(file.name)}`, {method: "POST", body: file});
+    const answer = await r.json();
+    if (!r.ok) throw new Error(answer.error || r.statusText);
+    tm.user = user;
+    drawImport(answer.importing);
+  } catch (err) { $("tm-import-go").disabled = false; $("tm-import-state").textContent = err.message; }
+});
+$("tm-remove").addEventListener("click", async () => {
+  const names = {all: "all of them", siansa: "those from the Siansa app", koito: "those from Koito's export", lastfm: "those from Last.fm's export", listenbrainz: "those from ListenBrainz's export"};
+  const source = (prompt(`Remove which listens of ${tm.user || "this listener"}? Type one of: all, siansa, koito, lastfm, listenbrainz`) || "").trim().toLowerCase();
+  if (!names[source] || !confirm(`Remove ${names[source]} for ${tm.user || "this listener"}? This can't be undone.`)) return;
+  try { await api("api/listens/remove", {method: "POST", body: JSON.stringify({user: tm.user || "", source})}); tm.year = tm.month = null; refreshListening(); }
+  catch (e) { banner(e.message); }
+});
+$("tm-lastfm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("tm-lastfm-state").textContent = "Signing in to Last.fm…";
+  try {
+    await api("api/listens/lastfm", {method: "POST", body: JSON.stringify({user: tm.user || "", api_key: $("tm-lf-key").value.trim(),
+      secret: $("tm-lf-secret").value.trim(), name: $("tm-lf-name").value.trim(), password: $("tm-lf-password").value})});
+    ["tm-lf-key", "tm-lf-secret", "tm-lf-name", "tm-lf-password"].forEach((id) => { $(id).value = ""; });
+    refreshListening();
+  } catch (err) { $("tm-lastfm-state").textContent = err.message; }
+});
+$("tm-lf-off").addEventListener("click", async () => {
+  if (!confirm("Stop sending listens on to Last.fm?")) return;
+  try { await api("api/listens/lastfm", {method: "POST", body: JSON.stringify({user: tm.user || "", disconnect: true})}); refreshListening(); }
+  catch (e) { banner(e.message); }
+});
 
 // ---- genres ----
 function styleOf(label) { return (label || "").split("---").pop(); }
@@ -1451,7 +1707,8 @@ function drawPull(sound) {
   if (p.running) text = p.total ? `Taking over from AudioMuse-AI: ${num(p.done || 0)} of ${num(p.total)} songs…` : "Asking AudioMuse-AI what it has…";
   else if (p.error) text = `${have}. The last try failed: ${p.error}`;
   else if (p.finished) text = `${have}. Last taken over ${new Date(p.finished * 1000).toLocaleString()}: ${num(p.kept || 0)} new or changed` +
-    (p.unknown ? `, ${num(p.unknown)} of AudioMuse-AI's songs aren't in the libraries chosen here` : "") + ".";
+    (p.unknown ? `, ${num(p.unknown)} of AudioMuse-AI's songs aren't in the libraries chosen here` : "") +
+    ((p.servers || []).length > 1 ? ` (its music servers: ${p.servers.map((m) => `${m.name} ${num(m.total)} songs, ${num(m.kept)} taken over`).join("; ")})` : "") + ".";
   else text = `${have}. Nothing taken over yet.`;
   $("pull-state").textContent = text;
   $("pull-now").disabled = $("pull-all").disabled = !!p.running;

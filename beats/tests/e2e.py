@@ -158,6 +158,16 @@ def checks(base, catalog, problems):
         problems.append(f"only {len(measured)} of {len(catalog)} songs have their loudness: {profiles[:2]}")
     if not any(p.get("intro_bpm") and p.get("beat_grid") == "siansa_beats" for p in profiles):
         problems.append("no profile carries its beat grid")
+    # The listening history, in the real image: a listen at half past midnight in Helsinki on 1 January is that
+    # year's there (so the image knows the time zones), and it's linked to the song here.
+    some = next(iter(catalog))
+    kept = call(base, "/api/v1/listens", "POST", {"user": "e2e", "listens": [
+        {"id": some, "at": 1767220200, "artist": catalog[some]["artist"], "title": catalog[some]["title"], "duration": 60}]})
+    year = call(base, "/api/listens?user=e2e&year=2026&tz=Europe/Helsinki")
+    if kept.get("kept") != 1 or year["totals"]["listens"] != 1 or year["hours"][0] != 1:
+        problems.append(f"the listening history isn't right: {kept}, {year['totals']}, hours {year['hours']}")
+    if call(base, "/api/v1/listens/top?user=e2e")["top"][0].get("id") != some:
+        problems.append("a listen isn't linked to its song")
     if call(base, "/api/v1/openapi.json").get("openapi", "")[:1] != "3":
         problems.append("the API's description isn't there")
     report = call(base, "/api/debug")

@@ -56,6 +56,9 @@ class FakeServer:
         self.native = True  # whether Navidrome's own API answers (else only Subsonic's made-up paths)
         # AudioMuse-AI's export for apps (/api/sync): {song id: its track, as AudioMuse-AI gives it}; None: it has none.
         self.sync = None
+        # AudioMuse-AI's music servers (/api/servers), each with the song ids its user sees; None: it has no list.
+        # [{"server_id", "name", "server_type", "is_default", "sees": {ids}}]
+        self.am_servers = None
         self.played = {}  # song id -> plays, for Navidrome's own API's play counts
         fake = self
 
@@ -97,6 +100,12 @@ class FakeServer:
                     if len(self.requestline) > 4094:
                         return self.reply(400, {"error": "Request Line is too large"})
                     tracks = [fake.sync[i] for i in sorted(fake.sync)]
+                    if fake.am_servers is not None:  # only what the asked server's user sees; its default's without one
+                        asked = [m for m in fake.am_servers if q.get("server") in (m["server_id"], m["name"])] \
+                            if q.get("server") else [m for m in fake.am_servers if m["is_default"]]
+                        if not asked:
+                            return self.reply(400, {"error": "Invalid server selection."})
+                        tracks = [t for t in tracks if t["id"] in asked[0]["sees"]]
                     if "ids" in q:
                         tracks = [t for t in tracks if t["id"] in q["ids"].split(",")]
                     total, limit, page = len(tracks), int(q.get("limit", 500)), int(q.get("page", 1))
@@ -106,6 +115,13 @@ class FakeServer:
                     more = page * limit < total and "ids" not in q
                     return self.reply(200, {"tracks": tracks, "total_tracks": total, "has_more": more,
                                             "next_page": page + 1 if more else None, "provider_type": "navidrome"})
+                if url.path == "/api/servers":
+                    if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+                        return self.reply(401, {"error": "login needed"})
+                    if fake.am_servers is None:
+                        return self.reply(404, {"error": "not found"})
+                    return self.reply(200, {"servers": [{k: v for k, v in m.items() if k != "sees"} | {"music_libraries": ""}
+                                                        for m in fake.am_servers], "multi_server_enabled": True})
                 if url.path == "/api/song" and fake.native:
                     if self.headers.get("X-ND-Authorization") not in [f"Bearer nd-{u}" for u in USERS]:
                         return self.reply(401, {"error": "login needed"})

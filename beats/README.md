@@ -164,6 +164,32 @@ checked to be identical to AudioMuse-AI's own code. So **AudioMuse-AI no longer 
 take over what it has (or don't, and every song is heard here), then it can be switched off. A song's tempo is
 still only ever Beat This!'s.
 
+**Every music server of AudioMuse-AI is taken over (0.29).** AudioMuse-AI can analyse several music servers under
+its one login, and the same Navidrome twice for two of its users counts as two. Its export gives only the songs its
+default server's user can see unless a server is named, so Siansa Beats asks for each of its servers in turn (0.28
+took over the default one alone and heard the others' songs itself). Nothing to set: the one address and token cover
+them all, and the page says how many songs came from each. An AudioMuse-AI without a list of servers, or a token
+that may not read it, is asked as before.
+
+**Your listening history (0.29).** The **Listening** page is a time machine: all time, a year or one of its
+months, with the listens, hours, artists, songs and albums of that time, the most played of each, the days or
+months as bars (press one to go there), when in the day and the week you listen, records, the artists heard for
+the first time, what's playing now and the last listens. Days and hours are your browser's clock's.
+
+- **From the app:** turn on **Scrobble to Siansa Beats** in Siansa (Settings › Scrobbling). Each listen is kept
+  under the name the app scrobbles as (your music server's user name), so two people have a history each; the page
+  has a listener switch when there's more than one.
+- **From a file:** an export of Koito (its own JSON), of Last.fm (the JSON or CSV of an export tool, e.g.
+  lastfm.ghan.nl/export) or of ListenBrainz. Choose the file and whose listens they are. A listen that's here
+  already (the same listener, second, artist and title) is kept once, so a file can be brought in again and two
+  services' exports of the same years don't count double. A listen is linked to the song here by artist and title.
+  Last.fm's exports don't say how long a song is: the hours then use the song's length from the library or another
+  listen, else 3½ minutes, and the page says for how many.
+- **On to Last.fm:** per listener, with their own Last.fm API account (key and shared secret) and one sign-in. New
+  listens from the app are sent on in the background, and again later when Last.fm can't be reached; listens from a
+  file never are, nor ones older than two weeks (Last.fm turns those away). The key, secret and session are kept
+  encrypted, the password not at all. Turn the app's own Last.fm scrobbling off then, so nothing is sent twice.
+
 **Songs gone from the server are forgotten (0.27).** When a library is read again (every few hours, or **Read
 again**), a song that's no longer on the server goes from here with its analysis, unless another server still has
 it. A library that suddenly lists far fewer songs (more than 25 songs and 10% missing at once) is left alone, with a
@@ -397,6 +423,9 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 | `GET /api/v1/profiles?ids=a,b` | Up to 500 songs: loudness (`ref_lufs`), fades (`start_ramp`, `end_ramp`), key and scale, and the beat grid at each end. Songs with nothing yet are `pending`. |
 | `GET /api/v1/genres` | Every style with songs in its genre by their sound, most songs first. |
 | `GET /api/v1/genre?name=&limit=` | The songs of a genre, by their sound, the ones that sound most like it first: all of them (`songs` says how many), or a random `limit` of them. |
+| `POST /api/v1/listens` | Finished listens of a listener: `{"user", "listens": [{"id", "at", "artist", "title", "album", "duration"}]}` (at most 500; `at`: seconds since 1970). Answers `{"kept", "known", "skipped"}`; the same listen twice is kept once. |
+| `POST /api/v1/listens/now` | What's playing now: `{"user", "artist", "title", "album", "duration"}`. |
+| `GET /api/v1/listens/top?user=&kind=&from=&to=&limit=` | A listener's most listened `songs` (with the server's id, when it has the song), `artists` or `albums` in a stretch of time. |
 | `GET /api/v1/genre/about?name=` | A short description of a genre, from Wikipedia. Every genre's (the sound's and the songs' tags) is fetched in the background every 6 hours and kept; one not fetched yet waits up to 3 s and then answers `"pending": true`, to ask again shortly. |
 | `GET /api/v1/similar/albums?track_id=` | Albums that sound like that song's album (`source`: `beats`, from the songs' sound here; `audiomuse` when the song's sound isn't here yet and AudioMuse-AI's Siansa plugin answered). |
 | `GET /api/v1/similar/artists?track_id=` or `?artist=` | Artists that sound like that one, the same way. |
@@ -428,7 +457,7 @@ and the rest are downloaded once more and measured here. New songs are measured 
 
 `GET /api/health`, `/api/status`, `/api/libraries`, `/api/songs`, `/api/songs/<id>` (with every beat),
 `/api/beats/<id>`, `/api/audio/<id>`, `/api/grids?ids=`, `/api/export.csv`, `/api/export.json`;
-`/api/bad-blends`, `/api/failed/export`, `/api/genres`, `/api/genre?name=&limit=`, `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`; `POST /api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
+`/api/bad-blends`, `/api/failed/export`, `/api/listens?user=&year=&month=&tz=`, `/api/listens/import` (`POST`: the export file as the body, `?user=&name=`), `POST /api/listens/lastfm`, `POST /api/listens/remove`, `/api/genres`, `/api/genre?name=&limit=`, `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`; `POST /api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
 `beats/server.py`.
 
 Beat This! is by Francesco Foscarin, Jan Schlüter and Gerhard Widmer (ISMIR 2024), under the MIT licence.

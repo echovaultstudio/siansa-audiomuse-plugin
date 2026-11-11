@@ -896,6 +896,236 @@
           }
         }
       }
+    },
+    "/api/v1/listens": {
+      "post": {
+        "summary": "Finished listens of a listener, from the app (the same listen twice is kept once)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Server"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "listens"
+                ],
+                "properties": {
+                  "user": {
+                    "type": "string",
+                    "description": "The listener: the name the app scrobbles as (the music server's user name)"
+                  },
+                  "listens": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "at",
+                        "artist",
+                        "title"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "The music server's id of the song"
+                        },
+                        "at": {
+                          "type": "integer",
+                          "description": "When it started, seconds since 1970"
+                        },
+                        "artist": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "album": {
+                          "type": "string"
+                        },
+                        "duration": {
+                          "type": "integer",
+                          "description": "Seconds"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "How many were kept, were here already, or had no date, artist or title",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "kept": {
+                      "type": "integer"
+                    },
+                    "known": {
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}"
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        }
+      }
+    },
+    "/api/v1/listens/now": {
+      "post": {
+        "summary": "What's playing now for a listener",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "artist",
+                  "title"
+                ],
+                "properties": {
+                  "user": {
+                    "type": "string"
+                  },
+                  "artist": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "album": {
+                    "type": "string"
+                  },
+                  "duration": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Taken"
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}"
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        }
+      }
+    },
+    "/api/v1/listens/top": {
+      "get": {
+        "summary": "A listener's most listened songs, artists or albums in a stretch of time",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "songs",
+                "artists",
+                "albums"
+              ],
+              "default": "songs"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Seconds since 1970",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 50
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Server"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The most listened, most first; a song has the named server's id when it has the song",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "listens": {
+                      "type": "integer"
+                    },
+                    "top": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}"
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1068,7 +1298,7 @@
           },
           "key": {
             "type": "string",
-            "description": "C, C#, D \u2026 B"
+            "description": "C, C#, D … B"
           },
           "scale": {
             "type": "string",

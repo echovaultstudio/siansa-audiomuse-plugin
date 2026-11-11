@@ -8,6 +8,9 @@ that would break that is v2, next to v1. The full description is ``openapi.json`
     GET  /api/v1/genres                every style with songs in its genre by their sound, most first
     GET  /api/v1/genre?name=&limit=    the songs of a genre, by their sound (all without limit): {"name", "styles", "genres", "ids", "songs"}
     GET  /api/v1/genre/about?name=     a short description of a genre, from Wikipedia: {"name", "about"}
+    POST /api/v1/listens               finished listens of a listener: {"user", "listens": [{"id", "at", "artist", …}]}
+    POST /api/v1/listens/now           what's playing now: {"user", "artist", "title", "album", "duration"}
+    GET  /api/v1/listens/top?user=&kind=&from=&to=&limit=   a listener's most listened songs, artists or albums
     GET  /api/v1/similar/albums?track_id=          albums that sound like that song's album (asked of AudioMuse-AI)
     GET  /api/v1/similar/artists?track_id=|artist= artists that sound like that one (asked of AudioMuse-AI)
     POST /api/v1/bad-blends            {"from_id", "to_id", "technique", "details"}: a song change marked as bad
@@ -27,6 +30,7 @@ import json
 import os
 from http import HTTPStatus
 
+from . import listens as listens_module
 from . import __version__
 from . import loudness
 
@@ -78,6 +82,8 @@ def capabilities(app, server=None):
             "words": {"available": bool(sound["words"]) and app.words.available, "songs": sound["words"],
                       "steering": app.words.steers},
             "servers": {"available": True, "kinds": ["navidrome", "emby", "jellyfin"]},
+            # The listening history (0.29): listens taken from the app, and sent on to Last.fm for who connected it.
+            "scrobbling": {"available": True, "listens": app.listens.count(), "most_at_once": listens_module.MOST_AT_ONCE},
         },
         "limits": {"profile_ids": MAX_IDS, "genre_songs": None},
     }
@@ -148,6 +154,18 @@ def get(handler, path, query, server=None):
             return handler._json(app.audiomuse.similar(path.rsplit("/", 1)[1], asked)) or True
         except AudioMuseError as e:
             return handler._error(HTTPStatus.BAD_GATEWAY, str(e)) or True
+    if path == "/api/v1/listens/top":  # the most listened songs, artists or albums of a listener in a stretch of time
+        kind = arg("kind", "songs")
+        if kind not in ("songs", "artists", "albums"):
+            return handler._error(HTTPStatus.BAD_REQUEST, "kind is songs, artists or albums") or True
+        try:
+            start, end = int(arg("from", "0") or 0), int(arg("to", str(2 ** 62)) or 2 ** 62)
+            limit = int(arg("limit", "50") or 50)
+        except ValueError:
+            return handler._error(HTTPStatus.BAD_REQUEST, "from, to (seconds since 1970) and limit are numbers") or True
+        user = arg("user")
+        return handler._json({"user": user, "kind": kind, "from": start, "to": end, "listens": app.listens.count(user),
+                              "top": app.listens.top(user, kind, start, end, limit, server or app.servers.default_id)}) or True
     if path == "/api/v1/genres":
         return handler._json({"styles": app.styles_status(server), "genres": app.genre_list(server)}) or True
     if path in ("/api/v1/genre", "/api/v1/genre/about"):
@@ -168,6 +186,18 @@ def post(handler, path, body, server=None):
     """Answers a POST of ``/api/v1/…``; False when it isn't one of its paths."""
     if path.startswith(AUDIOMUSE + "/"):
         return sound_post(handler, path[len(AUDIOMUSE):], body, server)
+    if path == "/api/v1/listens":  # finished listens, from the app ("Scrobble to Siansa Beats")
+        rows = body.get("listens")
+        if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+            return handler._error(HTTPStatus.BAD_REQUEST, 'listens needed: [{"id", "at", "artist", "title", "album", "duration"}]') or True
+        if len(rows) > listens_module.MOST_AT_ONCE:
+            return handler._error(HTTPStatus.BAD_REQUEST, f"at most {listens_module.MOST_AT_ONCE} listens at a time") or True
+        answer = handler.app.listens.add(body.get("user"), rows, "siansa", server or handler.app.servers.default_id)
+        return handler._json(answer) or True
+    if path == "/api/v1/listens/now":  # what's playing now
+        if not handler.app.listens.set_playing(body.get("user"), body):
+            return handler._error(HTTPStatus.BAD_REQUEST, "artist and title needed") or True
+        return handler._json({"playing": True}) or True
     if path == "/api/v1/bad-blends":
         answer, problem = add_bad_blend(handler.app, body, server)
         if problem:
