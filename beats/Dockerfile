@@ -5,7 +5,7 @@
 # built and kept in /models, so the service itself needs no internet: only your Navidrome (and AudioMuse-AI).
 FROM python:3.12-slim-bookworm
 
-LABEL org.opencontainers.image.source="https://github.com/echovaultstudio/siansa-audiomuse-plugin" \
+LABEL org.opencontainers.image.source="https://github.com/echovaultstudio/siansa-beats" \
       org.opencontainers.image.description="Siansa Beats: Beat This! beat and downbeat tracking for a Navidrome playlist, with a page to compare it" \
       org.opencontainers.image.licenses="AGPL-3.0-only"
 

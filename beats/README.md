@@ -1,8 +1,10 @@
 # Siansa Beats
 
-A test of [Beat This!](https://github.com/CPJKU/beat_this) (CPJKU, 2024), the beat and downbeat tracker, on your own
-music. It reads the songs of the libraries you choose on Navidrome, Emby or Jellyfin, finds every beat and downbeat in each, and shows them on a page:
-its tempo and bars next to the file's BPM tag, so misread songs stand out. You can play any song with a click on each beat to hear whether they're right.
+The companion service for the Siansa app (what it does for the app: [the repository's front page](../README.md)). It
+reads the songs of the libraries you choose on Navidrome, Emby or Jellyfin and finds every beat and downbeat in each
+with [Beat This!](https://github.com/CPJKU/beat_this) (CPJKU, 2024), with each song's loudness, fades, key, genres
+and how it sounds. Its page shows it all: each song's tempo and bars next to the file's BPM tag, so misread songs
+stand out, and you can play any song with a click on each beat to hear whether they're right.
 
 It runs in its own container, reads your music servers without changing anything, and keeps what it finds in its own
 database. Nothing is written to your music files or the servers. Siansa Dev talks to it directly (Settings › Connections
@@ -30,7 +32,7 @@ memory free while it works.
 
    ```
    mkdir -p ~/siansa-beats && cd ~/siansa-beats
-   base=https://raw.githubusercontent.com/echovaultstudio/siansa-audiomuse-plugin/main/beats
+   base=https://raw.githubusercontent.com/echovaultstudio/siansa-beats/main/beats
    curl -fsSLO $base/docker-compose.yml && curl -fsSL $base/.env.example -o .env
    ```
 
@@ -60,7 +62,7 @@ and the CPU when it isn't. The page's first pill says which, with the GPU's name
    Save. `nvidia-smi` in System › Shell should then list the card. (Driver 525 or newer; TrueNAS's is.)
 2. **Know your libraries**, as in step 1 above.
 3. **Install it:** Apps › Discover Apps › ⋮ › **Install via YAML**. Name it `siansa-beats`, paste
-   [`truenas.yml`](truenas.yml) (or [raw](https://raw.githubusercontent.com/echovaultstudio/siansa-audiomuse-plugin/main/beats/truenas.yml)), fill in the values marked `<…>` (Navidrome's address, user and password),
+   [`truenas.yml`](truenas.yml) (or [raw](https://raw.githubusercontent.com/echovaultstudio/siansa-beats/main/beats/truenas.yml)), fill in the values marked `<…>` (Navidrome's address, user and password),
    and Save.
 4. Open **http://\<TrueNAS\>:8090**. After the first song, the pill says **Model final0 · GPU** and the card's name.
    If it says CPU and a warning appears at the top, the container didn't get the GPU: check step 1, and that
