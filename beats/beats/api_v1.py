@@ -293,6 +293,11 @@ def features(app, ids, server):
     rows = app.store.sound_rows(here.values())
     tempos = app.store.tempos(here.values(), app.config.model)
     measured = app.store.measures(here.values())
+    arousal = app.arousal.of(here.values())
+    # Energies taken over from an older AudioMuse-AI are on its old scale: given on today's (beats.drive.converted).
+    from . import drive
+
+    old = app.store.energy_old_scale()
     tracks = []
     for asked in ids:
         r = rows.get(here.get(asked))
@@ -304,11 +309,16 @@ def features(app, ids, server):
                        "album": r["album"], "year": r["year"], "tempo": round(tempo, 2) if tempo else None,
                        "tempo_source": "beat_this" if tempo else None,
                        "key": own.get("key") or r["key"], "scale": (own.get("scale") if own.get("key") else r["scale"]),
-                       "mood_vector": r["moods"], "energy": r["energy"],
-                       # Who measured the energy (0.34): "beats" (heard here) or "audiomuse" (taken over). The two can
-                       # be on different scales (the owner's library, 12 Nov: about 0.3 and about 0.7 for alike
-                       # songs), so an app compares energies only within one of them.
-                       "energy_source": None if r["energy"] is None else ("beats" if r["source"] == "beats" else "audiomuse"),
+                       "mood_vector": r["moods"],
+                       # The energy is AudioMuse-AI's measure, a song's loudness on 0..1. energy_source says where it
+                       # is from: "beats" (heard here), "converted" (taken over on AudioMuse-AI's old scale and put
+                       # on today's, 0.35: the same scale as "beats"), or "audiomuse" (taken over as it is).
+                       "energy": drive.converted(r["energy"]) if old and r["source"] != "beats" else r["energy"],
+                       "energy_source": None if r["energy"] is None else
+                       ("beats" if r["source"] == "beats" else "converted" if old else "audiomuse"),
+                       # How energetic the song is to a listener (0.35, beats.drive): about 1 (calm) to 9. The one to
+                       # order and match songs by; null on an image without the model.
+                       "arousal": arousal.get(r["song_id"]),
                        "other_features": r["other"], "fp": r["fp"]})
     return {"tracks": tracks, "total_tracks": len(tracks), "has_more": False, "next_page": None,
             "provider_type": (app.servers.get(server or app.servers.default_id) or {}).get("kind")}
