@@ -612,7 +612,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
     <section data-view="blends" id="bad-card">
       <div class="page-head"><h2>Bad blends</h2><p class="sub">Song changes marked as bad in Siansa Dev, with how the app blended them. Tap a song to check its beats.</p></div>
       <div class="card">
-        <p><a class="btn" href="api/bad-blends/export" download title="Every bad blend with both songs' beats and sound levels: the one file to send">Download bad blends</a></p>
+        <p class="marks"><a class="btn" href="api/bad-blends/export" download title="Every bad blend with both songs' beats and sound levels: the one file to send">Download bad blends</a> <button class="btn" id="bad-clear" title="Takes every marked blend away, for a fresh start">Clear all</button></p>
         <ul class="events" id="bad" data-cap="10"></ul>
       </div>
     </section>
@@ -895,6 +895,11 @@ async function refreshBad() {
     return `<li><time>${new Date(b.at * 1000).toLocaleString()}</time>${song(b.from_id, b.from_title, b.from_artist)} → ${song(b.to_id, b.to_title, b.to_artist)}<br>${esc(facts)} <button data-unbad="${b.id}">Remove</button></li>`;
   }).join("");
 }
+$("bad-clear").addEventListener("click", async () => {
+  if (badCount <= 0 || !confirm(`Take all ${badCount} bad blends away? Download them first if you still want them.`)) return;
+  await api("api/bad-blends", {method: "DELETE"});
+  badCount = -1; refreshStatus();
+});
 $("bad").addEventListener("click", async (e) => {
   const open = e.target.closest("[data-open]");
   if (open) { e.preventDefault(); openSong(open.dataset.open); return; }

@@ -391,7 +391,8 @@ On the server, after setting it up:
   `outro_energy`, dB), and the song where the bass drops out and comes back (`breakdowns_ms`, `drops_ms`), for the
   app to choose how to blend.
 - **Bad blends**: a song change marked as bad in Siansa Dev lands in a list on the page, with how the app blended it
-  (technique, bars, tempos, confidence at each end), and both songs a tap away. **Download bad blends** saves them all
+  (technique, bars, tempos, confidence at each end), and both songs a tap away. **Clear all** takes them all away for a
+  fresh start (download them first if you still want them). **Download bad blends** saves them all
   with both songs' beats, sound levels and results in one file (`GET /api/bad-blends/export`).
 - **Failed songs**: when songs couldn't be analysed, **Download failed songs (N)** beside the exports saves them with
   why (the error), their file type, length and library in one file (`GET /api/failed/export`); the CSV export has the

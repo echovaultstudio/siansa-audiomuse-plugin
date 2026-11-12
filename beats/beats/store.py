@@ -904,6 +904,11 @@ class Store:
         with self._write():
             return self.db.execute("DELETE FROM bad_blends WHERE id=?", (blend_id,)).rowcount > 0
 
+    def clear_bad_blends(self):
+        """Takes every bad blend away (the owner, 12 Nov: a fresh start for the next day's testing); how many went."""
+        with self._write():
+            return self.db.execute("DELETE FROM bad_blends").rowcount
+
     def bad_blend_count(self):
         return self._rows("SELECT COUNT(*) AS n FROM bad_blends")[0]["n"]
 
