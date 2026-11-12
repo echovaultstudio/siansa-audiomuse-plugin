@@ -60,8 +60,9 @@ def measure_sound(path, samples, rate):
 class Worker:
     MEASURE_IDLE_SECONDS = 60.0  # between looks for songs to measure, when there were none
     def __init__(self, store, navidrome, tracker, decode, data_dir, model_name, measure=None, style=None,
-                 sound=None, hearer=None):
+                 sound=None, hearer=None, trial=None):
         self.store = store
+        self.trial = trial  # beats.trial.Trial in the trial image (several measures of energy, side by side), else None
         # How a song sounds (beats.hear.Hearer: AudioMuse-AI's vectors and moods, made here), or None.
         self.hearer = hearer
         self.hearing = None  # {"id", "title", "artist", "since"}: a song analysed before, being heard for its sound
@@ -618,7 +619,7 @@ class Worker:
             return False
         before = memory.rss_mb()
         gone = [name for name, model in (("Beat This!", self.tracker), ("the style model", self.style),
-                                         ("the models that hear a song", self.hearer))
+                                         ("the models that hear a song", self.hearer), ("the trial's models", self.trial))
                 if model is not None and callable(getattr(model, "unload", None)) and model.unload()]
         if not gone:
             return False
@@ -697,6 +698,8 @@ class Worker:
             self._style(song, samples, self.decode_rate)
             self._measure(song, path, samples, self.decode_rate)
             self._hear(song, path)
+            if self.trial is not None:
+                self.trial.hear(song, path)
             try:
                 levels = self.measure(samples)
                 _log.debug("%s: measured the sound", label)

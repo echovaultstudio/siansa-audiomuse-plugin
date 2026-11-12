@@ -57,6 +57,8 @@ jobs:
         run: cd beats && python3 -P tests/test_sound.py
       - name: Memory handed back (0.34)
         run: cd beats && python3 -P tests/test_memory.py
+      - name: The energy trial's candidates, kept and listed (its models are tried when its image is built)
+        run: cd beats && python3 -P tests/test_trial.py
       - name: The listening history (0.29), its exports and Last.fm
         run: |
           python3 -m pip install --quiet --break-system-packages --user pillow==11.3.0 || python3 -m pip install --quiet --user pillow

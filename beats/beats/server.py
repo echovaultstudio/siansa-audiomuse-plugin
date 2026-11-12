@@ -221,8 +221,13 @@ class App:
         self.words = words if words is not None else Words(config.models_dir)
         # How a song sounds, heard here with AudioMuse-AI's models (0.27): new songs need no AudioMuse-AI.
         self.hearer = hearer if hearer is not None else Hearer(config.models_dir, self.words, config.threads)
+        # The energy trial (the trial image only: Essentia's small models are in /models/trial); None anywhere else.
+        from .trial import Trial
+
+        trial = Trial(config.models_dir, self.store, config.threads)
+        self.trial = trial if trial.available else None
         self.worker = Worker(self.store, self.servers, self.tracker, decode or analyser.decode,
-                             config.data_dir, config.model, measure, self.style, sound, self.hearer)
+                             config.data_dir, config.model, measure, self.style, sound, self.hearer, self.trial)
         self.started = time.time()
         # Answers the page and the app ask for often, kept ready: the genre list and the styles' counts change with
         # each song heard (the page asks every 2 s).
@@ -1105,6 +1110,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(app.worker.libraries(server))
             if path == "/api/bad-blends":
                 return self._json(app.store.bad_blends())
+            # The energy trial (beats/trial.py), in the trial image only.
+            if path in ("/trial", "/api/trial", "/api/trial.csv"):
+                if app.trial is None:
+                    return self._json({"error": "This isn't the trial image"}, HTTPStatus.NOT_FOUND)
+                if path == "/trial":
+                    from .trial import PAGE as TRIAL_PAGE
+
+                    return self._send(HTTPStatus.OK, TRIAL_PAGE.encode(), "text/html; charset=utf-8")
+                if path == "/api/trial":
+                    return self._json({"songs": app.trial.rows(app.config.model)})
+                return self._send(HTTPStatus.OK, app.trial.csv(app.config.model).encode(), "text/csv; charset=utf-8",
+                                  {"Content-Disposition": 'attachment; filename="siansa-beats-energy-trial.csv"'})
             if path == "/api/failed/export":
                 body = json.dumps(app.failed_export(server), indent=1).encode()
                 return self._send(HTTPStatus.OK, body, "application/json",

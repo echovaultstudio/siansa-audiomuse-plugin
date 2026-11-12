@@ -1,0 +1,44 @@
+# The energy trial's image (beats/Dockerfile.trial): Siansa Beats' dev image with Essentia's small models, to choose
+# how a song's energy should be measured. Built from the energy-trial branch only and published as
+# ghcr.io/echovaultstudio/siansa-beats:trial; never as dev or latest.
+name: Energy trial image
+
+on:
+  push:
+    branches: [energy-trial]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trial-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: Trial image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/echovaultstudio/siansa-beats
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build (the models are converted and tried on a made-up song)
+        run: docker build --progress=plain -f beats/Dockerfile.trial -t siansa-beats:trial .
+      - name: The trial's page answers
+        run: |
+          docker run -d --name trial -p 8090:8090 siansa-beats:trial
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8090/api/health && break || sleep 2; done
+          curl -fsS http://127.0.0.1:8090/api/trial | head -c 200; echo
+          curl -fsS http://127.0.0.1:8090/trial | grep -q "The energy trial"
+          docker logs trial 2>&1 | tail -20
+      - name: Publish
+        if: github.ref == 'refs/heads/energy-trial'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker tag siansa-beats:trial "$IMAGE:trial" && docker push -q "$IMAGE:trial"
+          echo "::notice::Published $IMAGE:trial"

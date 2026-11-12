@@ -1,0 +1,23 @@
+# The energy trial's image (tag "trial"): Siansa Beats' dev image with Essentia's small models for arousal, valence,
+# engagement and approachability (MTG, UPF; CC BY-NC-SA 4.0), converted from TensorFlow to ONNX here. For choosing
+# how Siansa Beats should measure a song's energy (beats/trial.py); not for everyday use, and never published as dev.
+ARG BASE=ghcr.io/echovaultstudio/siansa-beats:dev
+FROM python:3.11-slim-bookworm AS models
+ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_DEFAULT_TIMEOUT=120 PIP_RETRIES=10
+RUN pip install tensorflow-cpu==2.15.1 tf2onnx==1.16.1 "numpy<2"
+COPY beats/trial_models.py /tmp/trial_models.py
+RUN mkdir -p /out && python /tmp/trial_models.py /out && ls -la /out
+
+FROM ${BASE}
+USER root
+COPY --from=models /out/ /models/trial/
+COPY beats/beats/ /app/beats/
+# The trial for real: a made-up song through every model, twice the same, and every column a number.
+RUN ffmpeg -v error -f lavfi -i "sine=frequency=220:duration=20,aformat=channel_layouts=stereo" -f lavfi -i "anoisesrc=d=20:c=pink:a=0.2" \
+      -filter_complex amix=inputs=2 -ar 44100 /tmp/heard.flac \
+ && python -c "import math; from beats.trial import Trial, COLUMNS; t = Trial('/models'); assert t.available; \
+a = t.measure('/tmp/heard.flac'); b = t.measure('/tmp/heard.flac'); assert a == b, (a, b); \
+missing = [c for c in COLUMNS if c not in a or not math.isfinite(a[c])]; assert not missing, missing; \
+assert 0 <= a['deam_arousal'] <= 10 and 0 < a['energy_now'] < 1, a; print('trial ok:', {k: round(v, 3) for k, v in a.items()})" \
+ && rm /tmp/heard.flac
+USER beats
