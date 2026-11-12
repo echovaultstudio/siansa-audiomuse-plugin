@@ -112,6 +112,7 @@ class Store:
         self.genre_changes = 0  # counts every change to the genres table, so kept answers know when they're old
         self.sound_changes = 0  # the same for the sound table: the vectors in memory are read again when it moves
         self.measure_changes = 0  # the same for the loudness measures
+        self.writes = 0  # every change to anything (0.35.1): answers kept while nothing is written are still right
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self._writing = threading.local()  # how deep this thread is in a change: it reads its own change, not a reader's
@@ -188,6 +189,7 @@ class Store:
                     yield self.db
             finally:
                 self._writing.depth = depth
+                self.writes += 1
 
     def _rows(self, sql, args=()):
         if self._readers is None or getattr(self._writing, "depth", 0):

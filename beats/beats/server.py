@@ -343,12 +343,16 @@ class App:
 
     def sound_status(self, server=None):
         """How much of ``server``'s music has its sound here, and how the pull from AudioMuse-AI is going."""
-        counts = self.store.sound_counts(self.only(server))
+        # Kept ready (0.35.1): counting 45,000 sounds reads each one's row, vectors and all, and the page asks every
+        # few seconds. Worked out again once anything was written, and at most a minute old.
+        server = server or self.servers.default_id
+        counts = self.kept("sound-counts", server, lambda only: self.store.sound_counts(only), 60, lambda: self.store.writes).get()
+        sources = self.kept("sound-sources", server, lambda only: self.store.sound_sources(only), 60, lambda: self.store.writes).get()
         return {**counts, "pull": dict(self.puller.state), "audiomuse": self.audiomuse.configured,
                 "text_model": {"available": self.words.available, "steering": self.words.steers,
                                "loaded": self.words.loaded, "load_seconds": self.words.load_seconds},
                 # Heard here (0.27): whether this image can, where each song's sound came from, what's being heard.
-                "hears": self.hearer.available, "sources": self.store.sound_sources(self.only(server)),
+                "hears": self.hearer.available, "sources": sources,
                 "hearing": dict(self.worker.hearing) if self.worker.hearing else None}
 
     # ---- connections and access, set on the page (0.24.0) ----
@@ -459,7 +463,7 @@ class App:
     def server_list(self):
         """The music servers as the page and the app see them: no passwords, each with its songs here and its chosen
         libraries."""
-        counts = self.store.server_counts()
+        counts = self.kept("server-counts", None, lambda _: self.store.server_counts(), 30, lambda: self.store.writes).get()
         return [{**self.servers.public(s), "songs": counts.get(s["id"], 0),
                  "libraries": [str(f) for f in self.store.setting(folders_key(s["id"])) or []]}
                 for s in self.servers.all()]
@@ -631,7 +635,23 @@ class App:
     def status(self, server=None):
         server = server or self.servers.default_id
         only = self.only(server)
-        counts = self.store.counts(only)
+        parts = {}  # where the time went, for the log when the answer is slow
+
+        def timed(name, work):
+            started = time.monotonic()
+            try:
+                return work()
+            finally:
+                parts[name] = time.monotonic() - started
+
+        counts = timed("queue", lambda: self.store.counts(only))
+        styles = timed("styles", lambda: self.styles_status(server))
+        measured = timed("loudness", lambda: self.kept("measure-counts", server, lambda o: self.store.measure_counts(loudness.VERSION, o), 30,
+                                                       lambda: self.store.writes).get())
+        sound = timed("sound", lambda: self.sound_status(server))
+        servers = timed("servers", self.server_list)
+        events = timed("events", self.store.events)
+        self.status_parts = parts
         worker = self.worker
         shown = self.servers.get(server) or {}
         current = dict(worker.current) if worker.current else None
@@ -649,25 +669,25 @@ class App:
             "current": current,
             "next": preparing,
             "bad_blends": self.store.bad_blend_count(),
-            "styles": self.styles_status(server),
+            "styles": styles,
             "connections": {"navidrome": bool(shown), "audiomuse": self.audiomuse.configured,
                             "audiomuse_url": self.audiomuse.url or None, "audiomuse_token": bool(self.audiomuse.token),
                             "api_key": bool(self.access().get("api_key")), "password": bool(self.access().get("password")),
                             # Secrets the container still has though they're no longer read: they can go from the YAML.
                             "left_in_container": self.config.secrets_left,
                             "secret_key": "container" if self.vault.from_env else "data folder"},
-            "loudness": {**self.store.measure_counts(loudness.VERSION, only),
+            "loudness": {**measured,
                          "measuring": dict(worker.measuring) if worker.measuring else None},
             "regridding": dict(worker.regridding) if worker.regridding else None,
             "reading": dict(worker.reading) if worker.reading else None,
-            "sound": self.sound_status(server),
+            "sound": sound,
             "libraries": {"chosen": self.store.setting(folders_key(server)) or [],
                           "read_at": self.store.setting("library_read_at")},
             # The server these numbers are of, and all of them (for the page's switch).
             "server": server,
             "server_kind": shown.get("kind"),
             "server_name": shown.get("name"),
-            "servers": self.server_list(),
+            "servers": servers,
             "paused": worker.paused,
             "last_error": worker.last_error,
             "model": self.config.model,
@@ -680,7 +700,7 @@ class App:
             "navidrome": shown.get("url") or None,  # the shown server's address (its name from before 0.23)
             "log_level": log.level(),
             "uptime_seconds": round(time.time() - self.started),
-            "events": self.store.events(),
+            "events": events,
         }
 
     def styles_status(self, server=None):
@@ -890,8 +910,10 @@ class Handler(BaseHTTPRequestHandler):
         if took > self.SLOW:
             worker = self.app.worker if self.app else None
             busy = (worker.current or {}).get("step") if worker else None
-            _log.warning("%s %s took %.1fs%s", self.command, log.redact(path), took,
-                         f" (busy {busy})" if busy else "")
+            parts = getattr(self.app, "status_parts", None) if path == "/api/status" and self.app else None
+            where = " · " + ", ".join(f"{k} {v:.1f}s" for k, v in parts.items() if v >= 0.05) if parts else ""
+            _log.warning("%s %s took %.1fs%s%s", self.command, log.redact(path), took,
+                         f" (busy {busy})" if busy else "", where)
         code = int(getattr(code, "value", code)) if str(getattr(code, "value", code)).isdigit() else 0
         if code >= 500:
             _log.warning("%s %s -> %s", self.command, log.redact(self.path), code)
@@ -1457,6 +1479,13 @@ def main():
             app.worker.regrid()
         except Exception:
             _log.exception("Working out older results again went wrong")
+        try:  # the page's first numbers, ready before anyone opens it (0.35.1)
+            started = time.monotonic()
+            app.status()
+            app.genre_list()
+            _log.info("The page's numbers are ready (%.1fs)", time.monotonic() - started)
+        except Exception:
+            _log.exception("Getting the page's numbers ready went wrong")
         try:  # how energetic each song is (0.35): the whole library, once, from the sound already kept
             scored = app.arousal.catch_up()
             if scored:
