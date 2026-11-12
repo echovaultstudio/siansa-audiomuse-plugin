@@ -186,7 +186,8 @@ months as bars (press one to go there), when in the day and the week you listen,
 the first time, what's playing now and the last listens. Days and hours are your browser's clock's.
 
 - **Pictures (0.30):** the favourites of a time (top artist, album and song), the number one of each list, the
-  lists' rows, what's playing and the last listens show the cover or the artist's picture. They're the music
+  lists' rows, what's playing and the last listens show the cover or the artist's picture. An animated cover
+  shows as a still, its first frame (0.34.1). They're the music
   server's own, asked through a song of that album or artist in the library and kept in the data folder (`art/`);
   nothing is looked up on the internet. Music that isn't on the server shows a tile in its own colour with the
   name's first letters. Navidrome's stand-in picture (its blue disc, its star) is never shown as a picture.

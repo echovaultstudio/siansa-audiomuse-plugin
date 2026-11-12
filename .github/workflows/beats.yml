@@ -58,7 +58,9 @@ jobs:
       - name: Memory handed back (0.34)
         run: cd beats && python3 -P tests/test_memory.py
       - name: The listening history (0.29), its exports and Last.fm
-        run: cd beats && python3 -P tests/test_listens.py
+        run: |
+          python3 -m pip install --quiet --break-system-packages --user pillow==11.3.0 || python3 -m pip install --quiet --user pillow
+          cd beats && python3 -P tests/test_listens.py
       - name: The page's script parses
         run: cd beats && python3 -P tests/test_page_script.py
 

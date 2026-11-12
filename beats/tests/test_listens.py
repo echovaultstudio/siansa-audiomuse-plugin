@@ -504,6 +504,35 @@ class Pictures(Service):
             self.picture("/api/art/cover/t122")
         self.assertEqual(len(self.fake.requests), before)
 
+    def test_an_animated_cover_shows_as_its_first_frame(self):
+        import io
+
+        from PIL import Image
+
+        self.started()
+        frames = [Image.new("RGB", (800, 800), colour) for colour in ("red", "blue", "green")]
+        moving = io.BytesIO()
+        frames[0].save(moving, "GIF", save_all=True, append_images=frames[1:], duration=100, loop=0)
+        self.fake.real_pictures = {"mf-t140": (moving.getvalue(), "image/gif")}
+        self.fake.cant_resize = {"mf-t140"}  # Navidrome failing to shrink it: asked for as it is
+        data, kind, _ = self.picture("/api/art/cover/t140?size=96")
+        self.assertEqual(kind, "image/jpeg")
+        with Image.open(io.BytesIO(data)) as still:
+            self.assertFalse(getattr(still, "is_animated", False))
+            self.assertEqual(still.size, (96, 96))
+            red, green, blue = still.convert("RGB").getpixel((48, 48))
+            self.assertTrue(red > 200 and green < 60 and blue < 60, (red, green, blue))  # the first frame
+        # The other sizes were made from the same download: the server isn't asked again.
+        before = len([p for p, q in self.fake.requests if p.endswith("getCoverArt")])
+        with Image.open(io.BytesIO(self.picture("/api/art/cover/t140?size=640")[0])) as big:
+            self.assertEqual(big.size, (640, 640))
+        self.assertEqual(len([p for p, q in self.fake.requests if p.endswith("getCoverArt")]), before)
+
+    def test_an_ordinary_picture_stays_as_the_server_gave_it(self):
+        from beats import art
+
+        self.assertIsNone(art.stills(fakes.PICTURE + b"not really a picture"))
+
 
 if __name__ == "__main__":
     unittest.main()

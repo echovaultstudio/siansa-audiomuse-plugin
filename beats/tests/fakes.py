@@ -187,6 +187,11 @@ class FakeServer:
                     artist = (q.get("id") or "").removeprefix("ar-")
                     if artist in fake.artist_photos and artist in fake.looked_up and fake.artist_photos[artist] is None:
                         return self.reply(200, PICTURE + q["id"].encode(), "image/jpeg", {"ETag": '"a1"'})
+                    if q.get("id") in getattr(fake, "real_pictures", {}):  # {id: (bytes, type)}: a real file, as it is
+                        data, kind = fake.real_pictures[q["id"]]
+                        if q.get("size") and q["id"] in getattr(fake, "cant_resize", ()):
+                            return self.reply(500, b"can't resize", "text/plain")
+                        return self.reply(200, data, kind, {"ETag": '"v1"', "Cache-Control": "public, max-age=315360000"})
                     if q.get("id") in fake.pictures:
                         return self.reply(200, PICTURE + q["id"].encode(), "image/png",
                                           {"ETag": '"v1"', "Cache-Control": "public, max-age=315360000"})

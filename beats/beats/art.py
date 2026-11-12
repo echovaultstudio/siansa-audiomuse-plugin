@@ -7,11 +7,14 @@ coloured tile with the name's first letters for the rest (listens of music that 
 
 - A listen says its artist, title and album as text. :class:`Art` finds a song here to ask the server about: the
   listen's own song when it's linked, else any song of that album, else any song of that artist.
+- An animated cover (a GIF, an animated WebP) shows as a still: its first frame, made once at the three sizes
+  (0.34.1). Navidrome gives one back as the whole file, many megabytes of it, which used to count as no picture.
 - A picture is kept in the data folder (``art/``) once fetched, at the three sizes the page uses, and "none" is
   remembered for a day, so a page of fifty rows asks the server once.
 """
 
 import hashlib
+import io
 import os
 import threading
 import time
@@ -24,7 +27,34 @@ _log = log.get("art")
 SIZES = (96, 300, 640)  # thumbnails, cards, the big one
 KINDS = ("cover", "artist")
 NONE_FOR = 30 * 60  # seconds "the server has none" is believed: a photo it's still fetching comes soon after
-MOST_BYTES = 8 * 1024 * 1024
+MOST_BYTES = 8 * 1024 * 1024  # a still picture is never bigger than this
+MOST_ANIMATED = 256 * 1024 * 1024  # an animated cover may be (the owner's library has one of 130 MB): only its first frame is kept
+
+
+def stills(data, sizes=SIZES):
+    """``{size: JPEG bytes}`` of the first frame of an animated picture (or of one too big to keep as it is), no wider
+    or taller than each size; None for an ordinary still picture, or when it can't be read (no Pillow, a broken file)."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        with Image.open(io.BytesIO(data)) as picture:
+            if not getattr(picture, "is_animated", False) and len(data) <= MOST_BYTES:
+                return None
+            picture.seek(0)
+            frame = picture.convert("RGB")
+        out = {}
+        for size in sizes:
+            small = frame.copy()
+            small.thumbnail((size, size))
+            kept = io.BytesIO()
+            small.save(kept, "JPEG", quality=88)
+            out[size] = kept.getvalue()
+        return out
+    except Exception as e:  # not a picture Pillow reads: as before
+        _log.debug("A picture's first frame couldn't be made: %s", e)
+        return None
 
 
 class Art:
@@ -86,19 +116,25 @@ class Art:
         if found is None:
             self._none[(kind, song_id)] = self.now()
             return None
+        # An animated cover's first frame, at every size from the one download; else the picture as the server gave it.
+        made = found[2] if len(found) > 2 else None
+        keep = {s: (made[s], "image/jpeg") for s in made} if made else {size: found[:2]}
         os.makedirs(self.folder, exist_ok=True)
-        try:
-            with open(path + ".part", "wb") as f:
-                f.write(found[0])
-            with open(path + ".type", "w") as t:
-                t.write(found[1])
-            os.replace(path + ".part", path)
-        except OSError as e:
-            _log.warning("A picture couldn't be kept: %s", e)
-        return found
+        for one, (data, kind_of) in keep.items():
+            target = self._path(kind, song_id, one)
+            try:
+                with open(target + ".part", "wb") as f:
+                    f.write(data)
+                with open(target + ".type", "w") as t:
+                    t.write(kind_of)
+                os.replace(target + ".part", target)
+            except OSError as e:
+                _log.warning("A picture couldn't be kept: %s", e)
+        return keep[size]
 
     def _fetch(self, kind, song_id, size):
-        """From the first server that has the song and a picture for it."""
+        """From the first server that has the song and a picture for it: ``(bytes, type)``, with a third,
+        ``{size: JPEG}``, when it's animated (:func:`stills`)."""
         for server, item_id in self.store.where(song_id) or []:
             client = self.servers.client(server)
             if not hasattr(client, "picture"):
@@ -108,7 +144,13 @@ class Art:
             except Exception as e:  # a server that's away: no picture now, asked again next time
                 _log.debug("No %s picture of %s from %s: %s", kind, song_id, getattr(client, "label", server), e)
                 return None
-            if found and found[0] and len(found[0]) <= MOST_BYTES:
+            if not found or not found[0] or len(found[0]) > MOST_ANIMATED:
+                continue
+            made = stills(found[0])
+            if made:
+                _log.info("The %s picture of %s is animated (%.1f MB): its first frame is shown", kind, song_id, len(found[0]) / 1e6)
+                return found[0], found[1], made
+            if len(found[0]) <= MOST_BYTES:
                 return found
         _log.info("No %s picture of %s: none of its servers has one now (asked again in %d min)", kind, song_id, NONE_FOR // 60)
         return None
