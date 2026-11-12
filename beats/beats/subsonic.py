@@ -217,7 +217,8 @@ class Subsonic:
     def _picture(self, cover, size):
         """Navidrome's picture ``cover`` (an id of getCoverArt); None for none or its stand-in."""
         try:
-            with urllib.request.urlopen(self.address("getCoverArt", id=cover, size=size), timeout=self.timeout) as response:
+            asked = {"id": cover, "size": size} if size else {"id": cover}
+            with urllib.request.urlopen(self.address("getCoverArt", **asked), timeout=self.timeout) as response:
                 kind = response.headers.get("Content-Type") or ""
                 stand_in = "no-store" in (response.headers.get("Cache-Control") or "").lower() and not response.headers.get("ETag")
                 if not kind.startswith("image/") or stand_in:
@@ -231,6 +232,10 @@ class Subsonic:
             if e.code == 404:
                 _log.debug("getCoverArt %s: none (HTTP 404)", cover)
                 return None
+            if e.code >= 500 and size:
+                # Navidrome can fail to resize an animated cover: the picture as it is, then (its first frame is shown).
+                _log.debug("getCoverArt %s at %s px: HTTP %s; asking for it as it is", cover, size, e.code)
+                return self._picture(cover, None)
             raise SubsonicError(f"getCoverArt: HTTP {e.code}") from None
         except (urllib.error.URLError, OSError) as e:
             raise SubsonicError(f"getCoverArt: {getattr(e, 'reason', e)}") from None
