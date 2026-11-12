@@ -576,6 +576,10 @@ class ServiceTest(Service):
         self.assertEqual(self.call("/api/v1/genre/about?name=Surf")["status"], "failed")
         made = self.call("/api/v1/bad-blends", "POST", {"from_id": "t140", "to_id": "t122", "technique": "echo out"})
         self.assertEqual(self.call("/api/bad-blends")[0]["id"], made["id"])
+        # Clear all (the owner, 12 Nov): a fresh start for the next day's testing.
+        self.call("/api/v1/bad-blends", "POST", {"from_id": "t122", "to_id": "t140", "technique": "quick swap"})
+        self.assertEqual(self.call("/api/bad-blends", "DELETE")["removed"], 2)
+        self.assertEqual(self.call("/api/bad-blends"), [])
         with self.assertRaises(urllib.error.HTTPError) as caught:
             self.call("/api/v1/bad-blends", "POST", {"from_id": "t140"})
         self.assertEqual(caught.exception.code, 400)

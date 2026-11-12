@@ -66,6 +66,7 @@ id or name: the default server's without it.
     POST /api/bad-blends              {"from_id", "to_id", "technique", "details"}: one more (from the app, through
                                       the Siansa Beats (dev) plugin)
     DELETE /api/bad-blends/<n>        takes one away
+    DELETE /api/bad-blends            takes them all away (a fresh start): {"removed": n}
     GET  /api/log?after=&limit=&level= the latest log lines (numbered; ``after`` for only newer ones), oldest first
     GET  /api/log/download            every kept log line, as a text file
     POST /api/log/level {"level"}     "debug" or "info": how much the log says (kept across restarts)
@@ -1363,6 +1364,10 @@ class Handler(BaseHTTPRequestHandler):
         server = self._server(self._query())
         if server is None:
             return None
+        if path == "/api/bad-blends":
+            removed = self.app.store.clear_bad_blends()
+            _log.info("Bad blends cleared: %d taken away", removed)
+            return self._json({"removed": removed})
         m = re.fullmatch(r"/api/bad-blends/(\d+)", path)
         if m:
             if not self.app.store.remove_bad_blend(int(m[1])):
