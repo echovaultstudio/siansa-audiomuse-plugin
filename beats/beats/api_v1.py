@@ -13,6 +13,7 @@ that would break that is v2, next to v1. The full description is ``openapi.json`
     POST /api/v1/listens/now           what's playing now: {"user", "artist", "title", "album", "duration"}
     POST /api/v1/loves                 a heart given or taken back: {"user", "artist", "title", "loved"}, on to Last.fm
     GET  /api/v1/listens/top?user=&kind=&from=&to=&limit=   a listener's most listened songs, artists or albums
+    GET  /api/v1/listens/totals?user=&from=&to=&tz=         that stretch in numbers: listens, seconds, artists, hours
     GET  /api/v1/similar/albums?track_id=          albums that sound like that song's album (asked of AudioMuse-AI)
     GET  /api/v1/similar/artists?track_id=|artist= artists that sound like that one (asked of AudioMuse-AI)
     POST /api/v1/bad-blends            {"from_id", "to_id", "technique", "details"}: a song change marked as bad
@@ -87,7 +88,8 @@ def capabilities(app, server=None):
                       "steering": app.words.steers},
             "servers": {"available": True, "kinds": ["navidrome", "emby", "jellyfin"]},
             # The listening history (0.29): listens taken from the app, and sent on to Last.fm for who connected it.
-            "scrobbling": {"available": True, "listens": app.listens.count(), "most_at_once": listens_module.MOST_AT_ONCE},
+            "scrobbling": {"available": True, "listens": app.listens.count(), "most_at_once": listens_module.MOST_AT_ONCE,
+                           "totals": True},  # /api/v1/listens/totals (0.33)
         },
         "limits": {"profile_ids": MAX_IDS, "genre_songs": None, "genre_ids": MAX_IDS},
     }
@@ -170,6 +172,13 @@ def get(handler, path, query, server=None):
         user = arg("user")
         return handler._json({"user": user, "kind": kind, "from": start, "to": end, "listens": app.listens.count(user),
                               "top": app.listens.top(user, kind, start, end, limit, server or app.servers.default_id)}) or True
+    if path == "/api/v1/listens/totals":  # a stretch of a listener's history in numbers (0.33): the app's reports
+        try:
+            start, end = int(arg("from", "0") or 0), int(arg("to", str(2 ** 62)) or 2 ** 62)
+        except ValueError:
+            return handler._error(HTTPStatus.BAD_REQUEST, "from and to are numbers: seconds since 1970") or True
+        user = arg("user")
+        return handler._json({"user": user, "from": start, "to": end, **app.listens.totals(user, start, end, arg("tz"))}) or True
     if path == "/api/v1/genres":
         return handler._json({"styles": app.styles_status(server), "genres": app.genre_list(server)}) or True
     if path == "/api/v1/songs/genres":  # each song's own genres (0.32): what a mix of them has to offer

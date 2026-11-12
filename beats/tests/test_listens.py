@@ -365,6 +365,18 @@ class ListeningService(Service):
         top = self.call("/api/v1/listens/top?user=max&kind=songs")
         self.assertEqual([(t["title"], t["listens"], t["id"]) for t in top["top"]], [("Control", 2, "t140"), ("Elsewhere", 1, None)])
         self.assertEqual(self.call(f"/api/v1/listens/top?user=max&kind=artists&from={now - 200}")["top"], [{"artist": "Someone", "listens": 1, "song": None}])
+        # The same stretch in numbers, for the app's reports: two listens of a 60 s song and one of unknown length.
+        totals = self.call("/api/v1/listens/totals?user=max&tz=Europe/Helsinki")
+        self.assertEqual((totals["listens"], totals["artists"], totals["songs"], totals["new_artists"], totals["guessed"]), (3, 2, 2, 2, 1))
+        self.assertEqual(totals["seconds"], 60 + 60 + L.TYPICAL_SECONDS)
+        self.assertEqual((sum(totals["hours"]), len(totals["hours"])), (3, 24))
+        late = self.call(f"/api/v1/listens/totals?user=max&from={now - 200}")
+        self.assertEqual((late["listens"], late["artists"], late["new_artists"]), (1, 1, 1))  # Someone, first heard then
+        self.assertEqual(self.call("/api/v1/listens/totals?user=nobody")["listens"], 0)
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/v1/listens/totals?user=max&from=yesterday")
+        self.assertEqual(e.exception.code, 400)
+        self.assertTrue(self.call("/api/v1/capabilities")["features"]["scrobbling"]["totals"])
         page = self.call("/api/listens?tz=Europe/Helsinki")  # the first listener's, all time
         self.assertEqual((page["user"], page["totals"]["listens"], page["now"]["title"]), ("max", 3, "Deep"))
         self.assertEqual([u["user"] for u in page["users"]], ["max"])

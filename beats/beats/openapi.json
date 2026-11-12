@@ -1218,6 +1218,107 @@
           }
         }
       }
+    },
+    "/api/v1/listens/totals": {
+      "get": {
+        "summary": "A stretch of a listener's history in numbers: what the app's listening reports show",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Seconds since 1970",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Server"
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The time zone the hours of the day are counted in (IANA, as Europe/Helsinki); UTC without it"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The numbers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "type": "string"
+                    },
+                    "from": {
+                      "type": "integer"
+                    },
+                    "to": {
+                      "type": "integer"
+                    },
+                    "listens": {
+                      "type": "integer"
+                    },
+                    "seconds": {
+                      "type": "integer",
+                      "description": "Time listened"
+                    },
+                    "guessed": {
+                      "type": "integer",
+                      "description": "Listens whose length isn't known and counts as a typical song's"
+                    },
+                    "artists": {
+                      "type": "integer"
+                    },
+                    "songs": {
+                      "type": "integer"
+                    },
+                    "albums": {
+                      "type": "integer"
+                    },
+                    "new_artists": {
+                      "type": "integer",
+                      "description": "Artists heard for the first time in this stretch"
+                    },
+                    "hours": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "description": "Listens per hour of the day, 0 to 23"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}"
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        }
+      }
     }
   },
   "components": {
