@@ -67,6 +67,9 @@ class FakeServer:
         # Pictures (0.30): the cover ids ("mf-<song>") and artist ids ("ar-artist-of-<song>") that have one; any other
         # is answered with the stand-in, as Navidrome does: an ordinary picture marked "don't keep", with no version.
         self.pictures = set()
+        # Artist photos Navidrome's agents find, only once the artist is asked about (getArtistInfo2): until then the
+        # artist's picture is the stand-in. {artist id: the photo's own address, or None to give it as a picture}.
+        self.artist_photos, self.looked_up = {}, set()
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -139,6 +142,8 @@ class FakeServer:
                     return self.reply(200, [{"id": s["id"], "libraryId": int(s.get("library", "1")),
                                              "libraryPath": "/music", "path": file_path(s),
                                              "playCount": fake.played.get(s["id"], 0)} for s in rows])
+                if url.path == "/agents/photo.view":  # a photo an agent found, at its own address
+                    return self.reply(200, PICTURE + b"photo-" + q.get("of", "").encode(), "image/jpeg")
                 if not url.path.startswith("/rest/"):
                     return self.reply(404, {"error": "not found"})
                 if q.get("t") != hashlib.md5((USERS.get(q.get("u"), "\0") + q.get("s", "")).encode()).hexdigest() \
@@ -172,7 +177,16 @@ class FakeServer:
                     if q.get("id") not in by_id:
                         return self.subsonic(error="Song not found")
                     return self.subsonic({"song": entry(by_id[q["id"]])})
+                if method == "getArtistInfo2":
+                    fake.looked_up.add(q.get("id"))
+                    photo = fake.artist_photos.get(q.get("id"))
+                    return self.subsonic({"artistInfo2": {"largeImageUrl": photo} if photo else {}})
+                if method == "photo":  # an agent's photo, at an address of its own (here: the same fake)
+                    return self.reply(200, PICTURE + b"photo-" + q.get("of", "").encode(), "image/jpeg")
                 if method == "getCoverArt":
+                    artist = (q.get("id") or "").removeprefix("ar-")
+                    if artist in fake.artist_photos and artist in fake.looked_up and fake.artist_photos[artist] is None:
+                        return self.reply(200, PICTURE + q["id"].encode(), "image/jpeg", {"ETag": '"a1"'})
                     if q.get("id") in fake.pictures:
                         return self.reply(200, PICTURE + q["id"].encode(), "image/png",
                                           {"ETag": '"v1"', "Cache-Control": "public, max-age=315360000"})

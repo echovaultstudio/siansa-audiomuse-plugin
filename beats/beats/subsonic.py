@@ -193,26 +193,58 @@ class Subsonic:
         ``size`` px; None when the server has none. Navidrome answers a picture it doesn't have with its stand-in (a
         blue disc, a star) as an ordinary picture, marked "don't keep" and without a version: that isn't a picture."""
         song = self._get("getSong", id=song_id).get("song") or {}
-        if of == "artist":
-            artist = song.get("artistId") or next((a.get("id") for a in song.get("artists") or [] if a.get("id")), None)
-            cover = f"ar-{artist}" if artist else None
-        else:
-            cover = song.get("coverArt") or song.get("albumId") or song_id
-        if not cover:
+        if of != "artist":
+            return self._picture(song.get("coverArt") or song.get("albumId") or song_id, size)
+        artist = song.get("artistId") or next((a.get("id") for a in song.get("artists") or [] if a.get("id")), None)
+        if not artist:
             return None
+        # Navidrome fetches an artist's photo from its agents (Last.fm, Spotify…) only when asked about the artist; until
+        # then its picture is the star stand-in (the owner, 11 Nov: Rammstein, Sleep Token showed none). Asking about it
+        # first is what Siansa does too; the photo's own address is the fallback when Navidrome still has the stand-in.
+        try:
+            info = self._get("getArtistInfo2", id=artist, count=0).get("artistInfo2") or {}
+        except SubsonicError:
+            info = {}
+        found = self._picture(f"ar-{artist}", size)
+        if found is None:
+            for address in (info.get("largeImageUrl"), info.get("mediumImageUrl")):
+                if address and address.startswith(("http://", "https://")) and "/rest/" not in address:
+                    found = self._outside(address)
+                    if found:
+                        break
+        return found
+
+    def _picture(self, cover, size):
+        """Navidrome's picture ``cover`` (an id of getCoverArt); None for none or its stand-in."""
         try:
             with urllib.request.urlopen(self.address("getCoverArt", id=cover, size=size), timeout=self.timeout) as response:
                 kind = response.headers.get("Content-Type") or ""
                 stand_in = "no-store" in (response.headers.get("Cache-Control") or "").lower() and not response.headers.get("ETag")
                 if not kind.startswith("image/") or stand_in:
+                    # Why there's none, for the log: its stand-in (no picture yet), or not a picture at all.
+                    _log.debug("getCoverArt %s: %s (%s, Cache-Control %s, ETag %s)", cover,
+                               "its stand-in" if stand_in else "not a picture", kind or "no type",
+                               response.headers.get("Cache-Control") or "none", response.headers.get("ETag") or "none")
                     return None
                 return response.read(), kind
         except urllib.error.HTTPError as e:
             if e.code == 404:
+                _log.debug("getCoverArt %s: none (HTTP 404)", cover)
                 return None
             raise SubsonicError(f"getCoverArt: HTTP {e.code}") from None
         except (urllib.error.URLError, OSError) as e:
             raise SubsonicError(f"getCoverArt: {getattr(e, 'reason', e)}") from None
+
+    def _outside(self, address):
+        """A picture at an address Navidrome gave (an artist photo its agents found); None when it can't be had."""
+        try:
+            request = urllib.request.Request(address, headers={"User-Agent": "SiansaBeats", "Accept": "image/*"})
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                kind = response.headers.get("Content-Type") or ""
+                return (response.read(8 * 1024 * 1024), kind) if kind.startswith("image/") else None
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            _log.debug("The artist photo at %s couldn't be had: %s", address.split("?")[0], getattr(e, "reason", e))
+            return None
 
     def audio(self, song_id, byte_range=None):
         """The song as MP3 for the page's player (every browser plays it), opened: the caller reads and closes it."""

@@ -71,6 +71,15 @@ class ClientTest(Base):
         self.fake.pictures = {"mf-t140", "ar-artist-of-t140"}
         self.assertEqual(navidrome.picture("t140", "cover", 300), (PICTURE + b"mf-t140", "image/png"))
         self.assertEqual(navidrome.picture("t140", "artist", 300), (PICTURE + b"ar-artist-of-t140", "image/png"))
+        # An artist's photo Navidrome hasn't fetched yet: asked about first (getArtistInfo2), so it's there at once
+        # (the owner, 11 Nov: artists with photos showed none).
+        self.fake.artist_photos = {"artist-of-t122": None}
+        self.assertEqual(navidrome.picture("t122", "artist", 300), (PICTURE + b"ar-artist-of-t122", "image/jpeg"))
+        # Still the stand-in after asking: the photo's own address, which Navidrome gave.
+        self.fake.artist_photos = {"artist-of-t96w": self.fake.url + "/rest/photo.view?of=t96w"}
+        self.assertIsNone(navidrome.picture("t96w", "artist", 300))  # an address of Navidrome's own isn't fetched apart
+        self.fake.artist_photos = {"artist-of-t96w": self.fake.url + "/agents/photo.view?of=t96w"}
+        self.assertEqual(navidrome.picture("t96w", "artist", 300), (PICTURE + b"photo-t96w", "image/jpeg"))
 
     def test_a_login_the_server_stops_taking_is_made_again(self):
         for media, client in self.both():
