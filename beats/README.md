@@ -323,9 +323,11 @@ genre pages and genre radios:
   PyTorch Beat This! uses; the model is small, so Beat This! hardly notices), else on the CPU (ONNX Runtime,
   `STYLE_THREADS`, 2 by default); `BEATS_DEVICE=cpu` keeps both on the CPU. New songs are heard on their way through
   the queue; songs analysed before are downloaded once more and heard while the queue is empty;
-- **a song is in a genre when its sound scores that style 0.15 or more, and always in the one it scores highest.**
-  There's no limit on how many genres a song is in, and a genre gives all its songs, the ones that sound most like it
-  first;
+- **a song is in a genre when its sound scores that style 0.15 or more and the style is among its three best, and
+  always in the one it scores highest** (0.36: before, a country album's faint fourth and fifth guesses put it in
+  Electro House). A genre gives all its songs, the ones that sound most like it first, with each one's score, so the
+  app's radio prefers the songs the sound is sure of. A radio for a whole family ("Electronic") takes only the songs
+  whose best style is in it;
 - the songs' own genre tags play no part (before 0.28 they were voted together with the sound; those votes are
   removed on the first start). Siansa still shows the tags where they belong: on an album's and an artist's page.
 

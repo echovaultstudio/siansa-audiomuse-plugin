@@ -106,6 +106,9 @@ from . import memory as memory_module
 
 _log = log.get("server")
 
+# A song scores a style this or more: the sound is sure of it (for the log and the app's radio, which prefers these).
+SURE = 0.4
+
 PAGE = os.path.join(os.path.dirname(__file__), "page.html")
 PASSTHROUGH = ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges")
 
@@ -752,8 +755,8 @@ class App:
                          lambda: self.store.genre_changes).get()
 
     def _genre_list(self, server, only):
-        counts = self.store.heard_counts(genres_module.HEARD_MIN, only)
-        by_library = self.store.heard_counts_by_library(genres_module.HEARD_MIN, server)
+        counts = self.store.heard_counts(genres_module.HEARD_MIN, genres_module.HEARD_RANK, only)
+        by_library = self.store.heard_counts_by_library(genres_module.HEARD_MIN, genres_module.HEARD_RANK, server)
         ranked = sorted(counts.items(), key=lambda p: -p[1])
         named = {}
         for label, _ in ranked:
@@ -772,7 +775,7 @@ class App:
         """The genres each of the songs ``ids`` is in by its sound, its best first: ``{asked id: [{"name", "label",
         "genre", "style", "score"}]}``, ``name`` as the genre list names it. Songs with none aren't in it."""
         here = self.store.resolve(ids, server)
-        heard = self.store.heard_of(here.values(), genres_module.HEARD_MIN)
+        heard = self.store.heard_of(here.values(), genres_module.HEARD_MIN, genres_module.HEARD_RANK)
         names = {g["label"]: g["name"] for g in self.genre_list(server)}
         out = {}
         for asked in ids:
@@ -796,14 +799,21 @@ class App:
         labels = set(styles)
         for f in families:
             labels |= set(taxonomy.by_genre.get(genres_module.key(f), []))
-        ids = self.store.songs_heard(labels, genres_module.HEARD_MIN, None, server or self.servers.default_id)
-        songs = len(ids)
+        # A style: the songs with it among their best few. A whole family ("Electronic"): only the songs whose best
+        # style is in it, or the family's radio is everything with a faint touch of any of its styles (0.36).
+        rank = genres_module.HEARD_RANK if styles else 1
+        found = self.store.songs_heard(labels, genres_module.HEARD_MIN, rank, None, server or self.servers.default_id)
+        songs = len(found)
         if limit is not None and songs > limit:
             import random
 
             keep = set(random.sample(range(songs), limit))
-            ids = [i for n, i in enumerate(ids) if n in keep]  # still the ones that sound most like it first
-        return {"name": name, "styles": sorted(styles), "genres": sorted(families), "ids": ids, "songs": songs,
+            found = [p for n, p in enumerate(found) if n in keep]  # still the ones that sound most like it first
+        sure = sum(1 for _, w in found if w >= SURE)
+        _log.info("Genre %s: %d songs by their sound (%d sure, %.2f or more)%s", name, songs, sure, SURE,
+                  " for the family's best styles only" if rank == 1 else "")
+        return {"name": name, "styles": sorted(styles), "genres": sorted(families), "ids": [i for i, _ in found],
+                "weights": [round(w, 3) for _, w in found], "songs": songs, "sure": sure,
                 "by": "sound", "why": None if labels else "no style of that name"}
 
     def debug_report(self):

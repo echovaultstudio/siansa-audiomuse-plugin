@@ -734,17 +734,28 @@ class ServiceTest(Service):
         self.assertIn("Trance 0.71 / Progressive Trance 0.40", csv_body.decode())
 
     def test_a_genre_gives_all_its_songs_and_a_song_is_always_in_its_best(self):
-        style = FakeStyle(os.path.join(self.tmp, "models"))
-        style.HEARD = dict(style.HEARD, t96w=[("Pop---Ballad", 0.08), ("Electronic---Trance", 0.05)])
+        # t122: a country song with a synthy sheen (the owner, 12 Nov): Electro House its faint fourth guess.
+        class Country(FakeStyle):
+            HEARD = dict(FakeStyle.HEARD, t96w=[("Pop---Ballad", 0.08), ("Electronic---Trance", 0.05)],
+                         t122=[("Folk, World, & Country---Country", 0.5), ("Pop---Ballad", 0.3), ("Electronic---Synth-pop", 0.2),
+                               ("Electronic---Electro House", 0.18), ("Electronic---House", 0.16)])
+        style = Country(os.path.join(self.tmp, "models"))
         self.start(style=style)
         self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
-        self.assertEqual(self.call("/api/v1/genre?name=Ballad")["ids"], ["t96w"])  # its best, however low
-        self.assertEqual(self.call("/api/v1/genre?name=Trance")["ids"], ["t140"])
+        self.assertEqual(self.call("/api/v1/genre?name=Ballad")["ids"], ["t122", "t96w"])  # t96w's best, however low
+        trance = self.call("/api/v1/genre?name=Trance")
+        self.assertEqual((trance["ids"], trance["weights"], trance["sure"]), (["t140"], [0.71], 1))
+        # Among its best three only (0.36): Synth-pop yes, Electro House and House no.
+        self.assertEqual(self.call("/api/v1/genre?name=Synth-pop")["ids"], ["t122"])
+        self.assertEqual(self.call("/api/v1/genre?name=" + urllib.parse.quote("Electro House"))["ids"], [])
+        self.assertEqual(self.call("/api/v1/genre?name=House")["ids"], [])
+        # A whole family: only the songs whose best style is in it (t122's is Country).
         everything = self.call("/api/v1/genre?name=Electronic")  # no limit asked: all of them
-        self.assertEqual((set(everything["ids"]), everything["songs"]), ({"t140", "t122"}, 2))
-        one = self.call("/api/v1/genre?name=Electronic&limit=1")
-        self.assertEqual((len(one["ids"]), one["songs"]), (1, 2))
+        self.assertEqual((set(everything["ids"]), everything["songs"]), ({"t140"}, 1))
+        self.assertEqual(self.call("/api/v1/genre?name=Country")["ids"], ["t122"])
+        one = self.call("/api/v1/genre?name=Trance&limit=1")
+        self.assertEqual((len(one["ids"]), one["songs"]), (1, 1))
 
     def test_each_songs_own_genres_for_what_a_mix_has_to_offer(self):
         style = FakeStyle(os.path.join(self.tmp, "models"))
