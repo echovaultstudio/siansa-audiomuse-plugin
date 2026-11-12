@@ -546,6 +546,37 @@ class Listens:
         return [{"artist": r["artist"], "title": r["title"], "album": r["album"], "listens": r["listens"],
                  "id": ids.get(r["song_id"]) if server else r["song_id"], "song": r["song_id"]} for r in rows]
 
+    def totals(self, user, start=0, end=2 ** 62, tz_name=None):
+        """What ``user`` listened to from ``start`` to ``end`` in numbers, for the app's reports: ``{"listens",
+        "seconds", "guessed" (listens whose length is a typical one's), "artists", "songs", "albums", "new_artists"
+        (heard for the first time then), "hours"}`` (listens per hour of the day in ``tz_name``)."""
+        tz = zone(tz_name)
+        rows = self.store._rows("SELECT at, akey, tkey, album, duration, song_id FROM listens WHERE user=? AND at>=? "
+                                "AND at<?", (user, start, end))
+        # A listen's length: its own, else its song's from another listen or from the library, else a typical one.
+        lengths = {(r["akey"], r["tkey"]): r["d"] for r in self.store._rows(
+            "SELECT akey, tkey, MAX(duration) AS d FROM listens WHERE user=? AND duration IS NOT NULL GROUP BY akey, tkey",
+            (user,))} if rows else {}
+        library = {r["id"]: r["duration"] for r in self.store._rows(
+            "SELECT id, duration FROM songs WHERE id IN (SELECT DISTINCT song_id FROM listens WHERE user=? AND at>=? "
+            "AND at<? AND song_id IS NOT NULL)", (user, start, end))} if rows else {}
+        seconds = guessed = 0
+        hours, artists, songs, albums = [0] * 24, set(), set(), set()
+        for r in rows:
+            length = r["duration"] or lengths.get((r["akey"], r["tkey"])) or library.get(r["song_id"])
+            if not length:
+                length, guessed = TYPICAL_SECONDS, guessed + 1
+            seconds += length
+            hours[datetime.datetime.fromtimestamp(r["at"], tz).hour] += 1
+            artists.add(r["akey"])
+            songs.add((r["akey"], r["tkey"]))
+            if r["album"]:
+                albums.add((r["akey"], r["album"].casefold()))
+        new = self.store._rows("SELECT COUNT(*) AS n FROM (SELECT MIN(at) AS first FROM listens WHERE user=? GROUP BY akey "
+                               "HAVING first>=? AND first<?)", (user, start, end))
+        return {"listens": len(rows), "seconds": seconds, "guessed": guessed, "artists": len(artists), "songs": len(songs),
+                "albums": len(albums), "new_artists": new[0]["n"] if new else 0, "hours": hours}
+
     def recent(self, user, limit=30):
         return [dict(r) for r in self.store._rows(
             "SELECT at, artist, title, album, source, song_id AS song FROM listens WHERE user=? ORDER BY at DESC LIMIT ?",
