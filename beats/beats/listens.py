@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS listens (
     id INTEGER PRIMARY KEY, user TEXT NOT NULL, at INTEGER NOT NULL, artist TEXT NOT NULL, title TEXT NOT NULL,
     album TEXT, duration INTEGER, song_id TEXT, source TEXT, client TEXT, akey TEXT NOT NULL, tkey TEXT NOT NULL,
     relayed INTEGER,  -- to Last.fm: NULL not to be sent, 0 waiting, 1 sent, 2 turned away, 3 too old to send
+    album_artist TEXT,  -- 0.37: the album's artist, which Last.fm needs to find a collaboration's or compilation's cover
     UNIQUE (user, at, akey, tkey)
 );
 CREATE INDEX IF NOT EXISTS listens_by_artist ON listens (user, akey, at);
@@ -286,6 +287,8 @@ class LastFm:
             params[f"artist[{i}]"], params[f"track[{i}]"], params[f"timestamp[{i}]"] = r["artist"], r["title"], str(r["at"])
             if r.get("album"):
                 params[f"album[{i}]"] = r["album"]
+            if r.get("album_artist"):
+                params[f"albumArtist[{i}]"] = r["album_artist"]
             if r.get("duration"):
                 params[f"duration[{i}]"] = str(r["duration"])
         return self.call(params, keys["secret"])
@@ -300,6 +303,8 @@ class LastFm:
                   "artist": row["artist"], "track": row["title"]}
         if row.get("album"):
             params["album"] = row["album"]
+        if row.get("album_artist"):
+            params["albumArtist"] = row["album_artist"]
         if row.get("duration"):
             params["duration"] = str(row["duration"])
         return self.call(params, keys["secret"])
@@ -312,6 +317,8 @@ class Listens:
         self.store, self.vault, self.lastfm, self.now = store, vault, lastfm or LastFm(), now
         with store._write():
             store.db.executescript(SCHEMA)
+            if "album_artist" not in {r[1] for r in store.db.execute("PRAGMA table_info(listens)")}:
+                store.db.execute("ALTER TABLE listens ADD COLUMN album_artist TEXT")
         self.changes = 0  # counts every change, so kept numbers know when they're old
         self.playing = {}  # listener -> {"artist", "title", "album", "at"}: what the app says is playing
         self.importing = {"running": False}
@@ -348,12 +355,13 @@ class Listens:
             except (TypeError, ValueError):
                 duration = None
             values.append((user, int(at), artist, title, str(r.get("album") or "").strip() or None, duration, song_id,
-                           source, str(r.get("client") or "")[:80] or None, akey, tkey, relay))
+                           source, str(r.get("client") or "")[:80] or None, akey, tkey, relay,
+                           str(r.get("album_artist") or "").strip() or None))
         before = self.count(user)
         with self.store._write():
             self.store.db.executemany(
                 "INSERT OR IGNORE INTO listens (user, at, artist, title, album, duration, song_id, source, client, "
-                "akey, tkey, relayed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values)
+                "akey, tkey, relayed, album_artist) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values)
         kept = self.count(user) - before
         if kept:
             self.changes += 1
@@ -396,6 +404,7 @@ class Listens:
         except (TypeError, ValueError):
             duration = None
         playing = {"artist": artist, "title": title, "album": str(row.get("album") or "").strip() or None,
+                   "album_artist": str(row.get("album_artist") or "").strip() or None,
                    "duration": duration, "at": int(self.now()), "song": song_id}
         self.playing[user] = playing
         keys = self._keys(user)
@@ -820,7 +829,7 @@ class Listens:
             self.store.db.execute("UPDATE listens SET relayed=3 WHERE user=? AND relayed=0 AND at<?", (user, oldest))
         while True:
             rows = [dict(r) for r in self.store._rows(
-                "SELECT id, at, artist, title, album, duration FROM listens WHERE user=? AND relayed=0 ORDER BY at LIMIT ?",
+                "SELECT id, at, artist, title, album, album_artist, duration FROM listens WHERE user=? AND relayed=0 ORDER BY at LIMIT ?",
                 (user, LastFm.MOST))]
             if not rows:
                 break

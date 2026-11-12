@@ -10,7 +10,7 @@ that would break that is v2, next to v1. The full description is ``openapi.json`
     GET  /api/v1/genre/about?name=     a short description of a genre, from Wikipedia: {"name", "about"}
     GET  /api/v1/songs/genres?ids=a,b  the genres each of up to 500 songs is in by its sound, its best first
     POST /api/v1/listens               finished listens of a listener: {"user", "listens": [{"id", "at", "artist", …}]}
-    POST /api/v1/listens/now           what's playing now: {"user", "artist", "title", "album", "duration"}
+    POST /api/v1/listens/now           what's playing now: {"user", "artist", "title", "album", "album_artist", "duration"}
     POST /api/v1/loves                 a heart given or taken back: {"user", "artist", "title", "loved"}, on to Last.fm
     GET  /api/v1/listens/top?user=&kind=&from=&to=&limit=   a listener's most listened songs, artists or albums
     GET  /api/v1/listens/totals?user=&from=&to=&tz=         that stretch in numbers: listens, seconds, artists, hours
