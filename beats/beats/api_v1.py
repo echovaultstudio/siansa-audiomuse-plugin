@@ -8,6 +8,7 @@ that would break that is v2, next to v1. The full description is ``openapi.json`
     GET  /api/v1/genres                every style with songs in its genre by their sound, most first
     GET  /api/v1/genre?name=&limit=    the songs of a genre, by their sound (all without limit): {"name", "styles", "genres", "ids", "songs"}
     GET  /api/v1/genre/about?name=     a short description of a genre, from Wikipedia: {"name", "about"}
+    GET  /api/v1/songs/genres?ids=a,b  the genres each of up to 500 songs is in by its sound, its best first
     POST /api/v1/listens               finished listens of a listener: {"user", "listens": [{"id", "at", "artist", …}]}
     POST /api/v1/listens/now           what's playing now: {"user", "artist", "title", "album", "duration"}
     POST /api/v1/loves                 a heart given or taken back: {"user", "artist", "title", "loved"}, on to Last.fm
@@ -31,6 +32,7 @@ import json
 import os
 from http import HTTPStatus
 
+from . import genres as genres_module
 from . import listens as listens_module
 from . import __version__
 from . import loudness
@@ -68,7 +70,8 @@ def capabilities(app, server=None):
             "loudness": {"available": True, "songs": measured["measured"], "waiting": measured["waiting"],
                          "version": loudness.VERSION},
             "keys": {"available": True, "songs": measured["measured"]},
-            "genres": {"available": bool(styles.get("available")), "styles": len(app.genre_list(server))},
+            "genres": {"available": bool(styles.get("available")), "styles": len(app.genre_list(server)),
+                       "per_song": True},  # /api/v1/songs/genres (0.32)
             "genre_about": {"available": True, "source": "Wikipedia"},
             "bad_blends": {"available": True},
             # Similar albums and artists: from the songs' sound here once it's known (0.25), else asked of AudioMuse-AI.
@@ -86,7 +89,7 @@ def capabilities(app, server=None):
             # The listening history (0.29): listens taken from the app, and sent on to Last.fm for who connected it.
             "scrobbling": {"available": True, "listens": app.listens.count(), "most_at_once": listens_module.MOST_AT_ONCE},
         },
-        "limits": {"profile_ids": MAX_IDS, "genre_songs": None},
+        "limits": {"profile_ids": MAX_IDS, "genre_songs": None, "genre_ids": MAX_IDS},
     }
 
 
@@ -169,6 +172,14 @@ def get(handler, path, query, server=None):
                               "top": app.listens.top(user, kind, start, end, limit, server or app.servers.default_id)}) or True
     if path == "/api/v1/genres":
         return handler._json({"styles": app.styles_status(server), "genres": app.genre_list(server)}) or True
+    if path == "/api/v1/songs/genres":  # each song's own genres (0.32): what a mix of them has to offer
+        ids = [i for i in (arg("ids") or "").split(",") if i]
+        if not ids:
+            return handler._error(HTTPStatus.BAD_REQUEST, "ids needed: the songs, separated by commas") or True
+        if len(ids) > MAX_IDS:
+            return handler._error(HTTPStatus.BAD_REQUEST, f"at most {MAX_IDS} songs at a time") or True
+        return handler._json({"schema_version": SCHEMA_VERSION, "minimum": genres_module.HEARD_MIN,
+                              "songs": app.genres_of(ids, server)}) or True
     if path in ("/api/v1/genre", "/api/v1/genre/about"):
         name = arg("name")
         if not name:

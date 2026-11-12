@@ -1174,6 +1174,50 @@
           }
         }
       }
+    },
+    "/api/v1/songs/genres": {
+      "get": {
+        "summary": "The genres each song is in by its sound, its best first: what a mix of those songs has to offer",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": true,
+            "description": "Up to 500 song ids, separated by commas",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Server"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Each song's genres; a song with none isn't in it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SongGenres"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Something was missing or wrong: {\"error\": why}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The password or API key is needed"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1678,6 +1722,46 @@
           "songs": {
             "type": "integer",
             "description": "Its songs in Siansa Beats"
+          }
+        }
+      },
+      "SongGenres": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "type": "integer"
+          },
+          "minimum": {
+            "type": "number",
+            "description": "The score a song's sound must give a style to be in its genre (its best always is)"
+          },
+          "songs": {
+            "type": "object",
+            "description": "By the song id asked",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "As the genre list names it: the style, or Genre / Style"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "genre": {
+                    "type": "string"
+                  },
+                  "style": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
           }
         }
       }

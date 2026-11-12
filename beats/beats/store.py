@@ -457,6 +457,17 @@ class Store:
     HEARD = ("g.source='sound' AND (g.weight >= ? OR NOT EXISTS (SELECT 1 FROM genres b WHERE b.song_id = g.song_id "
              "AND b.source='sound' AND b.weight > g.weight))")
 
+    def heard_of(self, song_ids, minimum):
+        """``{song id: [(label, weight)]}``: the genres each of ``song_ids`` is in by its sound, its best first."""
+        out, ids = {}, list(dict.fromkeys(song_ids))
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            marks = ", ".join("?" for _ in chunk)
+            for r in self._rows(f"SELECT g.song_id AS id, g.label AS label, g.weight AS w FROM genres g WHERE {self.HEARD} "
+                                f"AND g.song_id IN ({marks}) ORDER BY g.weight DESC, g.label", (minimum, *chunk)):
+                out.setdefault(r["id"], []).append((r["label"], r["w"]))
+        return out
+
     def drop_votes(self):
         """Removes the genres voted from sound and tags together (before 0.28). How many rows went."""
         with self._write():

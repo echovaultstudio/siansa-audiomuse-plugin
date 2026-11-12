@@ -561,7 +561,8 @@ class ServiceTest(Service):
         spec = self.call("/api/v1/openapi.json")
         self.assertEqual(spec["info"]["version"], "1")
         for path in ("/api/v1/capabilities", "/api/v1/profiles", "/api/v1/genres", "/api/v1/genre", "/api/v1/genre/about",
-                     "/api/v1/bad-blends", "/api/v1/listens", "/api/v1/listens/now", "/api/v1/listens/top", "/api/v1/loves"):
+                     "/api/v1/bad-blends", "/api/v1/listens", "/api/v1/listens/now", "/api/v1/listens/top", "/api/v1/loves",
+                     "/api/v1/songs/genres"):
             self.assertIn(path, spec["paths"])
 
     def test_v1_similar_albums_and_artists_asked_of_audiomuse(self):
@@ -716,6 +717,26 @@ class ServiceTest(Service):
         self.assertEqual((set(everything["ids"]), everything["songs"]), ({"t140", "t122"}, 2))
         one = self.call("/api/v1/genre?name=Electronic&limit=1")
         self.assertEqual((len(one["ids"]), one["songs"]), (1, 2))
+
+    def test_each_songs_own_genres_for_what_a_mix_has_to_offer(self):
+        style = FakeStyle(os.path.join(self.tmp, "models"))
+        style.HEARD = dict(style.HEARD, t96w=[("Pop---Ballad", 0.08), ("Electronic---Trance", 0.05)])
+        self.start(style=style)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        caps = self.call("/api/v1/capabilities")
+        self.assertTrue(caps["features"]["genres"]["per_song"])
+        self.assertEqual(caps["limits"]["genre_ids"], 500)
+        answer = self.call("/api/v1/songs/genres?ids=t96w,t140,nothing")
+        self.assertEqual(set(answer["songs"]), {"t96w", "t140"})  # a song not here isn't in it
+        self.assertEqual([(g["name"], g["genre"], g["score"]) for g in answer["songs"]["t96w"]], [("Ballad", "Pop", 0.08)])  # its best, however low
+        scores = [g["score"] for g in answer["songs"]["t140"]]
+        self.assertEqual(scores, sorted(scores, reverse=True))  # its best first
+        self.assertTrue(all(s >= answer["minimum"] for s in scores[1:]))
+        self.assertIn("Trance", [g["name"] for g in answer["songs"]["t140"]])
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.call("/api/v1/songs/genres")
+        self.assertEqual(caught.exception.code, 400)
 
     def test_genres_voted_before_are_removed(self):
         style = FakeStyle(os.path.join(self.tmp, "models"))
