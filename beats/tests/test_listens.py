@@ -214,6 +214,30 @@ class History(unittest.TestCase):
         self.assertEqual([u["user"] for u in self.listens.users()], ["", "max"])
         self.assertEqual([(p["user"], p["title"]) for p in self.listens.all_playing()], [("max", "Honey")])
 
+    def test_an_artists_own_page(self):
+        self.listens.add("max", [
+            self.row("2024-03-01T20:00:00", "Moby", "Porcelain", album="Play", duration=240),
+            self.row("2025-03-01T20:00:00", "moby", "Porcelain", album="Play"),
+            self.row("2025-03-02T21:30:00", "Moby", "Honey", album="Play"),
+            self.row("2025-04-01T08:00:00", "Moby", "Go", album="Moby"),
+            self.row("2025-04-02T08:00:00", "Röyksopp", "Eple"), self.row("2025-04-03T08:00:00", "Röyksopp", "Eple"),
+            self.row("2025-04-04T08:00:00", "Röyksopp", "Eple"), self.row("2025-04-05T08:00:00", "Röyksopp", "Eple"),
+            self.row("2025-04-06T08:00:00", "Röyksopp", "Eple"), self.row("2025-04-07T08:00:00", "Burial", "Archangel")])
+        moby = self.listens.artist("max", "MOBY", "UTC")
+        self.assertEqual((moby["artist"], moby["totals"]["listens"], moby["totals"]["songs"], moby["totals"]["albums"]), ("Moby", 4, 3, 2))
+        self.assertEqual(moby["totals"]["rank"], 2)  # after Röyksopp's 5
+        self.assertEqual(moby["totals"]["share"], 40.0)
+        self.assertEqual(moby["totals"]["seconds"], 240 + 240 + 2 * L.TYPICAL_SECONDS)  # Porcelain's length known once
+        self.assertEqual([(s["title"], s["listens"]) for s in moby["songs"]], [("Porcelain", 2), ("Go", 1), ("Honey", 1)])
+        self.assertEqual([(a["album"], a["listens"], a["songs"]) for a in moby["albums"]], [("Play", 3, 2), ("Moby", 1, 1)])
+        self.assertEqual(moby["years"], [{"year": 2024, "listens": 1}, {"year": 2025, "listens": 3}])
+        self.assertEqual(moby["busiest_year"], {"year": 2025, "listens": 3})
+        self.assertEqual((moby["first"]["title"], moby["last"]["title"]), ("Porcelain", "Go"))
+        self.assertEqual(moby["hours"][20], 2)
+        self.assertEqual(moby["recent"][0]["title"], "Go")
+        self.assertIsNone(self.listens.artist("max", "Nobody", "UTC"))
+        self.assertIsNone(self.listens.artist("kids", "Moby", "UTC"))
+
     def test_whats_playing_shows_while_it_can_be(self):
         self.assertTrue(self.listens.set_playing("max", {"artist": "Moby", "title": "Honey", "duration": 200}))
         self.assertFalse(self.listens.set_playing("max", {"artist": "", "title": "Honey"}))
@@ -439,6 +463,21 @@ class Pictures(Service):
         self.picture("/api/art/cover/t140?size=300")
         self.assertEqual(len([p for p, q in self.fake.requests if p.endswith("getCoverArt")]), before)
         self.assertEqual(self.app.art.kept()["pictures"], 2)
+
+    def test_an_artist_page_through_the_service(self):
+        self.started()
+        self.fake.pictures = {"mf-t140", "ar-artist-of-t140"}
+        now = int(time.time())
+        self.call("/api/v1/listens", "POST", {"user": "max", "listens": [
+            {"id": "t140", "at": now - 600, "artist": "Ecsape", "title": "Control", "album": "Test"},
+            {"id": "t140", "at": now - 300, "artist": "Ecsape", "title": "Control", "album": "Test"}]})
+        page = self.call("/api/listens/artist?user=max&name=ecsape&tz=UTC")
+        self.assertEqual((page["artist"], page["face"], page["totals"]["listens"], page["songs"][0]["cover"]), ("Ecsape", "t140", 2, "t140"))
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/listens/artist?user=max&name=Nobody")
+        self.assertEqual(e.exception.code, 404)
+        # Opened straight from its address, with no one asked for: the listener Listening shows first.
+        self.assertEqual(self.call("/api/listens/artist?name=Ecsape")["user"], "max")
 
     def test_the_servers_stand_in_is_no_picture(self):
         self.started()  # no picture for anything: Navidrome answers with its blue disc, as an ordinary picture

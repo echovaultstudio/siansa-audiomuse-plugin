@@ -175,6 +175,26 @@ main > section.on { display: grid; gap: 16px; }
 .tm-listens .t b { font-weight: 600; } .tm-listens .t span { font-size: 0.8rem; color: var(--faint); }
 .tm-listens time { font-size: 0.76rem; color: var(--faint); white-space: nowrap; }
 .tm-faces { display: flex; flex-wrap: wrap; gap: 8px; }
+/* An artist's name or row opens its page. */
+[data-artist] { cursor: pointer; }
+.tm-rank li[data-artist]:hover, .tm-listens li[data-artist]:hover { background: color-mix(in srgb, var(--text) 5%, transparent); border-radius: 8px; }
+.tm-link { color: inherit; text-decoration: none; } .tm-link:hover { color: var(--amber-text); text-decoration: underline; }
+/* An artist's page: its picture big behind its name, then its numbers and its music. */
+.ar-hero { position: relative; overflow: hidden; isolation: isolate; border-radius: 18px; border: 1px solid var(--line); min-height: 300px;
+  display: flex; flex-direction: column; justify-content: flex-end; padding: 18px 20px; color: #fff; background: var(--raised-2); }
+.ar-hero .art { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 0; aspect-ratio: auto; font-size: 5rem; z-index: -2; }
+.ar-hero .art img { object-position: center 25%; }
+.ar-hero::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(to top, rgba(0, 0, 0, 0.92), rgba(0, 0, 0, 0.35) 55%, rgba(0, 0, 0, 0.1)); }
+.ar-hero .back { position: absolute; top: 14px; left: 14px; background: rgba(0, 0, 0, 0.45); color: #fff; border-color: rgba(255, 255, 255, 0.25); backdrop-filter: blur(6px); }
+.ar-hero h2 { font-size: clamp(2.1rem, 8vw, 3.6rem); line-height: 1.02; letter-spacing: -0.03em; margin: 4px 0 6px; }
+.ar-hero p { margin: 0; color: rgba(255, 255, 255, 0.82); font-size: 0.95rem; }
+.ar-hero .tm-kicker { color: #ffb547; }  /* on the dark of the picture, in light and dark */
+#ar-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ar-albums { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
+.ar-album { min-width: 0; } .ar-album .art { width: 100%; font-size: 1.6rem; border-radius: 10px; }
+.ar-album > b, .ar-album > span:not(.art) { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ar-album > b { margin-top: 8px; font-size: 0.92rem; } .ar-album > span:not(.art) { font-size: 0.8rem; color: var(--faint); }
+@media (max-width: 700px) { .ar-hero { min-height: 260px; } #ar-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ar-albums { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tm-faces .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 3px; margin: 0; font-size: 0.82rem; }
 .tm-rank .t { min-width: 0; } .tm-rank .t b, .tm-rank .t span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tm-rank .t b { font-weight: 600; } .tm-rank .t span { font-size: 0.8rem; color: var(--faint); }
@@ -182,9 +202,11 @@ main > section.on { display: grid; gap: 16px; }
 .tm-facts { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; margin: 0; }
 .tm-facts dt { color: var(--muted); } .tm-facts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .tm-empty { text-align: center; padding: 28px 16px; color: var(--muted); }
-.tm-tabs { position: sticky; top: var(--header-h); z-index: 4; display: flex; gap: 4px; padding: 6px; border-radius: 999px;
+.tm-tabs { position: sticky; top: var(--header-h); z-index: 4; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 5px; border-radius: 999px;
   background: color-mix(in srgb, var(--raised) 92%, transparent); backdrop-filter: blur(10px); border: 1px solid var(--line); }
-.tm-tabs button { flex: 1 1 0; border: 0; padding: 8px 6px; font-weight: 600; color: var(--muted); background: none; }
+.tm-tabs button { justify-content: center; text-align: center; min-width: 0; border: 0; padding: 9px 4px; font-weight: 600; color: var(--muted); background: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background 0.15s ease, color 0.15s ease; }
+.tm-tabs button:hover { color: var(--text); }
 .tm-tabs button[aria-selected=true] { background: var(--amber); color: var(--on-amber); }
 .tm-panel { display: grid; gap: 16px; min-width: 0; }
 .tm-seg { margin-bottom: 12px; }
@@ -673,6 +695,25 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
           <div class="controls" id="tm-lf-off-box" hidden><button type="button" id="tm-lf-off">Disconnect</button></div>
         </div>
       </div>
+    </section>
+
+    <!-- One artist in the listening history: reached from any artist's name or row on Listening (#artist=<name>). -->
+    <section data-view="artist">
+      <div class="ar-hero" id="ar-hero">
+        <button type="button" class="back" id="ar-back">‹ Listening</button>
+        <span id="ar-face"></span>
+        <div class="tm-kicker" id="ar-kicker">Artist</div>
+        <h2 id="ar-name"></h2>
+        <p id="ar-sub" role="status">Loading…</p>
+      </div>
+      <div class="tiles tm-tiles" id="ar-tiles"></div>
+      <div class="tm-cols">
+        <div class="card"><h3>Year by year</h3><div class="tm-chart" id="ar-years"></div><p class="sub">Press a year for that year on Listening.</p></div>
+        <div class="card"><h3>Around the clock</h3><div class="tm-chart small" id="ar-hours"></div><p class="sub" id="ar-hours-note"></p></div>
+      </div>
+      <div class="card"><h3>Most played songs</h3><ol class="tm-rank" id="ar-songs" data-cap="10"></ol></div>
+      <div class="card"><h3>Albums</h3><div class="ar-albums" id="ar-albums"></div></div>
+      <div class="card"><h3>Last listens</h3><ul class="tm-listens" id="ar-recent" data-cap="5"></ul></div>
     </section>
 
     <section data-view="activity">
@@ -1505,7 +1546,7 @@ window.addEventListener("scroll", () => { toTop.hidden = window.scrollY < window
 // ---- pages ----
 // One page at a time, chosen in the side menu (tabs on a phone) and kept in the address (#songs, #song=<id>), so Back
 // and a bookmark work.
-const VIEWS = ["overview", "libraries", "songs", "listening", "loudness", "genres", "similar", "blends", "activity", "log", "setup"];
+const VIEWS = ["overview", "libraries", "songs", "listening", "artist", "loudness", "genres", "similar", "blends", "activity", "log", "setup"];
 let currentView = null;
 function showView(view, keepHash) {
   if (!VIEWS.includes(view)) view = "overview";
@@ -1522,8 +1563,14 @@ function showView(view, keepHash) {
   if (view === "loudness") refreshLoudness();
   if (view === "similar") drawSimilarStatus();
   if (view === "listening") refreshListening();
+  if (view === "artist") {  // part of Listening: its menu entry stays marked
+    document.querySelector('.nav [data-view="listening"]')?.setAttribute("aria-current", "page");
+    $("page-name").textContent = "Listening · " + (ar.name || "Artist");
+  }
 }
 function route() {
+  const a = location.hash.match(/^#artist=(.+)$/);
+  if (a) { showView("artist", true); openArtist(decodeURIComponent(a[1])); return; }
   const m = location.hash.match(/^#song=(.+)$/);
   if (m) { showView("songs", true); if (selected !== decodeURIComponent(m[1])) { history.replaceState({song: decodeURIComponent(m[1])}, "", location.hash); openSong(decodeURIComponent(m[1]), true, true); } return; }
   showView(location.hash.slice(1) || "overview", true);
@@ -1562,13 +1609,15 @@ const TM_KINDS = {
 };
 function tmFeature(kind, r, wide) {
   const k = TM_KINDS[kind], under = k.under(r);
-  return `<${wide ? "div" : "button type=\"button\""} class="tm-feature${wide ? " wide" : ""}" data-kind="${kind}">${k.pic(r, 640, "")}` +
+  // An artist's card opens its page; an album's or a song's opens its list (and the list's number one, its artist's page).
+  const attrs = kind === "artists" || wide ? ` data-artist="${esc(r.artist)}" tabindex="0" style="cursor:pointer"` : "";
+  return `<${wide ? "div" : "button type=\"button\""} class="tm-feature${wide ? " wide" : ""}" data-kind="${kind}"${attrs}>${k.pic(r, 640, "")}` +
     `<span class="txt"><small>${wide ? "Number one" : k.one}</small><b>${esc(k.title(r))}</b><i>${under ? esc(under) + " · " : ""}${num(r.listens)} plays</i></span></${wide ? "div" : "button"}>`;
 }
 // The rows after the first (which is the picture above the list), numbered from 2.
 function tmRank(kind, rows) {
   const k = TM_KINDS[kind], most = Math.max(1, ...rows.map((r) => r.listens));
-  $("tm-" + kind).innerHTML = rows.slice(1).map((r) => `<li style="--w:${Math.round(r.listens / most * 100)}%">${k.pic(r, 96, "s" + (k.round ? " round" : ""))}` +
+  $("tm-" + kind).innerHTML = rows.slice(1).map((r) => `<li style="--w:${Math.round(r.listens / most * 100)}%" data-artist="${esc(r.artist)}" tabindex="0" title="${esc(r.artist)}'s page">${k.pic(r, 96, "s" + (k.round ? " round" : ""))}` +
     `<div class="t"><b>${esc(k.title(r))}</b>${k.under(r) ? `<span>${esc(k.under(r))}</span>` : ""}</div><span class="n">${num(r.listens)}</span></li>`).join("");
 }
 function tmFirst() {
@@ -1581,6 +1630,62 @@ function tmTop(kind) {
   ["songs", "artists", "albums"].forEach((k) => { $("tm-" + k).hidden = k !== kind; capList($("tm-" + k)); });
   tmFirst();
 }
+// ---- an artist's page ----
+const ar = {name: null};
+function artistHref(name) { return "#artist=" + encodeURIComponent(name); }
+function goArtist(name) { if (name) location.hash = artistHref(name); }
+// Any element with data-artist opens that artist's page (rows, cards, names), by a click or Enter.
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-artist]");
+  if (!el || e.target.closest("a[href]:not([data-artist]), button:not([data-artist])")) return;
+  e.preventDefault();
+  goArtist(el.dataset.artist);
+});
+document.addEventListener("keydown", (e) => {
+  const el = e.target.closest && e.target.closest("[data-artist]");
+  if (el && (e.key === "Enter" || e.key === " ") && el.tagName !== "BUTTON" && el.tagName !== "A") { e.preventDefault(); goArtist(el.dataset.artist); }
+});
+$("ar-back").addEventListener("click", () => { if (history.length > 1 && document.referrer !== "") history.back(); else location.hash = "#listening"; });
+async function openArtist(name) {
+  ar.name = name;
+  $("ar-name").textContent = name;
+  $("ar-sub").textContent = "Loading…";
+  $("page-name").textContent = "Listening · " + name;
+  document.title = `${name} · Siansa Beats`;
+  const q = new URLSearchParams({name});
+  if (tm.user != null) q.set("user", tm.user);
+  if (TM_ZONE) q.set("tz", TM_ZONE);
+  let d;
+  try { d = await api("api/listens/artist?" + q); }
+  catch (e) { $("ar-sub").textContent = e.message; $("ar-face").innerHTML = ""; return; }
+  if (ar.name !== name) return;  // another artist was opened meanwhile
+  ar.name = d.artist;
+  $("ar-name").textContent = d.artist;
+  $("page-name").textContent = "Listening · " + d.artist;
+  $("ar-face").innerHTML = art("artist", d.face, d.artist, 640, "");
+  const t = d.totals, when = (at) => new Date(at * 1000).toLocaleDateString(undefined, {day: "numeric", month: "long", year: "numeric"});
+  $("ar-kicker").textContent = `Your number ${t.rank} artist`;
+  $("ar-sub").textContent = `${num(t.listens)} plays · ${tmHours(t.seconds)} hours · since ${new Date(d.first.at * 1000).toLocaleDateString(undefined, {month: "long", year: "numeric"})}`;
+  const tile = (k, v, s) => `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${v}</div><div class="s sub">${esc(s || "")}</div></div>`;
+  $("ar-tiles").innerHTML = tile("Plays", num(t.listens), `${t.share} % of all you played`) + tile("Hours", tmHours(t.seconds), "") +
+    tile("Songs", num(t.songs), "different ones") + tile("Albums", num(t.albums), "") +
+    tile("Busiest year", String(d.busiest_year.year), `${num(d.busiest_year.listens)} plays`) + tile("Days", num(t.days), "with them");
+  tmBars("ar-years", d.years.map((y) => ({label: String(y.year), short: d.years.length > 10 && y.year % 2 ? "" : String(y.year), listens: y.listens, year: y.year})),
+    (p) => { tm.year = p.year; tm.month = null; tmTab("overview"); location.hash = "#listening"; });
+  tmBars("ar-hours", d.hours.map((n, h) => ({label: `${String(h).padStart(2, "0")}:00`, short: h % 6 ? "" : String(h), listens: n})));
+  const peak = d.hours.indexOf(Math.max(...d.hours));
+  $("ar-hours-note").textContent = `Mostly around ${String(peak).padStart(2, "0")}:00. First heard ${when(d.first.at)} (${d.first.title}); last ${tmAgo(d.last.at)} (${d.last.title}).`;
+  const most = Math.max(1, ...d.songs.map((r) => r.listens));
+  $("ar-songs").setAttribute("start", "1");
+  $("ar-songs").style.counterReset = "rank 0";
+  $("ar-songs").innerHTML = d.songs.map((r) => `<li style="--w:${Math.round(r.listens / most * 100)}%">${art("cover", r.cover, r.title, 96, "s", r.artist)}` +
+    `<div class="t"><b>${esc(r.title)}</b>${r.album ? `<span>${esc(r.album)}</span>` : ""}</div><span class="n">${num(r.listens)}</span></li>`).join("");
+  $("ar-albums").innerHTML = d.albums.map((r) => `<div class="ar-album">${art("cover", r.cover, r.album, 300, "", r.artist)}` +
+    `<b>${esc(r.album)}</b><span>${num(r.listens)} plays · ${num(r.songs)} song${r.songs === 1 ? "" : "s"}</span></div>`).join("") || '<p class="sub">No albums named in these listens.</p>';
+  $("ar-recent").innerHTML = d.recent.map((l) => `<li>${art("cover", l.cover, l.title, 96, "s", l.artist)}<div class="t"><b>${esc(l.title)}</b><span>${esc(l.album || "")}</span></div>` +
+    `<time>${esc(tmAgo(l.at))}</time></li>`).join("");
+}
+
 // When a listen was: "5 min ago", "3 h ago", "yesterday", else the date.
 function tmAgo(at) {
   const s = Date.now() / 1000 - at;
@@ -1610,7 +1715,7 @@ function drawListening(d) {
   // What's playing, for every listener (the app's listener may not be the one shown).
   const playing = d.playing || [];
   $("tm-now").hidden = !playing.length;
-  $("tm-now-what").innerHTML = playing.map((p) => `<div class="row">${art("cover", p.cover, p.title, 96, "m")}<div class="t">` +
+  $("tm-now-what").innerHTML = playing.map((p) => `<div class="row" data-artist="${esc(p.artist)}" tabindex="0" title="${esc(p.artist)}'s page">${art("cover", p.cover, p.title, 96, "m")}<div class="t">` +
     `<div class="kicker"><span class="dot" aria-hidden="true"></span>Playing now${playing.length > 1 || p.user !== d.user ? ` · ${esc(p.user || "no name")}` : ""}</div>` +
     `<b>${esc(p.title)}</b><span>${esc(p.artist)}</span></div></div>`).join("");
   // Listens without a listener's name (a file brought in with none) beside a named listener (the app's): join them.
@@ -1664,7 +1769,7 @@ function drawListening(d) {
     tmFirst();
     // The favourites of this time, a picture each: press one for its whole list.
     $("tm-podium").innerHTML = ["artists", "albums", "songs"].filter((k) => d.top[k].length).map((k) => tmFeature(k, d.top[k][0], false)).join("");
-    $("tm-podium").querySelectorAll(".tm-feature").forEach((b) => b.addEventListener("click", () => { tmTop(b.dataset.kind); tmTab("top"); window.scrollTo({top: 0}); }));
+    $("tm-podium").querySelectorAll('.tm-feature:not([data-kind="artists"])').forEach((b) => b.addEventListener("click", () => { tmTop(b.dataset.kind); tmTab("top"); window.scrollTo({top: 0}); }));
     // The most played artist of this time, faint behind its name.
     const face = (d.top.artists.find((a) => a.face) || {}).face;
     document.querySelector(".tm-hero").style.setProperty("--face", face ? `url("${artUrl("artist", face, 640)}")` : "none");
@@ -1682,10 +1787,10 @@ function drawListening(d) {
       ["", r.first ? new Date(r.first.at * 1000).toLocaleString(undefined, {dateStyle: "medium", timeStyle: "short"}) : ""],
     ].map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
     $("tm-new-card").hidden = !d.period.year || !(d.new_artists || []).length;
-    $("tm-new").innerHTML = (d.new_artists || []).map((a) => `<span class="chip" title="${num(a.listens)} listens since">${art("artist", a.face, a.artist, 96, "xs round")}${esc(a.artist)}</span>`).join("");
+    $("tm-new").innerHTML = (d.new_artists || []).map((a) => `<span class="chip" data-artist="${esc(a.artist)}" tabindex="0" title="${num(a.listens)} listens since: ${esc(a.artist)}'s page">${art("artist", a.face, a.artist, 96, "xs round")}${esc(a.artist)}</span>`).join("");
   }
   $("tm-recent-card").hidden = !(d.recent || []).length;  // History: always there, also in a month with nothing
-  $("tm-recent").innerHTML = (d.recent || []).map((l) => `<li>${art("cover", l.cover, l.title, 96, "s")}<div class="t"><b>${esc(l.title)}</b><span>${esc(l.artist)}</span></div>` +
+  $("tm-recent").innerHTML = (d.recent || []).map((l) => `<li data-artist="${esc(l.artist)}" tabindex="0">${art("cover", l.cover, l.title, 96, "s")}<div class="t"><b>${esc(l.title)}</b><span>${esc(l.artist)}</span></div>` +
     `<time>${esc(tmAgo(l.at))}</time></li>`).join("");
   drawImport(d.importing);
   $("tm-remove-box").hidden = !users.some((u) => u.user === d.user && u.listens);
