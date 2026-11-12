@@ -466,18 +466,20 @@ class Store:
             out.setdefault(r["song_id"], {}).setdefault(r["source"], []).append((r["label"], r["weight"]))
         return out
 
-    # A song is in a style's genre when its sound scores it ``minimum`` or more, and always in its best one.
-    HEARD = ("g.source='sound' AND (g.weight >= ? OR NOT EXISTS (SELECT 1 FROM genres b WHERE b.song_id = g.song_id "
-             "AND b.source='sound' AND b.weight > g.weight))")
+    # A song is in a style's genre when its sound scores it ``minimum`` or more and the style is among its ``rank``
+    # best (fewer styles above it than ``rank``), and always in its best one. Takes (minimum, rank).
+    HEARD = ("g.source='sound' AND ((g.weight >= ? AND (SELECT COUNT(*) FROM genres b WHERE b.song_id = g.song_id "
+             "AND b.source='sound' AND b.weight > g.weight) < ?) OR NOT EXISTS (SELECT 1 FROM genres b WHERE "
+             "b.song_id = g.song_id AND b.source='sound' AND b.weight > g.weight))")
 
-    def heard_of(self, song_ids, minimum):
+    def heard_of(self, song_ids, minimum, rank):
         """``{song id: [(label, weight)]}``: the genres each of ``song_ids`` is in by its sound, its best first."""
         out, ids = {}, list(dict.fromkeys(song_ids))
         for start in range(0, len(ids), 500):
             chunk = ids[start:start + 500]
             marks = ", ".join("?" for _ in chunk)
             for r in self._rows(f"SELECT g.song_id AS id, g.label AS label, g.weight AS w FROM genres g WHERE {self.HEARD} "
-                                f"AND g.song_id IN ({marks}) ORDER BY g.weight DESC, g.label", (minimum, *chunk)):
+                                f"AND g.song_id IN ({marks}) ORDER BY g.weight DESC, g.label", (minimum, rank, *chunk)):
                 out.setdefault(r["id"], []).append((r["label"], r["w"]))
         return out
 
@@ -489,32 +491,32 @@ class Store:
             self.genre_changes += 1
         return gone
 
-    def heard_counts(self, minimum, server=None):
+    def heard_counts(self, minimum, rank, server=None):
         """``{label: songs}``: how many songs (``server``'s only, when given) are in each style's genre by their
         sound."""
         if server is None:
             return {r["label"]: r["n"] for r in self._rows(
-                f"SELECT g.label, COUNT(*) AS n FROM genres g WHERE {self.HEARD} GROUP BY g.label", (minimum,))}
+                f"SELECT g.label, COUNT(*) AS n FROM genres g WHERE {self.HEARD} GROUP BY g.label", (minimum, rank))}
         # The server's songs first, then each one's styles (CROSS JOIN keeps that order: five times quicker than the
         # styles first on a big library).
         return {r["label"]: r["n"] for r in self._rows(
             "SELECT g.label, COUNT(*) AS n FROM links l CROSS JOIN genres g ON g.song_id = l.song_id "
-            f"WHERE l.server = ? AND {self.HEARD} GROUP BY g.label", (server, minimum))}
+            f"WHERE l.server = ? AND {self.HEARD} GROUP BY g.label", (server, minimum, rank))}
 
-    def heard_counts_by_library(self, minimum, server=MAIN):
+    def heard_counts_by_library(self, minimum, rank, server=MAIN):
         """``{label: {library: songs}}``: :meth:`heard_counts` split by the library the songs are in on ``server``, so
         the app can leave out a genre whose songs are all in libraries it hides."""
         out = {}
         for r in self._rows(
                 "SELECT g.label, COALESCE(l.folder, '') AS folder, COUNT(*) AS n FROM links l CROSS JOIN genres g "
                 f"ON g.song_id = l.song_id WHERE l.server = ? AND {self.HEARD} GROUP BY g.label, l.folder",
-                (server, minimum)):
+                (server, minimum, rank)):
             out.setdefault(r["label"], {})[str(r["folder"])] = r["n"]
         return out
 
-    def songs_heard(self, labels, minimum, limit=None, server=None):
-        """Every song id in the genre of any of ``labels`` by their sound, the ones that sound most like it first (the
-        first ``limit`` when given): the ids here, or ``server``'s own for the songs it has."""
+    def songs_heard(self, labels, minimum, rank, limit=None, server=None):
+        """Every song in the genre of any of ``labels`` by their sound, as ``[(id, weight)]``, the ones that sound most
+        like it first (the first ``limit`` when given): the ids here, or ``server``'s own for the songs it has."""
         labels = list(labels)
         if not labels:
             return []
@@ -522,13 +524,13 @@ class Store:
         if server is None:
             rows = self._rows(
                 f"SELECT g.song_id AS id, MAX(g.weight) AS w FROM genres g WHERE {self.HEARD} "
-                f"AND g.label IN ({marks}) GROUP BY g.song_id", (minimum, *labels))
+                f"AND g.label IN ({marks}) GROUP BY g.song_id", (minimum, rank, *labels))
         else:
             rows = self._rows(
                 "SELECT l.item_id AS id, MAX(g.weight) AS w FROM genres g JOIN links l ON l.song_id = g.song_id "
                 f"AND l.server = ? WHERE {self.HEARD} AND g.label IN ({marks}) GROUP BY l.item_id",
-                (server, minimum, *labels))
-        return [r["id"] for r in sorted(rows, key=lambda r: -r["w"])][:limit]
+                (server, minimum, rank, *labels))
+        return [(r["id"], r["w"]) for r in sorted(rows, key=lambda r: -r["w"])][:limit]
 
     def genres(self, song_id):
         return self._rows("SELECT source, label, weight FROM genres WHERE song_id=? ORDER BY source, weight DESC, label",

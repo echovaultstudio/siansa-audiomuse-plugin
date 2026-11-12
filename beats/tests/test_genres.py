@@ -37,9 +37,11 @@ class GenresTest(unittest.TestCase):
                   ("Electronic---Techno", 0.149), ("Pop---Ballad", 0.02)]
         self.assertEqual(genres.heard(ranked), ranked[:3])
         self.assertEqual(genres.heard(list(reversed(ranked))), ranked[:3])  # in any order
-        # No limit on how many: the vote kept five.
-        many = [(label, 0.3) for label in LABELS]
-        self.assertEqual(len(genres.heard(many)), len(LABELS))
+        # Only among its best three (0.36): a faint fourth guess doesn't make a genre.
+        many = [(label, 0.3 - i * 0.001) for i, label in enumerate(LABELS)]
+        self.assertEqual(len(genres.heard(many)), 3)
+        self.assertEqual(len(genres.heard(many, rank=1)), 1)
+        self.assertEqual(len(genres.heard(many, rank=len(LABELS))), len(LABELS))
 
     def test_a_song_is_always_in_its_best_genre(self):
         self.assertEqual(genres.heard([("Pop---Ballad", 0.05), ("Rock---Punk", 0.03)]), [("Pop---Ballad", 0.05)])

@@ -6,7 +6,7 @@ that would break that is v2, next to v1. The full description is ``openapi.json`
     GET  /api/v1/capabilities          what this Siansa Beats can do now, and how far it is (the app's DJ check)
     GET  /api/v1/profiles?ids=a,b      loudness, fades, key and the beat grid at both ends of up to 500 songs
     GET  /api/v1/genres                every style with songs in its genre by their sound, most first
-    GET  /api/v1/genre?name=&limit=    the songs of a genre, by their sound (all without limit): {"name", "styles", "genres", "ids", "songs"}
+    GET  /api/v1/genre?name=&limit=    the songs of a genre, by their sound (all without limit): {"name", "styles", "genres", "ids", "weights", "songs", "sure"}
     GET  /api/v1/genre/about?name=     a short description of a genre, from Wikipedia: {"name", "about"}
     GET  /api/v1/songs/genres?ids=a,b  the genres each of up to 500 songs is in by its sound, its best first
     POST /api/v1/listens               finished listens of a listener: {"user", "listens": [{"id", "at", "artist", …}]}

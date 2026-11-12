@@ -1,8 +1,10 @@
 """A song's genres: what its sound says (:mod:`beats.style`, Essentia's Discogs-EffNet), and nothing else.
 
 Every genre is one of the model's 400 Discogs styles (``Electronic---Progressive Trance``). A song is in a genre when
-its sound scores that style :data:`HEARD_MIN` or more, and always in the one it scores highest; there is no limit on
-how many genres a song is in, nor on how many songs a genre has. The songs' own genre tags play no part (before 0.28
+its sound scores that style :data:`HEARD_MIN` or more *and* the style is among its :data:`HEARD_RANK` best (0.36, the
+owner, 12 Nov: a country album's faint fourth and fifth guesses had put it in Electro House), and always in the one it
+scores highest; there is no limit on how many songs a genre has. A radio for a whole family ("Electronic") takes only
+the songs whose best style is in it. The songs' own genre tags play no part (before 0.28
 they were voted together with the sound): they stay what Siansa shows on an album's or an artist's page.
 
 Names are still matched onto the styles, for what a radio is asked for: "Drum And Bass", "drum & bass" and "DnB" are
@@ -15,6 +17,7 @@ Plain Python.
 import re
 
 HEARD_MIN = 0.15  # a song is in a style's genre when its sound scores it this or more (and always in its best one)
+HEARD_RANK = 3  # …and the style is among the song's best this many; a family radio takes the best style only (1)
 
 # Other names for the same thing, after normalising (lower case, "&" as "and", only letters and digits).
 ALIASES = {
@@ -71,11 +74,11 @@ class Taxonomy:
         return styles, genres
 
 
-def heard(ranked, minimum=HEARD_MIN):
+def heard(ranked, minimum=HEARD_MIN, rank=HEARD_RANK):
     """The genres of a song whose sound gave ``ranked`` (``[(label, score)]``, best first): every style at
-    ``minimum`` or more, and always the best one."""
+    ``minimum`` or more among its ``rank`` best, and always the best one."""
     ranked = sorted(ranked or [], key=lambda p: -p[1])
-    return [p for i, p in enumerate(ranked) if p[1] >= minimum or p[1] == ranked[0][1]]
+    return [p for i, p in enumerate(ranked) if (p[1] >= minimum and i < rank) or p[1] == ranked[0][1]]
 
 
 def target(taxonomy, name):
