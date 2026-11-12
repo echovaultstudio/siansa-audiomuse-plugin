@@ -142,7 +142,10 @@ USER beats
 RUN python -c "import onnx; from onnx2torch import convert; \
 convert(onnx.load('/models/discogs-effnet-bsdynamic-1.onnx')); print('converts as the service user')"
 # NVIDIA's container toolkit gives a GPU to containers that ask with these (harmless without one).
-ENV DATA_DIR=/data MODELS_DIR=/models PORT=8090 NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
+# MALLOC_ARENA_MAX: two pools of memory for the C library, not one a thread: freed memory goes back to the system
+# instead of staying with whichever thread had it (beats/memory.py, 0.34).
+ENV DATA_DIR=/data MODELS_DIR=/models PORT=8090 NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    MALLOC_ARENA_MAX=2
 VOLUME /data
 EXPOSE 8090
 

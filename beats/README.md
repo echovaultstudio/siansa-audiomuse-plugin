@@ -24,6 +24,13 @@ database. Nothing is written to your music files or the servers. Siansa Dev talk
 You need a Docker server on the same network as Navidrome, with about 3 GB of disk for the image and 2–3 GB of
 memory free while it works.
 
+**Memory (0.34).** The models are loaded by the first song and let go again after 10 minutes without a song to
+analyse (the Activity list says so, with the memory held before and after); the next song loads them again in a few
+seconds. What a song needed is handed back to the system when it's done. The log says how much memory is held at the
+start and each time the models go, and `/api/status` has it as `memory_mb`. On a GPU, the GPU's own libraries stay
+with the service once a model has used it (CUDA keeps them until the service restarts), so it rests higher there
+than on the CPU.
+
 1. **Know your libraries.** Siansa Beats analyses the Navidrome libraries you tick on its page (Navidrome's
    Settings › Libraries lists them), so you can leave some out, such as compilations or audiobooks. A song takes a
    few seconds on a GPU, much longer on the CPU: try one small library first.

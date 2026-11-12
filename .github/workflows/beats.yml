@@ -55,6 +55,8 @@ jobs:
         run: cd beats && python3 -P tests/test_secrets.py
       - name: What songs sound like, taken over from AudioMuse-AI (0.25)
         run: cd beats && python3 -P tests/test_sound.py
+      - name: Memory handed back (0.34)
+        run: cd beats && python3 -P tests/test_memory.py
       - name: The listening history (0.29), its exports and Last.fm
         run: cd beats && python3 -P tests/test_listens.py
       - name: The page's script parses

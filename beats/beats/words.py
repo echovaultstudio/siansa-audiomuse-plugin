@@ -25,7 +25,7 @@ import time
 
 import numpy as np
 
-from . import log
+from . import log, memory
 
 _log = log.get("words")
 
@@ -86,7 +86,7 @@ class Words:
         tokenizer.enable_truncation(TOKENS)
         tokenizer.enable_padding(length=TOKENS, pad_id=1, pad_token="<pad>")
         self._tokenizer = tokenizer
-        self._text = onnxruntime.InferenceSession(self._path(TEXT_MODEL), providers=["CPUExecutionProvider"])
+        self._text = onnxruntime.InferenceSession(self._path(TEXT_MODEL), memory.session_options(onnxruntime), providers=["CPUExecutionProvider"])
         self.load_seconds = round(time.monotonic() - started, 1)
         _log.info("The text model is loaded (%.1fs)", self.load_seconds)
 
@@ -97,8 +97,8 @@ class Words:
             return False
         import onnxruntime
 
-        self._encoder = onnxruntime.InferenceSession(self._path(ENCODER), providers=["CPUExecutionProvider"])
-        self._decoder = onnxruntime.InferenceSession(self._path(DECODER), providers=["CPUExecutionProvider"])
+        self._encoder = onnxruntime.InferenceSession(self._path(ENCODER), memory.session_options(onnxruntime), providers=["CPUExecutionProvider"])
+        self._decoder = onnxruntime.InferenceSession(self._path(DECODER), memory.session_options(onnxruntime), providers=["CPUExecutionProvider"])
         return True
 
     def unload_if_idle(self, now=None):

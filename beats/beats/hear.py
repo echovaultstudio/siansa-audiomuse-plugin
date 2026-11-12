@@ -31,7 +31,7 @@ import time
 
 import numpy as np
 
-from . import log
+from . import log, memory
 
 _log = log.get("hear")
 
@@ -169,14 +169,21 @@ class Hearer:
         import onnxruntime
 
         started = time.monotonic()
-        options = onnxruntime.SessionOptions()
-        if self.threads:
-            options.intra_op_num_threads = self.threads
+        options = memory.session_options(onnxruntime, self.threads)
         self._sessions = tuple(onnxruntime.InferenceSession(self._path(n), options, providers=["CPUExecutionProvider"])
                                for n in (EMBEDDING, PREDICTION, CLAP_AUDIO))
         self.load_seconds = round(time.monotonic() - started, 1)
         _log.info("The models that hear a song's sound are loaded (%.1fs)", self.load_seconds)
         return self._sessions
+
+    def unload(self):
+        """Lets the models go (they load again with the next song); True when there were any. The six feelings stay:
+        they're a few numbers."""
+        with self._lock:
+            if self._sessions is None:
+                return False
+            self._sessions = None
+            return True
 
     def feelings(self):
         """The six feelings as vectors in CLAP's space (worked out once, with the text model), or None without it."""

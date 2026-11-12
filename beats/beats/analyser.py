@@ -93,6 +93,22 @@ class BeatThis:
                 self.load_seconds = time.monotonic() - started
         return self._tracker
 
+    def unload(self):
+        """Lets the model go (it loads again with the next song); True when it was loaded. On a GPU its memory there
+        is handed back; the GPU's own libraries stay with the service until it restarts."""
+        with self._lock:
+            if self._tracker is None:
+                return False
+            self._tracker = None
+            if self.device and self.device.startswith("cuda"):
+                try:
+                    import torch
+
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+            return True
+
     def __call__(self, samples, rate=RATE):
         tracker = self.load()
         import torch
