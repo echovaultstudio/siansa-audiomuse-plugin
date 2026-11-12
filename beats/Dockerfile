@@ -3,6 +3,14 @@
 # Two builds from this file: the CPU one (the default) and, with --build-arg TORCH_INDEX=…/whl/cu121, the cuda one
 # for an NVIDIA GPU (it also runs without one, on the CPU). The model's checkpoints are downloaded while the image is
 # built and kept in /models, so the service itself needs no internet: only your Navidrome (and AudioMuse-AI).
+# How energetic a song is (0.35): Essentia's emoMusic arousal model (MTG, UPF; CC BY-NC-SA 4.0), published as a
+# TensorFlow file, made into ONNX here. TensorFlow is in this stage only: the image itself gets the one small file.
+FROM python:3.11-slim-bookworm AS arousal
+ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_DEFAULT_TIMEOUT=120 PIP_RETRIES=10
+RUN pip install tensorflow-cpu==2.15.1 tf2onnx==1.16.1 "numpy<2"
+COPY arousal_model.py /tmp/arousal_model.py
+RUN python /tmp/arousal_model.py /emomusic-msd-musicnn-2.onnx && ls -la /emomusic-msd-musicnn-2.onnx
+
 FROM python:3.12-slim-bookworm
 
 LABEL org.opencontainers.image.source="https://github.com/echovaultstudio/siansa-beats" \
@@ -136,6 +144,14 @@ print('text model ok: alike', round(float(a @ b), 3), 'unlike', round(float(a @ 
 RUN python -c "import torch, beat_this.inference, beats.server; print('imports ok, torch', torch.__version__, 'cuda', torch.version.cuda)" \
  && python -c "import numpy, beats.style as s; m = s.StyleModel('/models'); assert m.available; \
 r = m(numpy.zeros(16000 * 5, numpy.float32)); assert len(r) == 400 and 0 <= r[0][1] <= 1, r[:3]; print('style model ok:', r[0])"
+
+# The arousal model for real: any number of songs at once, the same answer each time, each about 1 to 9.
+COPY --from=arousal /emomusic-msd-musicnn-2.onnx /models/emomusic-msd-musicnn-2.onnx
+RUN python -c "import numpy, tempfile, os; from beats.store import Store; from beats.drive import Arousal; \
+a = Arousal('/models', Store(os.path.join(tempfile.mkdtemp(), 'beats.db'))); assert a.available; \
+v = numpy.random.default_rng(1).normal(0, 1, (5, 200)).astype(numpy.float32); one, again, single = a.score(v), a.score(v), a.score(v[:1]); \
+assert one.shape == (5,) and numpy.allclose(one, again) and abs(float(single[0]) - float(one[0])) < 1e-4, (one, single); \
+assert numpy.all(numpy.isfinite(one)), one; print('arousal model ok:', numpy.round(one, 3), os.path.getsize('/models/emomusic-msd-musicnn-2.onnx'), 'bytes')"
 
 RUN useradd --uid 1000 --create-home beats && mkdir -p /data && chown beats /data
 USER beats

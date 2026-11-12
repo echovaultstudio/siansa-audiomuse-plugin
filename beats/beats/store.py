@@ -259,6 +259,17 @@ class Store:
                 out[r["song_id"]] = r
         return out
 
+    def energy_old_scale(self):
+        """Whether the energies taken over from AudioMuse-AI are on its old scale (beats.drive.old_scale): looked at
+        once for each change of the sound table."""
+        seen = getattr(self, "_old_scale", None)
+        if seen is None or seen[0] != self.sound_changes:
+            from .drive import old_scale
+
+            energies = [r["energy"] for r in self._rows("SELECT energy FROM sound WHERE source != 'beats' AND energy IS NOT NULL")]
+            seen = self._old_scale = (self.sound_changes, old_scale(energies))
+        return seen[1]
+
     def sound_counts(self, server=None):
         """``{"songs", "sound", "words"}``: ``server``'s songs, how many have their sound, how many the vector the
         search by words needs."""

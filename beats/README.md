@@ -24,6 +24,14 @@ database. Nothing is written to your music files or the servers. Siansa Dev talk
 You need a Docker server on the same network as Navidrome, with about 3 GB of disk for the image and 2–3 GB of
 memory free while it works.
 
+**How energetic a song is (0.35).** Beside the energy AudioMuse-AI measures (a song's loudness), every song with a
+sound gets its **arousal**: about 1 (calm) to 9, from Essentia's emoMusic model (MTG, UPF; CC BY-NC-SA 4.0), which
+reads the vector already kept for the song. So the whole library is scored once in seconds, with no song read again,
+and new songs as they come. In a trial on the owner's library (164 songs, five measures, judged by ear) it matched
+what he heard far better than loudness, which once on one scale barely tells songs apart. `/api/v1/audiomuse/api/sync`
+gives it as `arousal`. Energies taken over from an older AudioMuse-AI (its old scale, about 0.05 to 0.4) are given on
+today's scale (`energy_source`: `converted`).
+
 **Memory (0.34).** The models are loaded by the first song and let go again after 10 minutes without a song to
 analyse (the Activity list says so, with the memory held before and after); the next song loads them again in a few
 seconds. What a song needed is handed back to the system when it's done. The log says how much memory is held at the
@@ -463,7 +471,7 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 | `POST /api/v1/audiomuse/api/sonic_fingerprint/generate` | `{"n"}`: songs near what this server's user has played most (or near `ids`, when given). |
 | `POST /api/v1/audiomuse/api/clap/search` | `{"query", "limit", "steering": [{"term", "direction": "more" or "less", "weight"}]}`: the songs that sound like the description (0.26), each with its `similarity`; `steering_warnings` names terms that aren't concepts. |
 | `GET /api/v1/audiomuse/api/clap/concepts` | The concepts a search can be steered by, in their groups. |
-| `GET /api/v1/audiomuse/api/sync?ids=` | Up to 500 songs' tempo (Beat This!'s, `tempo_source`: `beat_this`; never AudioMuse-AI's), key, moods, genres and energy, without the vectors. `energy_source` (0.34) says who measured the energy, `beats` or `audiomuse`: compare energies only within one. |
+| `GET /api/v1/audiomuse/api/sync?ids=` | Up to 500 songs' tempo (Beat This!'s, `tempo_source`: `beat_this`; never AudioMuse-AI's), key, moods, genres and energy, without the vectors. `energy_source` says where the energy is from (`beats`, `converted`: the same scale; `audiomuse`: as taken over). `arousal` (0.35) is how energetic the song is to a listener, the one to order songs by. |
 | `POST /api/v1/bad-blends` | A song change marked as bad in the app. |
 
 With several music servers, every one of these takes `?server=`: the id (or name) of the server the app plays from,

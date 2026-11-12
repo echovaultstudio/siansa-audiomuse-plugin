@@ -221,6 +221,10 @@ class App:
         self.words = words if words is not None else Words(config.models_dir)
         # How a song sounds, heard here with AudioMuse-AI's models (0.27): new songs need no AudioMuse-AI.
         self.hearer = hearer if hearer is not None else Hearer(config.models_dir, self.words, config.threads)
+        # How energetic each song is (0.35, beats.drive): from the sound kept for it; nothing without the model.
+        from .drive import Arousal
+
+        self.arousal = Arousal(config.models_dir, self.store, config.threads)
         self.worker = Worker(self.store, self.servers, self.tracker, decode or analyser.decode,
                              config.data_dir, config.model, measure, self.style, sound, self.hearer)
         self.started = time.time()
@@ -274,6 +278,8 @@ class App:
             if self.words.unload_if_idle():
                 memory.trim()
             self.worker.let_models_go_if_idle()
+            if self.arousal.catch_up():  # songs heard or pulled since the last minute
+                memory.trim()
         except Exception as e:  # never the timer's end
             _log.debug("Minding the memory failed: %s", e)
 
@@ -1451,6 +1457,12 @@ def main():
             app.worker.regrid()
         except Exception:
             _log.exception("Working out older results again went wrong")
+        try:  # how energetic each song is (0.35): the whole library, once, from the sound already kept
+            scored = app.arousal.catch_up()
+            if scored:
+                app.store.event(f"Worked out how energetic {scored} songs are, from the sound kept for each (no song was read again)")
+        except Exception:
+            _log.exception("Working out how energetic the songs are went wrong")
         try:  # genres are the sound's alone from 0.28: the ones voted with the tags go
             gone = app.store.drop_votes()
             if gone:
