@@ -404,6 +404,30 @@ class ServiceTest(Service):
         self.app.worker.regridding = None
         self.assertIsNone(self.call("/api/status")["regridding"])
 
+    def test_the_pages_counts_are_kept_while_nothing_is_written(self):
+        """0.35.1: counting 45,000 sounds took over a second every few seconds on the owner's server."""
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        store, asked = self.app.store, []
+        counted, sources = store.sound_counts, store.sound_sources
+        store.sound_counts = lambda server=None: (asked.append("counts"), counted(server))[1]
+        store.sound_sources = lambda server=None: (asked.append("sources"), sources(server))[1]
+        seen, quiet = store.writes, 0  # the sound, the styles and the loudness follow the beats: until all is still
+        while quiet < 10:
+            time.sleep(0.1)
+            quiet = quiet + 1 if store.writes == seen else 0
+            seen = store.writes
+        first = self.call("/api/status")["sound"]
+        asked.clear()
+        for _ in range(3):
+            self.assertEqual(self.call("/api/status")["sound"]["songs"], first["songs"])
+        self.assertEqual(asked, [])  # nothing was written: nothing counted again
+        store.event("something happened")  # anything written: counted again, at once
+        self.assertEqual(self.call("/api/status")["sound"]["songs"], first["songs"])
+        self.assertEqual(sorted(asked), ["counts", "sources"])
+        self.assertIn("queue", self.app.status_parts)  # where a slow answer's time went, for the log
+
     def test_results_of_an_older_version_are_worked_out_again_from_their_beats(self):
         self.start()
         self.call("/api/libraries", "POST", {"ids": ["1"]})
