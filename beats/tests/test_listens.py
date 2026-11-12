@@ -33,6 +33,7 @@ class FakeLastFm(L.LastFm):
     def __init__(self):
         super().__init__()
         self.sent, self.playing, self.signed_in, self.fail, self.loved = [], [], [], None, []
+        self.sent_rows = []
 
     def session(self, api_key, secret, name, password):
         if password != "right":
@@ -45,6 +46,7 @@ class FakeLastFm(L.LastFm):
             raise self.fail
         assert keys == {"api_key": "key", "secret": "shh", "session": "session-max"}, keys
         self.sent.append([(r["at"], r["artist"], r["title"]) for r in rows])
+        self.sent_rows.append(rows)
 
     def now_playing(self, keys, row):
         self.playing.append((row["artist"], row["title"]))
@@ -329,11 +331,26 @@ class History(unittest.TestCase):
             return Answer()
 
         L.LastFm(opener).scrobble({"api_key": "key", "secret": "shh", "session": "sk"},
-                                  [{"at": 1, "artist": "Moby", "title": "Honey", "album": "Play", "duration": 200}])
+                                  [{"at": 1, "artist": "Moby • Sinéad O'Connor", "title": "Honey", "album": "Play",
+                                    "album_artist": "Moby", "duration": 200}])
         import hashlib
         signed = {k: v for k, v in seen.items() if k not in ("api_sig", "format")}
         self.assertEqual(seen["api_sig"], hashlib.md5(("".join(k + signed[k] for k in sorted(signed)) + "shh").encode()).hexdigest())
-        self.assertEqual((seen["artist[0]"], seen["track[0]"], seen["timestamp[0]"], seen["method"]), ("Moby", "Honey", "1", "track.scrobble"))
+        self.assertEqual((seen["artist[0]"], seen["track[0]"], seen["timestamp[0]"], seen["method"]),
+                         ("Moby • Sinéad O'Connor", "Honey", "1", "track.scrobble"))
+        # The album's artist too (0.37): Last.fm finds the album, and its cover, by it when the song's artist is a
+        # collaboration or the album a compilation.
+        self.assertEqual((seen["album[0]"], seen["albumArtist[0]"]), ("Play", "Moby"))
+        seen.clear()
+        L.LastFm(opener).now_playing({"api_key": "key", "secret": "shh", "session": "sk"},
+                                     {"artist": "Moby", "title": "Honey", "album": "Play", "album_artist": "Moby"})
+        self.assertEqual((seen["method"], seen["albumArtist"]), ("track.updateNowPlaying", "Moby"))
+
+    def test_the_album_artist_is_kept_and_sent_on(self):
+        self.connect()
+        self.listens.add("max", [self.row("2026-11-11T10:00:00", "Moby • Sinéad O'Connor", "Honey", album="Play", album_artist="Moby")])
+        self.listens.relay()
+        self.assertEqual(self.lastfm.sent_rows[-1][0]["album_artist"], "Moby")
 
 
 class ListeningService(Service):

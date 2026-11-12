@@ -459,8 +459,8 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 | `GET /api/v1/profiles?ids=a,b` | Up to 500 songs: loudness (`ref_lufs`), fades (`start_ramp`, `end_ramp`), key and scale, and the beat grid at each end. Songs with nothing yet are `pending`. |
 | `GET /api/v1/genres` | Every style with songs in its genre by their sound, most songs first. |
 | `GET /api/v1/genre?name=&limit=` | The songs of a genre, by their sound, the ones that sound most like it first: all of them (`songs` says how many), or a random `limit` of them. |
-| `POST /api/v1/listens` | Finished listens of a listener: `{"user", "listens": [{"id", "at", "artist", "title", "album", "duration"}]}` (at most 500; `at`: seconds since 1970). Answers `{"kept", "known", "skipped"}`; the same listen twice is kept once. |
-| `POST /api/v1/listens/now` | What's playing now: `{"user", "artist", "title", "album", "duration"}`. |
+| `POST /api/v1/listens` | Finished listens of a listener: `{"user", "listens": [{"id", "at", "artist", "title", "album", "album_artist", "duration"}]}` (at most 500; `at`: seconds since 1970). Answers `{"kept", "known", "skipped"}`; the same listen twice is kept once. `album_artist` (0.37) goes on to Last.fm, which finds a collaboration's or compilation's album, and its cover, by it. |
+| `POST /api/v1/listens/now` | What's playing now: `{"user", "artist", "title", "album", "album_artist", "duration"}`. |
 | `GET /api/v1/listens/top?user=&kind=&from=&to=&limit=` | A listener's most listened `songs` (with the server's id, when it has the song), `artists` or `albums` in a stretch of time. |
 | `GET /api/v1/listens/totals?user=&from=&to=&tz=` | That stretch in numbers (0.33): `listens`, `seconds`, `artists`, `songs`, `albums`, `new_artists` and `hours` (listens per hour of the day in `tz`). Siansa's Time machine and listening reports read a listener's history from this and `listens/top`. |
 | `GET /api/v1/songs/genres?ids=a,b` | The genres each of up to 500 songs is in by its sound, its best first (0.32): `{"songs": {"<id>": [{"name", "genre", "style", "score"}]}}`. Siansa picks a vibe's sound dials from it: what that mix has to offer. |
