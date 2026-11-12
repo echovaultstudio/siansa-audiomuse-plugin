@@ -713,7 +713,8 @@ class App:
         worker, style = self.worker, self.style
         available = bool(style is not None and style.available)
         out = {"available": available, "loaded": bool(available and style.loaded),
-               "device": getattr(style, "backend", None), "problem": getattr(style, "problem", None)}
+               "device": getattr(style, "backend", None), "problem": getattr(style, "problem", None),
+               "checked": getattr(style, "checked", None)}
         if available:
             # Kept ready: the page asks every few seconds; its total follows songs added, too.
             out.update(self.kept("styles", server or self.servers.default_id, self.store.style_counts, 30,

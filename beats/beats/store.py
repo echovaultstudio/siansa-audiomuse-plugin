@@ -421,6 +421,8 @@ class Store:
         self.genre_changes += 1
         with self._write():
             self.db.execute("DELETE FROM genres WHERE song_id=? AND source=?", (song_id, source))
+            if source == "sound":  # heard again: the doubted styles go
+                self.db.execute("DELETE FROM genres WHERE song_id=? AND source='sound-doubted'", (song_id,))
             for i, label in enumerate(labels):
                 weight = weights[i] if weights else 1.0
                 self.db.execute("INSERT OR REPLACE INTO genres VALUES (?,?,?,?)", (song_id, source, label, weight))
@@ -468,9 +470,19 @@ class Store:
 
     # A song is in a style's genre when its sound scores it ``minimum`` or more and the style is among its ``rank``
     # best (fewer styles above it than ``rank``), and always in its best one. Takes (minimum, rank).
-    HEARD = ("g.source='sound' AND ((g.weight >= ? AND (SELECT COUNT(*) FROM genres b WHERE b.song_id = g.song_id "
-             "AND b.source='sound' AND b.weight > g.weight) < ?) OR NOT EXISTS (SELECT 1 FROM genres b WHERE "
-             "b.song_id = g.song_id AND b.source='sound' AND b.weight > g.weight))")
+    # 'sound-doubted': styles from a GPU found to disagree with the CPU (0.37.1), still used until heard again.
+    HEARD = ("g.source IN ('sound', 'sound-doubted') AND ((g.weight >= ? AND (SELECT COUNT(*) FROM genres b WHERE "
+             "b.song_id = g.song_id AND b.source = g.source AND b.weight > g.weight) < ?) OR NOT EXISTS (SELECT 1 FROM "
+             "genres b WHERE b.song_id = g.song_id AND b.source = g.source AND b.weight > g.weight))")
+
+    def doubt_styles(self):
+        """Marks every song's styles as doubted (the GPU that gave them disagreed with the CPU, 0.37.1): they stay in
+        use, and each song is heard again on the CPU, which replaces them. How many songs."""
+        with self._write():
+            n = self.db.execute("UPDATE genres SET source='sound-doubted' WHERE source='sound'").rowcount
+        if n:
+            self.genre_changes += 1
+        return n
 
     def heard_of(self, song_ids, minimum, rank):
         """``{song id: [(label, weight)]}``: the genres each of ``song_ids`` is in by its sound, its best first."""

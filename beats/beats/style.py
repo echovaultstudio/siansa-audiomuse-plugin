@@ -32,6 +32,7 @@ MAX_PATCHES = 64
 MODEL_FILE = "discogs-effnet-bsdynamic-1.onnx"
 LABELS_FILE = "discogs-effnet-bs64-1.json"
 KEEP = 15  # the top styles kept for each song (with their scores), its genres (beats.genres) among them, and for the page
+CHECK_TOLERANCE = 0.05  # the GPU's scores may differ from ONNX Runtime's by this much before the GPU is distrusted
 
 
 def _hz_to_mel(f):
@@ -127,6 +128,9 @@ class StyleModel:
         self._output = None
         self.load_seconds = None
         self.problem = None
+        # The GPU checked against ONNX Runtime on the first real song (0.37.1, the owner, 12 Nov: a country album's
+        # songs scored 0.7 as electro house): {"diff", "ok"} once done; a GPU that disagrees is dropped for the CPU.
+        self.checked = None
 
     @property
     def available(self):
@@ -145,20 +149,58 @@ class StyleModel:
                 if self._load_gpu():
                     self.load_seconds = time.monotonic() - started
                     return self._torch
-                import onnxruntime
-
-                options = memory.session_options(onnxruntime, self.threads, inter_threads=1)
-                session = onnxruntime.InferenceSession(os.path.join(self.models_dir, MODEL_FILE), options,
-                                                       providers=["CPUExecutionProvider"])
-                names = self._labels
-                self._input = session.get_inputs()[0].name
                 # The output with a score for each of the 400 styles (the other is the 1280-number embedding).
-                outputs = session.get_outputs()
-                self._output = next((o.name for o in outputs if o.shape and o.shape[-1] == len(names)), outputs[0].name)
-                self._session = session
+                self._session = self._cpu_session()
                 self.device = "cpu"
                 self.load_seconds = time.monotonic() - started
         return self._torch if self._torch is not None else self._session
+
+    def _cpu_session(self):
+        """ONNX Runtime on the CPU, made when first needed (the CPU's own run, or the check of the GPU)."""
+        import onnxruntime
+
+        options = memory.session_options(onnxruntime, self.threads, inter_threads=1)
+        session = onnxruntime.InferenceSession(os.path.join(self.models_dir, MODEL_FILE), options,
+                                               providers=["CPUExecutionProvider"])
+        self._input = session.get_inputs()[0].name
+        outputs = session.get_outputs()
+        self._output = next((o.name for o in outputs if o.shape and o.shape[-1] == len(self._labels)), outputs[0].name)
+        return session
+
+    def _cpu_scores(self, session, batch):
+        return session.run([self._output], {self._input: batch})[0]
+
+    def _gpu_scores(self, model, batch):
+        import torch
+
+        with torch.inference_mode():
+            outputs = model(torch.from_numpy(batch).to(self.device))
+        outputs = outputs if isinstance(outputs, (list, tuple)) else (outputs,)
+        return outputs[self._pick].float().cpu().numpy()
+
+    def _check(self, batch, gpu_mean):
+        """The GPU's scores for a real song against ONNX Runtime's, once: a GPU that disagrees (a conversion or a
+        driver gone wrong) is let go, and the CPU takes the model from here. The CPU's mean when it took over."""
+        import numpy as np
+
+        session = self._cpu_session()
+        cpu_mean = np.asarray(self._cpu_scores(session, batch), dtype=np.float64).reshape(len(batch), -1).mean(axis=0)
+        diff = float(np.abs(cpu_mean - gpu_mean).max())
+        self.checked = {"diff": round(diff, 4), "ok": diff <= CHECK_TOLERANCE}
+        if diff <= CHECK_TOLERANCE:
+            return None
+        self.problem = (f"the style model's scores on the GPU differ from ONNX Runtime's by {diff:.2f} (more than "
+                        f"{CHECK_TOLERANCE}), so the CPU runs it; songs styled on the GPU are heard again")
+        self._torch = None
+        self._session = session
+        self.device = "cpu"
+        try:
+            import torch
+
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+        return cpu_mean
 
     def unload(self):
         """Lets the model go (it loads again with the next song); True when it was loaded."""
@@ -224,14 +266,34 @@ class StyleModel:
             samples = soxr.resample(np.asarray(samples, dtype=np.float32), rate, RATE)
         batch = patches(mel(samples))
         if model is self._torch:
-            import torch
-
-            with torch.inference_mode():
-                outputs = model(torch.from_numpy(batch).to(self.device))
-            outputs = outputs if isinstance(outputs, (list, tuple)) else (outputs,)
-            scores = outputs[self._pick].float().cpu().numpy()
+            scores = self._gpu_scores(model, batch)
         else:
-            scores = model.run([self._output], {self._input: batch})[0]
+            scores = self._cpu_scores(model, batch)
         mean = np.asarray(scores, dtype=np.float64).reshape(len(batch), -1).mean(axis=0)
-        ranked = sorted(zip(self._labels, (float(v) for v in mean)), key=lambda p: -p[1])
-        return ranked
+        if model is self._torch and self.checked is None:
+            with self._lock:
+                taken_over = self._check(batch, mean)
+            if taken_over is not None:
+                mean = taken_over
+        return sorted(zip(self._labels, (float(v) for v in mean)), key=lambda p: -p[1])
+
+    def both(self, samples, rate=RATE):
+        """``{"gpu": ranked, "cpu": ranked}`` for one song, each way the model can run (the GPU's None without one):
+        to see for oneself whether the two agree."""
+        import numpy as np
+
+        model = self.load()
+        if rate != RATE:
+            import soxr
+
+            samples = soxr.resample(np.asarray(samples, dtype=np.float32), rate, RATE)
+        batch = patches(mel(samples))
+        out = {}
+        for way, scores in (("gpu", self._gpu_scores(model, batch) if model is self._torch else None),
+                            ("cpu", self._cpu_scores(self._session or self._cpu_session(), batch))):
+            if scores is None:
+                out[way] = None
+                continue
+            mean = np.asarray(scores, dtype=np.float64).reshape(len(batch), -1).mean(axis=0)
+            out[way] = sorted(zip(self._labels, (float(v) for v in mean)), key=lambda p: -p[1])
+        return out

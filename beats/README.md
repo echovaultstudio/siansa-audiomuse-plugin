@@ -321,8 +321,12 @@ genre pages and genre radios:
 - Essentia's Discogs-EffNet (the Music Technology Group, UPF) hears the song and scores each of 400 Discogs styles,
   from Progressive Trance and Deep House to Punk and Boom Bap. It runs on the GPU when there is one (through the
   PyTorch Beat This! uses; the model is small, so Beat This! hardly notices), else on the CPU (ONNX Runtime,
-  `STYLE_THREADS`, 2 by default); `BEATS_DEVICE=cpu` keeps both on the CPU. New songs are heard on their way through
-  the queue; songs analysed before are downloaded once more and heard while the queue is empty;
+  `STYLE_THREADS`, 2 by default); `BEATS_DEVICE=cpu` keeps both on the CPU. On the first real song the GPU's scores
+  are checked against ONNX Runtime's (0.37.1): a GPU that disagrees by more than 0.05 is let go for the CPU, the
+  page says so, and every song is heard again (its old styles stay in use until then). `GET
+  /api/v1/songs/styles/again?ids=` hears up to ten songs again both ways, to see the two side by side. New songs are
+  heard on their way through the queue; songs analysed before are downloaded once more and heard while the queue is
+  empty;
 - **a song is in a genre when its sound scores that style 0.15 or more and the style is among its three best, and
   always in the one it scores highest** (0.36: before, a country album's faint fourth and fifth guesses put it in
   Electro House). A genre gives all its songs, the ones that sound most like it first, with each one's score, so the

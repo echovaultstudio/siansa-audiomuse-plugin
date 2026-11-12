@@ -73,6 +73,7 @@ class Worker:
         self.style = style  # beats.style.StyleModel, or None
         self.styling = None  # {"id", "title", "artist", "since"}: a song analysed before, getting its styles
         self.genre_report = None  # beats.genres.agreement: how often the sound agrees with the tags
+        self._style_check_said = False
         self._taxonomy = None
         # The music servers (beats.servers.Servers), or one client for the container's own (the tests' way).
         self.servers = navidrome if hasattr(navidrome, "client") else _OneServer(navidrome)
@@ -406,12 +407,45 @@ class Worker:
                     self.store.event(self.style.problem, "warn")
             top = ranked[:STYLE_KEEP]
             self.store.set_genres(song["id"], "sound", [l for l, _ in top], [round(v, 4) for _, v in top])
+            self._style_checked()
             _log.debug("%s – %s: sounds like %s (%.2fs)", song.get("artist"), song.get("title"),
                        ", ".join(f"{l.partition('---')[2]} {v:.2f}" for l, v in top[:3]), seconds)
         except Exception as e:
             _log.warning("%s – %s: couldn't hear its style: %s", song.get("artist"), song.get("title"), e,
                          exc_info=not isinstance(e, RuntimeError))
             self.store.set_genres(song["id"], "sound-failed", [str(e)[:200] or e.__class__.__name__])
+
+    def _style_checked(self):
+        """Says, once, how the GPU's styles compared with the CPU's on the first real song (0.37.1); a GPU that
+        disagreed is already let go by the model, and every song's styles are marked to be heard again."""
+        checked = getattr(self.style, "checked", None)
+        if not checked or self._style_check_said:
+            return
+        self._style_check_said = True
+        if checked["ok"]:
+            self.store.event(f"Style model: the GPU agrees with the CPU (scores within {checked['diff']})")
+            return
+        doubted = self.store.doubt_styles()
+        self.store.event(f"{self.style.problem}: {doubted} songs", "warn")
+        _log.warning("Style model: %s (%d songs to hear again)", self.style.problem, doubted)
+
+    def style_both_ways(self, song_id):
+        """Hears one song's styles again now, on the GPU and the CPU alike (0.37.1): ``{"gpu", "cpu"}``, each the
+        best five as ``[(style, score)]`` (the GPU's None without one), and keeps the trusted ones as the song's."""
+        song = self.store.song(song_id) or {"id": song_id, "title": song_id, "artist": ""}
+        fd, path = tempfile.mkstemp(prefix="style-", dir=self.data_dir)
+        os.close(fd)
+        try:
+            self.download(song_id, path)
+            samples = self.decode(path, STYLE_RATE) if self.decode_takes_rate else self.decode(path)
+            rate = STYLE_RATE if self.decode_takes_rate else self.decode_rate
+            both = self.style.both(samples, rate)
+            self._style(song, samples, rate)
+            return {way: None if ranked is None else [(l.partition("---")[2] or l, round(v, 4)) for l, v in ranked[:5]]
+                    for way, ranked in both.items()}
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
 
     def compare_with_tags(self):
         """Works out how often the songs' sound agrees with their tags (:func:`beats.genres.agreement`, shown on the
