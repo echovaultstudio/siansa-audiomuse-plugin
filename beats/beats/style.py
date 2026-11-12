@@ -20,6 +20,8 @@ import os
 import threading
 import time
 
+from . import memory
+
 RATE = 16_000
 FRAME = 512
 HOP = 256
@@ -145,9 +147,7 @@ class StyleModel:
                     return self._torch
                 import onnxruntime
 
-                options = onnxruntime.SessionOptions()
-                options.intra_op_num_threads = self.threads
-                options.inter_op_num_threads = 1
+                options = memory.session_options(onnxruntime, self.threads, inter_threads=1)
                 session = onnxruntime.InferenceSession(os.path.join(self.models_dir, MODEL_FILE), options,
                                                        providers=["CPUExecutionProvider"])
                 names = self._labels
@@ -159,6 +159,22 @@ class StyleModel:
                 self.device = "cpu"
                 self.load_seconds = time.monotonic() - started
         return self._torch if self._torch is not None else self._session
+
+    def unload(self):
+        """Lets the model go (it loads again with the next song); True when it was loaded."""
+        with self._lock:
+            if self._session is None and self._torch is None:
+                return False
+            gpu = self._torch is not None
+            self._session = self._torch = None
+            if gpu:
+                try:
+                    import torch
+
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+            return True
 
     def _load_gpu(self):
         """The model on the GPU (onnx2torch), when there is one and it isn't turned off; False otherwise, and the CPU

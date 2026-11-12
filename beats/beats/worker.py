@@ -30,6 +30,7 @@ from . import grid
 from . import key as key_finder
 from . import log
 from . import loudness
+from . import memory
 from .servers import MAIN, folders_key
 from .subsonic import ServerError, SubsonicError
 
@@ -96,6 +97,7 @@ class Worker:
         # What's being read right now, for the page (0.24.1: adding a library took minutes with nothing to show):
         # {"server", "server_name", "library", "libraries", "done", "songs", "started", "why"}, or None.
         self.reading = None
+        self.last_work = time.time()  # when a song was last worked on: the models go after a while without one
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._ready = queue.Queue(maxsize=1)
@@ -448,6 +450,7 @@ class Worker:
                     done_since_report = 0
 
     def _style_again(self, song_id):
+        self.last_work = time.time()
         song = self.store.song(song_id) or {"id": song_id, "title": song_id, "artist": ""}
         self.styling = {"id": song_id, "title": song.get("title"), "artist": song.get("artist"), "since": time.time()}
         path = None
@@ -526,6 +529,7 @@ class Worker:
                 self._hear_again(song_id)
 
     def _hear_again(self, song_id):
+        self.last_work = time.time()
         song = self.store.song(song_id) or {"id": song_id, "title": song_id, "artist": ""}
         self.hearing = {"id": song_id, "title": song.get("title"), "artist": song.get("artist"), "since": time.time()}
         path = None
@@ -582,6 +586,7 @@ class Worker:
         return True
 
     def _measure_again(self, song_id):
+        self.last_work = time.time()
         song = self.store.song(song_id) or {"id": song_id, "title": song_id, "artist": ""}
         self.measuring = {"id": song_id, "title": song.get("title"), "artist": song.get("artist"), "since": time.time()}
         path = None
@@ -598,6 +603,29 @@ class Worker:
             self.measuring = None
             if path and os.path.exists(path):
                 os.remove(path)
+
+    # ---- memory (0.34): the models go when there's nothing to analyse ----
+
+    def busy(self):
+        """Whether a song is being worked on right now, in any of the ways."""
+        return bool(self.current or self.preparing or self.styling or self.hearing or self.measuring or self.regridding)
+
+    def let_models_go_if_idle(self, now=None, idle=memory.MODELS_IDLE):
+        """Lets Beat This!, the style model and the models that hear a song go after ``idle`` seconds without a song
+        to analyse, and hands their memory back; they load again with the next song. True when any went."""
+        now = now or time.time()
+        if self.busy() or now - self.last_work < idle:
+            return False
+        before = memory.rss_mb()
+        gone = [name for name, model in (("Beat This!", self.tracker), ("the style model", self.style),
+                                         ("the models that hear a song", self.hearer))
+                if model is not None and callable(getattr(model, "unload", None)) and model.unload()]
+        if not gone:
+            return False
+        after = memory.trim()
+        held = f" · memory {memory.said(before)}, now {memory.said(after)}" if before is not None and after is not None else ""
+        self.store.event(f"Let go after {int(idle // 60)} minutes without a song to analyse: {', '.join(gone)}{held}")
+        return True
 
     # ---- the work ----
 
@@ -644,6 +672,7 @@ class Worker:
 
     def prepare(self, song_id):
         """Downloads, decodes and measures the song: what :meth:`finish` needs, or ``None`` when it failed."""
+        self.last_work = time.time()
         song = self.store.song(song_id) or {"id": song_id, "title": song_id, "artist": "", "duration": 0}
         holder = self.preparing = {"id": song_id, "title": song["title"], "artist": song["artist"], "step": None,
                                    "since": time.time()}
@@ -739,6 +768,11 @@ class Worker:
             self._failed(song, e)
         finally:
             self.current = None
+            self.last_work = time.time()
+            # The song's sound, back to the system before the next: whoever handed it over may still hold the dict.
+            prepared.clear()
+            del samples, levels
+            memory.trim()
 
 
 def _merge(matches):

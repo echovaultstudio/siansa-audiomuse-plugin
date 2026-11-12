@@ -101,6 +101,7 @@ from .subsonic import ServerError, SubsonicError
 from .worker import Worker
 from . import genres as genres_module
 from . import log
+from . import memory as memory_module
 
 _log = log.get("server")
 
@@ -260,9 +261,21 @@ class App:
                 # The text model goes when nobody has searched for a while (looked at every minute).
                 for _ in range(self.PULL_EVERY // 60):
                     time.sleep(60)
-                    self.words.unload_if_idle()
+                    self.mind_memory()
 
         threading.Thread(target=loop, name="sound-pull-timer", daemon=True).start()
+
+    def mind_memory(self):
+        """Every minute: the text model goes when nobody has searched for a while, the models that analyse when
+        there has been no song for a while (beats.memory); what they held goes back to the system."""
+        from . import memory
+
+        try:
+            if self.words.unload_if_idle():
+                memory.trim()
+            self.worker.let_models_go_if_idle()
+        except Exception as e:  # never the timer's end
+            _log.debug("Minding the memory failed: %s", e)
 
     RELAY_EVERY = 30  # seconds between tries to send waiting listens on to Last.fm
 
@@ -625,6 +638,7 @@ class App:
             preparing["for_seconds"] = round(time.time() - preparing.pop("since"), 1)
         return {
             "version": __version__,
+            "memory_mb": memory_module.rss_mb(),
             "counts": counts,
             "current": current,
             "next": preparing,
@@ -1452,6 +1466,7 @@ def main():
     threading.Thread(target=background, name="start", daemon=True).start()
     server = make_server(app)
     _log.info("Siansa Beats %s on port %s", __version__, config.port)
+    _log.info("Memory at the start: %s", memory_module.said(memory_module.rss_mb()))
     try:
         server.serve_forever()
     finally:
