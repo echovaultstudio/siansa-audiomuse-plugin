@@ -287,7 +287,8 @@ def features(app, ids, server):
 
     ``tempo`` is always Beat This!'s (the owner, 11 Nov: AudioMuse-AI's is never used, and isn't kept), null for a
     song not analysed here yet. ``key`` and ``scale`` are this service's own measure where there is one, AudioMuse-AI's
-    otherwise; moods, genres and energy are AudioMuse-AI's."""
+    otherwise; moods, genres and energy are AudioMuse-AI's, or made here as AudioMuse-AI makes them
+    (``energy_source`` says which, for the energy)."""
     here = app.store.resolve(ids, server)
     rows = app.store.sound_rows(here.values())
     tempos = app.store.tempos(here.values(), app.config.model)
@@ -304,6 +305,10 @@ def features(app, ids, server):
                        "tempo_source": "beat_this" if tempo else None,
                        "key": own.get("key") or r["key"], "scale": (own.get("scale") if own.get("key") else r["scale"]),
                        "mood_vector": r["moods"], "energy": r["energy"],
+                       # Who measured the energy (0.34): "beats" (heard here) or "audiomuse" (taken over). The two can
+                       # be on different scales (the owner's library, 12 Nov: about 0.3 and about 0.7 for alike
+                       # songs), so an app compares energies only within one of them.
+                       "energy_source": None if r["energy"] is None else ("beats" if r["source"] == "beats" else "audiomuse"),
                        "other_features": r["other"], "fp": r["fp"]})
     return {"tracks": tracks, "total_tracks": len(tracks), "has_more": False, "next_page": None,
             "provider_type": (app.servers.get(server or app.servers.default_id) or {}).get("kind")}

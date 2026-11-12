@@ -429,6 +429,7 @@ class PullTest(Service):
         feats = self.call(f"{am}/api/sync?ids=t140")["tracks"][0]
         self.assertEqual((feats["tempo"], feats["mood_vector"], feats["energy"], feats["other_features"]),
                          (140.0, "electronic:0.600,dance:0.550", 0.61, "danceable:0.60,happy:0.50"))
+        self.assertEqual(feats["energy_source"], "beats")  # heard here, not taken over (0.34)
         self.assertEqual(self.call(f"{am}/api/clap/search", "POST", {"query": "deep"})["results"][0]["item_id"], "t122")
         # The one that couldn't be heard isn't tried again and again.
         self.assertEqual(self.app.store.without_sound(), [])

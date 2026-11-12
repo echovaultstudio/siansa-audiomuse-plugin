@@ -462,7 +462,7 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 | `POST /api/v1/audiomuse/api/sonic_fingerprint/generate` | `{"n"}`: songs near what this server's user has played most (or near `ids`, when given). |
 | `POST /api/v1/audiomuse/api/clap/search` | `{"query", "limit", "steering": [{"term", "direction": "more" or "less", "weight"}]}`: the songs that sound like the description (0.26), each with its `similarity`; `steering_warnings` names terms that aren't concepts. |
 | `GET /api/v1/audiomuse/api/clap/concepts` | The concepts a search can be steered by, in their groups. |
-| `GET /api/v1/audiomuse/api/sync?ids=` | Up to 500 songs' tempo (Beat This!'s, `tempo_source`: `beat_this`; never AudioMuse-AI's), key, moods, genres and energy, without the vectors. |
+| `GET /api/v1/audiomuse/api/sync?ids=` | Up to 500 songs' tempo (Beat This!'s, `tempo_source`: `beat_this`; never AudioMuse-AI's), key, moods, genres and energy, without the vectors. `energy_source` (0.34) says who measured the energy, `beats` or `audiomuse`: compare energies only within one. |
 | `POST /api/v1/bad-blends` | A song change marked as bad in the app. |
 
 With several music servers, every one of these takes `?server=`: the id (or name) of the server the app plays from,

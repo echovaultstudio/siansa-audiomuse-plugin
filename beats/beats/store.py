@@ -254,7 +254,7 @@ class Store:
         for start in range(0, len(ids), 500):
             chunk = ids[start:start + 500]
             for r in self._rows("SELECT o.song_id, o.key, o.scale, o.moods, o.other, o.energy, o.album_artist, "
-                                "o.year, o.fp, s.title, s.artist, s.album FROM sound o JOIN songs s ON s.id=o.song_id "
+                                "o.year, o.fp, o.source, s.title, s.artist, s.album FROM sound o JOIN songs s ON s.id=o.song_id "
                                 f"WHERE o.song_id IN ({', '.join('?' for _ in chunk)})", chunk):
                 out[r["song_id"]] = r
         return out
