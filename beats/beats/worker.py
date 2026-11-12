@@ -619,7 +619,7 @@ class Worker:
             return False
         before = memory.rss_mb()
         gone = [name for name, model in (("Beat This!", self.tracker), ("the style model", self.style),
-                                         ("the models that hear a song", self.hearer), ("the trial's models", self.trial))
+                                         ("the models that hear a song", self.hearer), ("the trial's models", getattr(self, "trial", None)))
                 if model is not None and callable(getattr(model, "unload", None)) and model.unload()]
         if not gone:
             return False
