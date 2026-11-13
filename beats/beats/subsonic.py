@@ -10,7 +10,6 @@ real paths), so it's asked first, with the same user and password; Subsonic's pa
 import hashlib
 import json
 import secrets
-import shutil
 import time
 import urllib.error
 import urllib.parse
@@ -29,6 +28,29 @@ class ServerError(Exception):
 
 
 SubsonicError = ServerError  # its name until 0.23, when Emby and Jellyfin came
+
+# A song's file is never bigger than this (0.40): a stream that doesn't end, or a server sending something else,
+# can't fill the disk. 2 GB holds a two-hour FLAC mix.
+MOST_SONG_BYTES = 2 << 30
+
+
+def save(response, out, song_id="?", label="the server"):
+    """Copies a song's file from ``response`` to ``out``, no further than :data:`MOST_SONG_BYTES`: its size. The
+    download is refused before it starts when the server says the file is bigger, and cut off if it turns out to be."""
+    most = MOST_SONG_BYTES
+    said = response.headers.get("Content-Length")
+    if said and said.isdigit() and int(said) > most:
+        raise ServerError(f"stream: {label} says the file is {int(said) / 1e6:,.0f} MB, over the {most >> 20} MB a song may be")
+    size = 0
+    while True:
+        chunk = response.read(1 << 20)
+        if not chunk:
+            return size
+        size += len(chunk)
+        if size > most:
+            _log.warning("stream %s: cut off at %d MB, more than a song can be", song_id, most >> 20)
+            raise ServerError(f"stream: the file goes past the {most >> 20} MB a song may be: not kept")
+        out.write(chunk)
 
 
 class Subsonic:
@@ -269,8 +291,7 @@ class Subsonic:
                     said = r.read(300).decode(errors="replace")
                     _log.warning("stream %s: Navidrome sent %s instead of the file: %s", song_id, kind, said)
                     raise SubsonicError(f"stream: {said}")
-                shutil.copyfileobj(r, out, 1 << 20)
-                size = out.tell()
+                size = save(r, out, song_id, "Navidrome")
                 _log.debug("stream %s: %.1f MB (%s) in %.2fs", song_id, size / 1e6, kind or "no type",
                            time.monotonic() - started)
                 return size

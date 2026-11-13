@@ -14,14 +14,13 @@ Nothing on the server is changed.
 """
 
 import json
-import shutil
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from . import __version__, log
-from .subsonic import ServerError
+from .subsonic import ServerError, save
 
 _log = log.get("mediaserver")
 
@@ -268,8 +267,7 @@ class MediaBrowser:
                 kind = r.headers.get("Content-Type", "")
                 if "json" in kind or "html" in kind:
                     raise ServerError(f"stream: {self.label} sent {kind} instead of the file")
-                shutil.copyfileobj(r, out, 1 << 20)
-                return out.tell(), kind
+                return save(r, out, song_id, self.label), kind
 
         try:
             size, kind = self._as_user(fetch)

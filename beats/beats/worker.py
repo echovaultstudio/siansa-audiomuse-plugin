@@ -32,6 +32,7 @@ from . import log
 from . import loudness
 from . import memory
 from .servers import MAIN, folders_key
+from .store import TASKS
 from .subsonic import ServerError, SubsonicError
 
 _log = log.get("worker")
@@ -155,7 +156,8 @@ class Worker:
         """A server's libraries, each with whether it's chosen and how many of its songs are here and analysed."""
         server = server or self.servers.default_id
         chosen, counts = set(self.chosen(server)), self.store.folder_counts(server)
-        return [{**f, "on": f["id"] in chosen, **counts.get(f["id"], {"songs": 0, "done": 0})}
+        skips = self.store.skips(server)
+        return [{**f, "on": f["id"] in chosen, **counts.get(f["id"], {"songs": 0, "done": 0}), "skip": skips.get(f["id"], [])}
                 for f in self.servers.client(server).libraries()]
 
     def _label(self, server):
@@ -163,9 +165,13 @@ class Worker:
         found = self.servers.get(server)
         return f" on {found['name']}" if found and self.servers.several() else ""
 
-    def choose(self, ids, server=None, background=False):
+    TASK_NAMES = {"beats": "beats", "loudness": "loudness and key", "sound": "sound", "styles": "genres by sound"}
+
+    def choose(self, ids, server=None, background=False, skips=None):
         """Analyses ``server``'s libraries ``ids`` (and none of its others): reads them now; the others' songs not yet
-        analysed leave the queue (those done stay). Returns ``{"songs", "queued"}``."""
+        analysed leave the queue (those done stay). ``skips`` (0.40), ``{library id: [tasks]}``, says what each is
+        left out of (``beats``, ``loudness``, ``sound``, ``styles``); a library not in it is in everything. Returns
+        ``{"songs", "queued"}``."""
         server = server or self.servers.default_id
         client = self.servers.client(server)
         known = {f["id"]: f["name"] for f in client.libraries()}
@@ -174,6 +180,19 @@ class Worker:
         if unknown:
             raise ValueError(f"No library {', '.join(unknown)} on {client.label} (its libraries: "
                              f"{', '.join(f'{k} {v}' for k, v in known.items()) or 'none'})")
+        if skips is not None:
+            if not isinstance(skips, dict) or not all(isinstance(v, list) for v in skips.values()):
+                raise ValueError("skips must be {library id: [tasks]}")
+            before = self.store.skips(server)
+            for folder in ids:
+                tasks = [t for t in dict.fromkeys(str(t) for t in skips.get(folder, [])) if t in TASKS]
+                if sorted(tasks) == sorted(before.get(folder, [])):
+                    continue
+                moved = self.store.set_skips(server, folder, tasks) or {}
+                self.store.event(f"Library {known[folder]}{self._label(server)}: "
+                                 + (f"left out of {', '.join(self.TASK_NAMES[t] for t in tasks)}" if tasks else "in everything again")
+                                 + (f" ({moved['skipped']} songs left the queue)" if moved.get("skipped") else "")
+                                 + (f" ({moved['queued']} songs joined the queue)" if moved.get("queued") else ""))
         self.store.set_setting(folders_key(server), ids)
         taken = self.store.unqueue_except(ids, server)
         names = ", ".join(known[i] for i in ids) or "none"
@@ -733,9 +752,13 @@ class Worker:
             decode_seconds = time.monotonic() - started
             _log.debug("%s: decoded %d samples (%.1fs of sound) in %.2fs", label, len(samples), len(samples) / 22_050.0,
                        decode_seconds)
-            self._style(song, samples, self.decode_rate)
-            self._measure(song, path, samples, self.decode_rate)
-            self._hear(song, path)
+            wants = self.store.wanted(song_id)  # what its library asks for (0.40): the rest is left out on the way
+            if "styles" in wants:
+                self._style(song, samples, self.decode_rate)
+            if "loudness" in wants:
+                self._measure(song, path, samples, self.decode_rate)
+            if "sound" in wants:
+                self._hear(song, path)
             try:
                 levels = self.measure(samples)
                 _log.debug("%s: measured the sound", label)

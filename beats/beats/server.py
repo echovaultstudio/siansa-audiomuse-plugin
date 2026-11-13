@@ -97,6 +97,8 @@ import gzip
 
 from . import __version__, api_v1, grid, loudness
 from .audiomuse import AudioMuse, AudioMuseError
+from .checks import Checks
+from .clean import Cleaner
 from .servers import KINDS, MAIN, Servers, folders_key
 from .store import Store
 from .vault import Vault
@@ -260,6 +262,7 @@ class App:
         from .listens import Listens
 
         self.listens = Listens(self.store, self.vault)
+        self.cleaner = Cleaner(self)  # tidying the database (0.40): looked at first, removed as shown
         # Covers and artists' pictures for the listening page (0.30): the music server's own, kept in the data folder.
         from .art import Art
 
@@ -756,6 +759,31 @@ class App:
         return {"chosen": spec.id if spec else None,
                 "models": [m.summary(self.config.models_dir) for m in style_module.MODELS.values()]}
 
+    def start_analysis(self, ids, server=None, skips=None):
+        """Start analysis (0.40, the owner, 13 Nov): every check first (:mod:`beats.checks`), then, when none failed,
+        the ticked libraries are the ones to analyse and are read for new songs in the background. The report, with
+        ``reading`` (whether a read started) and ``queued_before``."""
+        server = server or self.servers.default_id
+        report = Checks(self).run(server, ids)
+        report["reading"] = False
+        if report["ok"]:
+            try:
+                answer = self.worker.choose(ids, server, background=True, skips=skips)
+            except ValueError as e:
+                report["ok"] = False
+                report["checks"].append({"id": "choice", "name": "Choice", "state": "fail", "detail": str(e)})
+                answer = {}
+            report["reading"] = bool(answer.get("reading"))
+            if answer.get("reading") is False:
+                report["note"] = "The libraries are already being read: this choice is read next time."
+        failed = [c["name"] for c in report["checks"] if c["state"] == "fail"]
+        warned = [c["name"] for c in report["checks"] if c["state"] == "warn"]
+        self.store.event(f"Checked before analysing in {report['seconds']}s: "
+                         + ("all well" if not failed and not warned else
+                            ", ".join(([f"failed: {', '.join(failed)}"] if failed else []) + ([f"to look at: {', '.join(warned)}"] if warned else [])))
+                         + ("" if report["ok"] else ". Nothing started"), "error" if failed else "warn" if warned else "info")
+        return report
+
     def choose_style_model(self, model_id):
         """Switches the style model (0.39, the owner, 13 Nov): the other one is let go, the choice kept, and every
         song's styles are doubted (still used) and heard again with the new model. How many songs that is."""
@@ -1220,6 +1248,13 @@ class Handler(BaseHTTPRequestHandler):
                                   {"Content-Disposition": f'attachment; filename="siansa-beats-debug-{stamp}.json"'})
             if path == "/api/libraries":
                 return self._json(app.worker.libraries(server))
+            if path == "/api/clean/preview":  # what could go (0.40): nothing is removed by looking
+                try:
+                    return self._json(app.cleaner.preview(server))
+                except ServerError as e:
+                    return self._error(HTTPStatus.BAD_GATEWAY, str(e))
+            if path == "/api/analysis/checks":  # the last report (0.40)
+                return self._json(app.store.setting("last_checks") or {"checks": [], "ok": None})
             if path == "/api/bad-blends":
                 return self._json(app.store.bad_blends())
             if path == "/api/failed/export":
@@ -1341,7 +1376,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error(HTTPStatus.BAD_REQUEST, 'ids needed: a list of library ids ([] for none)')
                 try:
                     # The page's: chosen now, read in a thread whose progress the status shows (0.24.1).
-                    return self._json(app.worker.choose(ids, server, background=bool(body.get("background"))))
+                    return self._json(app.worker.choose(ids, server, background=bool(body.get("background")),
+                                                        skips=body.get("skips")))
                 except ValueError as e:
                     return self._error(HTTPStatus.BAD_REQUEST, str(e))
             if path.startswith("/api/v1/") and api_v1.post(self, path, body, server):
@@ -1351,6 +1387,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(HTTPStatus.BAD_REQUEST, problem) if problem else self._json(answer)
             if path == "/api/genres/about/fetch":
                 return self._json(app.about.fetch_all())
+            if path == "/api/analysis/start":
+                ids = body.get("ids")
+                if not isinstance(ids, list):
+                    return self._error(HTTPStatus.BAD_REQUEST, 'ids needed: a list of library ids ([] for none)')
+                return self._json(app.start_analysis(ids, server, body.get("skips")))
+            if path == "/api/clean":
+                try:
+                    return self._json(app.cleaner.apply(server, body.get("token"), body.get("groups")))
+                except ValueError as e:
+                    return self._error(HTTPStatus.CONFLICT, str(e))
             if path == "/api/libraries/read":
                 if body.get("background"):
                     return self._json(app.worker.read_in_background(every=True))
