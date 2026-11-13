@@ -35,6 +35,12 @@ FAMILIES = {
 # How sharply the cosines are turned into shares: CLAP's own logit scale is about this.
 SCALE = 25.0
 
+# Whether a family is heard at all, from its cosine alone (the owner's library, 13 Nov: ten electronic tracks scored
+# 0.27 to 0.50 for "electronic dance music", a piano ballad 0.03): nothing below LOW, fully above HIGH, a ramp between.
+# Absolute, not against the strongest family: vocal house reads as pop first and electronic second, and is still both.
+LOW = 0.15
+HIGH = 0.35
+
 
 def family_of(label):
     """The family a Discogs style belongs to ("Electronic---Electro House" → "Electronic")."""
@@ -53,6 +59,12 @@ class Families:
             self._vectors = {name: self.words.embed(prompt) for name, prompt in FAMILIES.items()}
         return self._vectors
 
+    def ask(self, clap, prompts):
+        """The cosine of a song's CLAP vector to each of ``prompts`` (any words), to try wordings by."""
+        v = np.asarray(clap, dtype=np.float32)
+        v = v / max(float(np.linalg.norm(v)), 1e-8)
+        return {p: round(float(np.dot(v, self.words.embed(p))), 4) for p in prompts}
+
     def scores(self, clap):
         """``{"cosine": {family: cos}, "share": {family: 0..1}}`` for a song's CLAP vector (512 float32), the shares
         a softmax of the cosines at :data:`SCALE`."""
@@ -69,14 +81,18 @@ class Families:
                 "share": {n: round(float(s), 4) for n, s in zip(cos, share)}}
 
 
-def gated(styles, share):
-    """What a song's styles would be with CLAP's say: each ``(label, score)`` scaled by its family's share relative to
-    the family CLAP hears most (a style of the most-heard family keeps its score; one of a family heard a tenth as
-    much keeps a tenth). Sorted, best first."""
-    top = max(share.values()) if share else 1.0
+def heard(cosine):
+    """How much a family is heard, 0 to 1, from its cosine: the ramp from :data:`LOW` to :data:`HIGH`."""
+    return min(1.0, max(0.0, (float(cosine) - LOW) / (HIGH - LOW)))
+
+
+def gated(styles, cosine):
+    """What a song's styles would be with CLAP's veto: each ``(label, score)`` scaled by how much its family is heard
+    (:func:`heard` of the family's cosine). A family CLAP doesn't hear takes its styles with it; one it hears keeps
+    them whole. Sorted, best first."""
     out = []
     for label, score in styles:
         fam = family_of(label)
-        weight = (share.get(fam, 0.0) / top) if fam and top > 0 else 1.0
+        weight = heard(cosine.get(fam, 0.0)) if fam else 1.0
         out.append((label, round(float(score) * weight, 4)))
     return sorted(out, key=lambda p: -p[1])

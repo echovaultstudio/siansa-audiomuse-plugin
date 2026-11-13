@@ -10,7 +10,9 @@ that would break that is v2, next to v1. The full description is ``openapi.json`
     GET  /api/v1/genre/about?name=     a short description of a genre, from Wikipedia: {"name", "about"}
     GET  /api/v1/songs/genres?ids=a,b  the genres each of up to 500 songs is in by its sound, its best first
     GET  /api/v1/songs/styles/again?ids=  hears up to 10 songs' styles again, on the GPU and the CPU: {"gpu", "cpu"} each
-    GET  /api/v1/songs/families?ids=   CLAP's view of up to 20 songs' genre families, and their styles weighed by it (a look, nothing kept)
+    GET  /api/v1/songs/families?ids=   CLAP's view of up to 20 songs' genre families, and their styles weighed by it (a look, nothing kept);
+                                       &words=a|b tries any wordings on them too
+    GET  /api/v1/genre/preview?name=   what CLAP's veto would do to a genre: how many songs stay or go, the strongest of each
     POST /api/v1/listens               finished listens of a listener: {"user", "listens": [{"id", "at", "artist", …}]}
     POST /api/v1/listens/now           what's playing now: {"user", "artist", "title", "album", "album_artist", "duration"}
     POST /api/v1/loves                 a heart given or taken back: {"user", "artist", "title", "loved"}, on to Last.fm
@@ -213,8 +215,17 @@ def get(handler, path, query, server=None):
         ids = [i for i in (arg("ids") or "").split(",") if i]
         if not ids or len(ids) > 20:
             return handler._error(HTTPStatus.BAD_REQUEST, "ids needed: up to 20 songs, separated by commas") or True
+        words = [w.strip() for w in (arg("words") or "").split("|") if w.strip()][:12]
         try:
-            return handler._json({"schema_version": SCHEMA_VERSION, "songs": app.families_of(ids, server)}) or True
+            return handler._json({"schema_version": SCHEMA_VERSION, "songs": app.families_of(ids, server, words)}) or True
+        except Exception as e:
+            return handler._error(HTTPStatus.SERVICE_UNAVAILABLE, str(e)[:200] or e.__class__.__name__) or True
+    if path == "/api/v1/genre/preview":  # what CLAP's veto would do to a genre (0.38.1, a look only)
+        name = (arg("name") or "").strip()
+        if not name:
+            return handler._error(HTTPStatus.BAD_REQUEST, "name needed") or True
+        try:
+            return handler._json({"schema_version": SCHEMA_VERSION, **app.genre_preview(name, server)}) or True
         except Exception as e:
             return handler._error(HTTPStatus.SERVICE_UNAVAILABLE, str(e)[:200] or e.__class__.__name__) or True
     if path in ("/api/v1/genre", "/api/v1/genre/about"):
