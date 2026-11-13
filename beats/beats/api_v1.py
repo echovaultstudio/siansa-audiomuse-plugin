@@ -9,6 +9,7 @@ that would break that is v2, next to v1. The full description is ``openapi.json`
     GET  /api/v1/genre?name=&limit=    the songs of a genre, by their sound (all without limit): {"name", "styles", "genres", "ids", "weights", "songs", "sure"}
     GET  /api/v1/genre/about?name=     a short description of a genre, from Wikipedia: {"name", "about"}
     GET  /api/v1/songs/genres?ids=a,b  the genres each of up to 500 songs is in by its sound, its best first
+    GET  /api/v1/songs/styles/again?ids=  hears up to 10 songs' styles again, on the GPU and the CPU: {"gpu", "cpu"} each
     POST /api/v1/listens               finished listens of a listener: {"user", "listens": [{"id", "at", "artist", …}]}
     POST /api/v1/listens/now           what's playing now: {"user", "artist", "title", "album", "album_artist", "duration"}
     POST /api/v1/loves                 a heart given or taken back: {"user", "artist", "title", "loved"}, on to Last.fm
@@ -189,6 +190,24 @@ def get(handler, path, query, server=None):
             return handler._error(HTTPStatus.BAD_REQUEST, f"at most {MAX_IDS} songs at a time") or True
         return handler._json({"schema_version": SCHEMA_VERSION, "minimum": genres_module.HEARD_MIN,
                               "songs": app.genres_of(ids, server)}) or True
+    if path == "/api/v1/songs/styles/again":  # hear a few songs' styles again, both ways (0.37.1): a check by eye
+        ids = [i for i in (arg("ids") or "").split(",") if i]
+        if not ids or len(ids) > 10:
+            return handler._error(HTTPStatus.BAD_REQUEST, "ids needed: up to 10 songs, separated by commas") or True
+        here = app.store.resolve(ids, server)
+        out = {}
+        for asked in ids:
+            song_id = here.get(asked)
+            if song_id is None:
+                out[asked] = {"error": "not a song here"}
+                continue
+            try:
+                out[asked] = app.worker.style_both_ways(song_id)
+            except Exception as e:
+                out[asked] = {"error": str(e)[:200] or e.__class__.__name__}
+        checked = getattr(app.worker.style, "checked", None)
+        return handler._json({"schema_version": SCHEMA_VERSION, "device": getattr(app.worker.style, "device", None),
+                              "checked": checked, "songs": out}) or True
     if path in ("/api/v1/genre", "/api/v1/genre/about"):
         name = arg("name")
         if not name:
