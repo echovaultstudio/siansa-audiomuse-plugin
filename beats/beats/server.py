@@ -205,7 +205,7 @@ class App:
     """Everything the handler needs, so the tests can make one with stand-ins."""
 
     def __init__(self, config, tracker=None, decode=None, measure=None, style=None, sound=None, words=None,
-                 hearer=None):
+                 hearer=None, style_factory=None):
         from . import analyser
         from . import style as style_module
 
@@ -219,7 +219,13 @@ class App:
         self.audiomuse = AudioMuse(saved.get("url"), self.vault.open(saved.get("token")))
         self.tracker = tracker or analyser.BeatThis(config.model, config.device, config.models_dir, config.threads,
                                                     config.float16)
-        self.style = style if style is not None else style_module.StyleModel(config.models_dir, config.style_threads, config.device)
+        # The style model (0.39): the one chosen in Setup, Discogs-EffNet unless MAEST was picked (and is in the image).
+        chosen = self.store.setting("style_model") or style_module.DEFAULT_MODEL
+        spec = style_module.MODELS.get(chosen, style_module.MODELS[style_module.DEFAULT_MODEL])
+        if not spec.available(config.models_dir) and style is None:
+            spec = style_module.MODELS[style_module.DEFAULT_MODEL]
+        self.style_factory = style_factory or (lambda chosen_spec: style_module.StyleModel(config.models_dir, config.style_threads, config.device, chosen_spec))
+        self.style = style if style is not None else self.style_factory(spec)
         # Music found by describing it in words (0.26): the text model, loaded when first searched.
         from .hear import Hearer
         from .words import Words
@@ -741,14 +747,49 @@ class App:
             out[asked] = entry
         return out
 
+    def style_models(self):
+        """The style models to choose from (0.39): each with its name, what it's like, what it costs and whether the
+        image has it; and which is in use."""
+        from . import style as style_module
+
+        spec = getattr(self.style, "spec", None)
+        return {"chosen": spec.id if spec else None,
+                "models": [m.summary(self.config.models_dir) for m in style_module.MODELS.values()]}
+
+    def choose_style_model(self, model_id):
+        """Switches the style model (0.39, the owner, 13 Nov): the other one is let go, the choice kept, and every
+        song's styles are doubted (still used) and heard again with the new model. How many songs that is."""
+        from . import style as style_module
+
+        spec = style_module.MODELS.get(model_id)
+        if spec is None:
+            raise ValueError(f"No style model called {model_id!r}")
+        if not spec.available(self.config.models_dir):
+            raise ValueError(f"{spec.name} isn't in this image")
+        current = getattr(self.style, "spec", None)
+        if current is not None and current.id == spec.id:
+            return 0
+        self.style.unload()
+        self.style = self.style_factory(spec)
+        self.worker.style = self.style
+        self.worker._style_check_said = False
+        self.store.set_setting("style_model", spec.id)
+        doubted = self.store.doubt_styles()
+        self.store.event(f"Style model: {spec.name} from now on; {doubted} songs are heard again with it")
+        _log.info("Style model: %s chosen (%d songs to hear again)", spec.name, doubted)
+        self.worker.wake()
+        return doubted
+
     def styles_status(self, server=None):
         """The style model: whether the image has it, how far the songs (``server``'s) are, and how often it agrees
         with the tags."""
         worker, style = self.worker, self.style
         available = bool(style is not None and style.available)
+        spec = getattr(style, "spec", None)
         out = {"available": available, "loaded": bool(available and style.loaded),
                "device": getattr(style, "backend", None), "problem": getattr(style, "problem", None),
-               "checked": getattr(style, "checked", None)}
+               "checked": getattr(style, "checked", None),
+               "model": spec.id if spec else None, "model_name": spec.name if spec else None}
         if available:
             # Kept ready: the page asks every few seconds; its total follows songs added, too.
             out.update(self.kept("styles", server or self.servers.default_id, self.store.style_counts, 30,
@@ -1141,6 +1182,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/genres":
                 return self._json({"styles": app.styles_status(server), "genres": app.genre_list(server),
                                    "about": app.about.status()})
+            if path == "/api/style/models":  # the style models to choose from, and the one in use (0.39)
+                return self._json(app.style_models())
             if path == "/api/genre/about":
                 name = (query.get("name") or [""])[0].strip()
                 if not name:
@@ -1244,6 +1287,12 @@ class Handler(BaseHTTPRequestHandler):
                 except AudioMuseError as e:
                     return self._error(HTTPStatus.BAD_GATEWAY, str(e))
                 return self._json({"plugin": plugin, "url": app.audiomuse.url or None})
+            if path == "/api/style/model":  # the style model to hear genres with (0.39): {"model": "effnet" | "maest"}
+                try:
+                    doubted = app.choose_style_model(str(body.get("model") or ""))
+                except ValueError as e:
+                    return self._error(HTTPStatus.BAD_REQUEST, str(e))
+                return self._json({"doubted": doubted, **app.style_models()})
             if path == "/api/sound/pull":  # everything again with {"everything": true}
                 if not app.audiomuse.configured:
                     return self._error(HTTPStatus.BAD_REQUEST, "Connect AudioMuse-AI first (Setup › AudioMuse-AI)")

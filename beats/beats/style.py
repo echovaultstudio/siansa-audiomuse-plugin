@@ -31,6 +31,42 @@ PATCH_HOP = 62
 MAX_PATCHES = 64
 MODEL_FILE = "discogs-effnet-bsdynamic-1.onnx"
 LABELS_FILE = "discogs-effnet-bs64-1.json"
+
+
+class Spec:
+    """One of the style models (0.39, the owner, 13 Nov: a choice of model in Setup). Both take the same mel bands
+    (:func:`mel`) and give the same 400 Discogs styles, so a genre page reads the same whichever heard the songs;
+    they differ in the patch they hear at once, how many patches of a song, and whether the bands are normalised
+    first (MAEST's are: its mean and twice its standard deviation, from its own code)."""
+
+    def __init__(self, id, name, file, labels_file, patch, hop, most, blurb, znorm=None, cost=""):
+        self.id, self.name, self.file, self.labels_file = id, name, file, labels_file
+        self.patch, self.hop, self.most, self.znorm = patch, hop, most, znorm
+        self.blurb, self.cost = blurb, cost
+
+    def available(self, models_dir):
+        return os.path.exists(os.path.join(models_dir, self.file)) and os.path.exists(os.path.join(models_dir, self.labels_file))
+
+    def summary(self, models_dir):
+        return {"id": self.id, "name": self.name, "blurb": self.blurb, "cost": self.cost, "available": self.available(models_dir)}
+
+
+MODELS = {
+    "effnet": Spec(
+        "effnet", "Discogs-EffNet (2021)", MODEL_FILE, LABELS_FILE, PATCH, PATCH_HOP, MAX_PATCHES,
+        "A small, quick model. Sure of itself on electronic music, where it was mostly trained; it can misread a "
+        "quiet, sparse recording (a piano ballad as dance-pop).",
+        cost="About a second a song on a CPU.",
+    ),
+    "maest": Spec(
+        "maest", "MAEST (2023)", "discogs-maest-30s-pw-1.onnx", "discogs-maest-30s-pw-1.json", 1876, 938, 8,
+        "A larger transformer from the same group, hearing 30 seconds at a time. Markedly more accurate on the "
+        "same 400 styles, and surer of what it hears; the better choice beyond electronic music.",
+        znorm=(2.06755686098554, 2 * 1.268292820667291),
+        cost="Slow on a CPU (about 4 seconds per 30 seconds heard, a few windows a song); quick on a GPU.",
+    ),
+}
+DEFAULT_MODEL = "effnet"
 KEEP = 15  # the top styles kept for each song (with their scores), its genres (beats.genres) among them, and for the page
 CHECK_TOLERANCE = 0.05  # the GPU's scores may differ from ONNX Runtime's by this much before the GPU is distrusted
 
@@ -86,22 +122,22 @@ def mel(samples):
     return np.log10(1.0 + 10000.0 * (power.astype(np.float32) @ _filters())).astype(np.float32)
 
 
-def patches(bands, most=MAX_PATCHES):
-    """``(n, 128, 96)``: the patches the model hears, every :data:`PATCH_HOP` frames, at most ``most`` of them spread
-    evenly through the song; a song shorter than one patch is padded with silence."""
+def patches(bands, most=MAX_PATCHES, patch=PATCH, hop=PATCH_HOP):
+    """``(n, patch, 96)``: the patches the model hears, every ``hop`` frames, at most ``most`` of them spread evenly
+    through the song; a song shorter than one patch is padded with silence."""
     import numpy as np
 
-    if len(bands) < PATCH:
-        bands = np.pad(bands, ((0, PATCH - len(bands)), (0, 0)))
-    starts = list(range(0, len(bands) - PATCH + 1, PATCH_HOP))
+    if len(bands) < patch:
+        bands = np.pad(bands, ((0, patch - len(bands)), (0, 0)))
+    starts = list(range(0, len(bands) - patch + 1, hop))
     if len(starts) > most:
         starts = [starts[round(i * (len(starts) - 1) / (most - 1))] for i in range(most)]
-    return np.stack([bands[s:s + PATCH] for s in starts])
+    return np.stack([bands[s:s + patch] for s in starts])
 
 
-def labels(models_dir):
+def labels(models_dir, spec=None):
     """The 400 style names in the model's order (``Electronic---Trance``), from its metadata file."""
-    with open(os.path.join(models_dir, LABELS_FILE), encoding="utf-8") as f:
+    with open(os.path.join(models_dir, (spec or MODELS[DEFAULT_MODEL]).labels_file), encoding="utf-8") as f:
         return list(json.load(f)["classes"])
 
 
@@ -115,7 +151,8 @@ class StyleModel:
     """Discogs-EffNet, loaded with the first song. Thread-safe; ``available`` is False when the image has no model
     (an older image, or a test), and then nothing is asked of it."""
 
-    def __init__(self, models_dir, threads=2, device="auto"):
+    def __init__(self, models_dir, threads=2, device="auto", spec=None):
+        self.spec = spec or MODELS[DEFAULT_MODEL]
         self.models_dir = models_dir
         self.threads = threads
         self.requested = device  # BEATS_DEVICE: auto, cpu, cuda, cuda:N
@@ -134,8 +171,7 @@ class StyleModel:
 
     @property
     def available(self):
-        return os.path.exists(os.path.join(self.models_dir, MODEL_FILE)) and \
-            os.path.exists(os.path.join(self.models_dir, LABELS_FILE))
+        return self.spec.available(self.models_dir)
 
     @property
     def loaded(self):
@@ -145,7 +181,7 @@ class StyleModel:
         with self._lock:
             if self._session is None and self._torch is None:
                 started = time.monotonic()
-                self._labels = labels(self.models_dir)
+                self._labels = labels(self.models_dir, self.spec)
                 if self._load_gpu():
                     self.load_seconds = time.monotonic() - started
                     return self._torch
@@ -155,16 +191,32 @@ class StyleModel:
                 self.load_seconds = time.monotonic() - started
         return self._torch if self._torch is not None else self._session
 
+    def _patches(self, samples):
+        """The song's bands as the model's patches, normalised first when the model wants that (MAEST)."""
+        bands = mel(samples)
+        if self.spec.znorm:
+            mean, scale = self.spec.znorm
+            bands = ((bands - mean) / scale).astype(bands.dtype)
+        return patches(bands, self.spec.most, self.spec.patch, self.spec.hop)
+
     def _cpu_session(self):
         """ONNX Runtime on the CPU, made when first needed (the CPU's own run, or the check of the GPU)."""
         import onnxruntime
 
         options = memory.session_options(onnxruntime, self.threads, inter_threads=1)
-        session = onnxruntime.InferenceSession(os.path.join(self.models_dir, MODEL_FILE), options,
+        session = onnxruntime.InferenceSession(os.path.join(self.models_dir, self.spec.file), options,
                                                providers=["CPUExecutionProvider"])
         self._input = session.get_inputs()[0].name
         outputs = session.get_outputs()
-        self._output = next((o.name for o in outputs if o.shape and o.shape[-1] == len(self._labels)), outputs[0].name)
+        # The output with a score for each style: MAEST gives its logits as well, so the one within 0 and 1.
+        named = [o.name for o in outputs if o.shape and o.shape[-1] == len(self._labels)] or [outputs[0].name]
+        self._output = named[0]
+        if len(named) > 1:
+            import numpy as np
+
+            probe = np.zeros((1, self.spec.patch, BANDS), np.float32)
+            scores = session.run(named, {self._input: probe})
+            self._output = next((n for n, v in zip(named, scores) if float(v.min()) >= 0 and float(v.max()) <= 1), named[0])
         return session
 
     def _cpu_scores(self, session, batch):
@@ -239,11 +291,13 @@ class StyleModel:
 
             # Loaded here and handed over in memory: given the path, onnx2torch writes a temporary file beside the
             # model, and /models is read-only to the service (0.17.0: "Permission denied: '/models/tmp_…'").
-            module = convert(onnx.load(os.path.join(self.models_dir, MODEL_FILE))).eval().to(device)
+            module = convert(onnx.load(os.path.join(self.models_dir, self.spec.file))).eval().to(device)
             with torch.inference_mode():
-                outputs = module(torch.zeros((1, PATCH, BANDS), device=device))
+                outputs = module(torch.zeros((1, self.spec.patch, BANDS), device=device))
             outputs = outputs if isinstance(outputs, (list, tuple)) else (outputs,)
-            self._pick = next(i for i, o in enumerate(outputs) if o.shape[-1] == len(self._labels))
+            # The scores, within 0 and 1 (MAEST gives its logits too).
+            self._pick = next(i for i, o in enumerate(outputs)
+                              if o.shape[-1] == len(self._labels) and float(o.min()) >= 0 and float(o.max()) <= 1)
             self._torch, self.device = module, device
             return True
         except Exception as e:  # no onnx2torch, an odd driver: the CPU does it
@@ -264,7 +318,7 @@ class StyleModel:
             import soxr
 
             samples = soxr.resample(np.asarray(samples, dtype=np.float32), rate, RATE)
-        batch = patches(mel(samples))
+        batch = self._patches(samples)
         if model is self._torch:
             scores = self._gpu_scores(model, batch)
         else:
@@ -287,7 +341,7 @@ class StyleModel:
             import soxr
 
             samples = soxr.resample(np.asarray(samples, dtype=np.float32), rate, RATE)
-        batch = patches(mel(samples))
+        batch = self._patches(samples)
         out = {}
         for way, scores in (("gpu", self._gpu_scores(model, batch) if model is self._torch else None),
                             ("cpu", self._cpu_scores(self._session or self._cpu_session(), batch))):

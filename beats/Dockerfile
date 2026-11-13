@@ -85,6 +85,25 @@ m = convert(path).eval(); out = m(torch.from_numpy(x)); out = out if isinstance(
 diff = max(float(numpy.abs(a - b.detach().numpy()).max()) for a, b in zip(ref, out)); \
 assert diff < 1e-3, diff; print('onnx2torch matches ONNX Runtime within', diff)"
 
+# MAEST (0.39): the same group's 2023 transformer, the same 400 styles, markedly more accurate; the one to choose in
+# Setup beyond electronic music. Essentia's ONNX (350 MB; CC BY-NC-SA 4.0, as EffNet), with its labels. Its scores
+# are the output within 0 and 1 (its logits come too); checked here through onnx2torch for the GPU, as EffNet is.
+ARG MAEST_MODELS=https://essentia.upf.edu/models/feature-extractors/maest
+RUN for file in discogs-maest-30s-pw-1.onnx discogs-maest-30s-pw-1.json; do \
+      for try in 1 2 3 4 5; do \
+        python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+          "${MAEST_MODELS}/${file}" "/models/${file}" && break || { echo "download $try failed, trying again"; sleep 15; }; \
+      done; \
+    done \
+ && python -c "import json, numpy, onnxruntime, torch; from onnx2torch import convert; \
+path = '/models/discogs-maest-30s-pw-1.onnx'; x = numpy.random.RandomState(0).rand(1, 1876, 96).astype(numpy.float32) * 4 - 2; \
+s = onnxruntime.InferenceSession(path, providers=['CPUExecutionProvider']); ref = s.run(['activations'], {'melspectrogram': x})[0]; \
+labels = json.load(open('/models/discogs-maest-30s-pw-1.json'))['classes']; effnet = json.load(open('/models/discogs-effnet-bs64-1.json'))['classes']; \
+assert labels == effnet, 'MAEST and EffNet name different styles'; assert ref.shape == (1, 400), ref.shape; \
+m = convert(path).eval(); out = m(torch.from_numpy(x)); out = out if isinstance(out, (list, tuple)) else (out,); \
+act = next(o for o in out if tuple(o.shape) == (1, 400) and float(o.min()) >= 0 and float(o.max()) <= 1); \
+diff = float(numpy.abs(ref - act.detach().numpy()).max()); assert diff < 1e-3, diff; print('MAEST: 400 styles, onnx2torch matches ONNX Runtime within', diff)"
+
 # The search by words (0.26): AudioMuse-AI's own models, so a description lands among the songs as it does there.
 # LAION CLAP's text tower as ONNX (500 MB) and the two small models its concept steering uses (a sparse autoencoder
 # over CLAP's space), from AudioMuse-AI's releases; RoBERTa's tokenizer is in the repository (beats/roberta-tokenizer.json).
