@@ -176,3 +176,12 @@ class PrecisionAndPassesTest(unittest.TestCase):
         m._full_precision("a test")
         self.assertFalse(m.half)
         self.assertIn("full precision", m.problem)
+
+    def test_a_pass_that_does_not_fit_the_gpu_makes_it_one_at_a_time(self):
+        m = self.model()
+        m._torch = object()  # "on a GPU"
+        self.assertEqual(m.songs_at_once, style.SONGS_AT_ONCE_GPU)
+        self.assertTrue(m.one_at_a_time("out of memory"))
+        self.assertEqual(m.songs_at_once, 1)
+        self.assertFalse(m.one_at_a_time("again"))  # said once
+        self.assertIn("one song at a time", m.problem)

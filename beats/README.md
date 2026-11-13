@@ -372,9 +372,10 @@ genre pages and genre radios:
   same 400 styles, so the genre pages read the same. The model runs on the GPU when there is one (through the
   PyTorch Beat This! uses), else on the CPU (ONNX Runtime, `STYLE_THREADS`, 2 by default); `BEATS_DEVICE=cpu`
   keeps both on the CPU. On a GPU with tensor cores (an RTX, any card of compute capability 7 or more) it hears in
-  half precision (0.41, the owner, 13 Nov: an RTX 3050 took 1.7 s a song in full precision), two songs in one pass,
-  while the next songs download and decode in the background; older cards and the CPU hear in full precision, one
-  at a time (`STYLE_PRECISION`). Half precision that strays from the CPU's scores on the first song goes back to
+  half precision (0.41, the owner, 13 Nov: an RTX 3050 took 1.7 s a song in full precision), two songs in one pass
+  where the card's memory allows (a pass that runs out of memory is the last one of two: one a pass from then on,
+  said once in Activity; 0.42.2, the 3050's 6 GB), while the next songs download and decode in the background;
+  older cards and the CPU hear in full precision, one at a time (`STYLE_PRECISION`). Half precision that strays from the CPU's scores on the first song goes back to
   full precision by itself. EffNet is at home among electronic
   releases and can misread a clean, sparse production (a country ballad as Dance-pop, the owner, 13 Nov); `GET
   /api/v1/songs/families?ids=` (0.38) shows, for up to ten songs, how CLAP hears their genre family from the vector
