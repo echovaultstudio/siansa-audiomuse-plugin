@@ -69,9 +69,6 @@ class Worker:
         self.hearing = None  # {"id", "title", "artist", "since"}: a song analysed before, being heard for its sound
         self.sound = sound or measure_sound  # (path, samples, rate) -> loudness, fades and key
         self.measuring = None  # {"id", "title", "artist", "since"}: a song analysed before, getting its loudness
-        # (ids) -> {id: loudness, fades, key}: what AudioMuse-AI's Siansa plugin already measured, taken instead of
-        # downloading the song again (AudioMuse.profiles); None without AudioMuse-AI.
-        self.importer = None
         self.style = style  # beats.style.StyleModel, or None
         self.styling = None  # {"id", "title", "artist", "since", "with"}: a song analysed before, getting its styles
         self.genre_report = None  # beats.genres.agreement: how often the sound agrees with the tags
@@ -695,34 +692,10 @@ class Worker:
             if not waiting:
                 self._stop.wait(self.MEASURE_IDLE_SECONDS)
                 continue
-            if self.importer and self._import(waiting):
-                continue  # some came from the plugin: look again for the rest
             for song_id in waiting:
                 if self._stop.is_set() or self.paused or self.styling or self.store.counts().get("queued"):
                     break
                 self._measure_again(song_id)
-
-    def _import(self, waiting):
-        """Takes what the Siansa plugin on AudioMuse-AI already measured of the songs left to measure, a few hundred at a
-        time, each asked for once: True while there were songs to ask about. Then the rest are measured here."""
-        tried = self.__dict__.setdefault("_import_tried", set())
-        ids = [i for i in self.store.without_measure(loudness.VERSION, limit=len(tried) + 500) if i not in tried][:500]
-        if not ids:
-            self.importer = None
-            _log.info("Took what AudioMuse-AI's Siansa plugin had measured; the rest are measured here")
-            return False
-        tried.update(ids)
-        try:
-            found = self.importer(ids)
-        except Exception as e:  # AudioMuse-AI away: the songs are measured here instead
-            _log.info("Couldn't take loudness from AudioMuse-AI's Siansa plugin: %s", e)
-            self.importer = None
-            return False
-        for song_id, values in found.items():
-            self.store.save_measure(song_id, values, loudness.VERSION, source="plugin")
-        if found:
-            self.store.event(f"Loudness, fades and key of {len(found)} songs taken from AudioMuse-AI's Siansa plugin")
-        return True
 
     def _measure_again(self, song_id):
         self.last_work = time.time()

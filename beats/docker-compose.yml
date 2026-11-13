@@ -1,6 +1,6 @@
 # Siansa Beats: copy this and the .env next to it on the Docker server, then `docker compose up -d`.
 # The page is then at http://<that server>:8090: add your music server there, under Setup. No password goes in here
-# (0.24.0): the servers, AudioMuse-AI, the page's password and the app's key are set on the page. See README.md.
+# (0.24.0): the servers, the page's password and the app's key are set on the page. See README.md.
 services:
   beats:
     image: ghcr.io/echovaultstudio/siansa-beats:latest

@@ -12,9 +12,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
-from beats import pull, sound  # noqa: E402
+from beats import sound  # noqa: E402
 from beats.store import Store  # noqa: E402
-from fakes import TOKEN  # noqa: E402
 from test_service import CATALOG, Base, Service  # noqa: E402
 
 AXES = {"trance": 0, "house": 1, "jazz": 2, "rock": 3}
@@ -257,7 +256,7 @@ class FakeHearer:
 
 
 def track(s, **changes):
-    """A song as AudioMuse-AI's export gives it."""
+    """A song's sound and feel, as the hearer gives them, for :func:`kept_row`."""
     return {"id": s["id"], "title": s["title"], "artist": s["artist"], "album_artist": s["artist"], "album": s.get("album", "Test"),
             "year": 2020, "tempo": 128.0, "key": "A", "scale": "minor", "mood_vector": "trance:0.6,house:0.2",
             "energy": 0.4, "other_features": "danceable:0.7,happy:0.4", "rating": None, "umap_x": None, "umap_y": None,
@@ -265,70 +264,35 @@ def track(s, **changes):
             "clap_embedding": base64.b64encode(word_vector(CATALOG.index(s)).tobytes()).decode(), **changes}
 
 
-class PullTest(Service):
-    """The pull from AudioMuse-AI and the answers, through the running service."""
+def kept_row(song_id, t):
+    """``t`` (:func:`track`) as a row of the sound table."""
+    return {"song_id": song_id, "musicnn": base64.b64decode(t["embedding"]),
+            "clap": base64.b64decode(t["clap_embedding"]) if t.get("clap_embedding") else None,
+            "key": t.get("key"), "scale": t.get("scale"), "moods": t.get("mood_vector"), "other": t.get("other_features"),
+            "energy": t.get("energy"), "album_artist": t.get("album_artist"), "year": t.get("year"), "fp": t.get("fp")}
 
-    def pulled(self, **body):
-        self.assertTrue(self.call("/api/sound/pull", "POST", body)["started"])
-        end = time.time() + 10
+
+class AnswersTest(Service):
+    """What songs sound like, answered to the app through the running service."""
+
+    def heard(self):
+        """Every song of the catalog (but the broken one) with its sound here, as if heard; the status' sound."""
+        self.app.store.save_sound([kept_row(s["id"], track(s)) for s in CATALOG if s["id"] != "bad"], source="beats")
+        end = time.time() + 5
         while time.time() < end:
             state = self.call("/api/status")["sound"]
-            if not state["pull"].get("running"):
+            if state["sound"] == 3:
                 return state
             time.sleep(0.05)
-        self.fail("the pull didn't finish")
+        self.fail("the sound didn't show")
 
-    def test_every_music_server_of_audiomuse_is_taken_over_under_its_one_login(self):
-        # The owner's: his own and his kids' are the same Navidrome under two users, two servers in AudioMuse-AI. Its
-        # export gives the default server's songs alone unless a server is named (0.28 heard the kids' songs itself).
+    def test_the_songs_sound_answers_the_app(self):
         self.start()
         self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
-        self.fake.sync = {s["id"]: track(s) for s in CATALOG if s["id"] != "bad"}
-        self.fake.am_servers = [
-            {"server_id": "srv-kids", "name": "Kids", "server_type": "navidrome", "is_default": False, "sees": {"t96w", "t140"}},
-            {"server_id": "srv-main", "name": "Navidrome", "server_type": "navidrome", "is_default": True, "sees": {"t140", "t122"}},
-        ]
-        state = self.pulled()
-        self.assertEqual(state["sound"], 3)
-        pull = state["pull"]
-        self.assertEqual({k: pull[k] for k in ("total", "kept", "unknown", "same")}, {"total": 4, "kept": 3, "unknown": 0, "same": 1})
-        self.assertEqual([(s["name"], s["total"], s["kept"], s["same"]) for s in pull["servers"]],
-                         [("Navidrome", 2, 2, 0), ("Kids", 2, 1, 1)])  # its default first; a shared song once
-        asked = [q.get("server") for p, q in self.fake.requests if p == "/api/sync"]
-        self.assertEqual(set(asked), {"srv-main", "srv-kids"})
-        # Again: nothing new on either.
-        again = self.pulled()["pull"]
-        self.assertEqual((again["kept"], again["same"]), (0, 4))
-
-    def test_an_audiomuse_without_a_list_of_servers_is_asked_as_before(self):
-        self.start()
-        self.call("/api/libraries", "POST", {"ids": ["1"]})
-        self.wait_done()
-        self.fake.sync = {s["id"]: track(s) for s in CATALOG if s["id"] != "bad"}
-        pull = self.pulled()["pull"]
-        self.assertEqual((pull["kept"], [s["name"] for s in pull["servers"]]), (3, [None]))
-        self.assertFalse([q for p, q in self.fake.requests if p == "/api/sync" and "server" in q])
-
-    def test_audiomuses_analysis_is_taken_over_and_answers_the_app(self):
-        self.start()
-        self.call("/api/libraries", "POST", {"ids": ["1"]})
-        self.wait_done()
-        self.fake.sync = {s["id"]: track(s) for s in CATALOG if s["id"] != "bad"}
-        self.fake.sync["elsewhere"] = track(CATALOG[0], id="elsewhere")  # a song of a library not chosen here
-        state = self.pulled()
+        state = self.heard()
         self.assertEqual((state["sound"], state["words"], state["songs"]), (3, 3, 4))
-        self.assertEqual({k: state["pull"][k] for k in ("total", "kept", "unknown", "same")},
-                         {"total": 4, "kept": 3, "unknown": 1, "same": 0})
-
-        # Again: nothing changed, so nothing is asked for in full.
-        before = len([p for p, q in self.fake.requests if p == "/api/sync" and "ids" in q])
-        state = self.pulled()
-        self.assertEqual((state["pull"]["kept"], state["pull"]["same"]), (0, 3))
-        self.assertEqual(len([p for p, q in self.fake.requests if p == "/api/sync" and "ids" in q]), before)
-        # One song analysed again by AudioMuse-AI: only it comes over.
-        self.fake.sync["t122"] = track(CATALOG[1], fp="fp-new", tempo=61.0)
-        self.assertEqual(self.pulled()["pull"]["kept"], 1)
+        self.assertNotIn("pull", state)  # 0.43: nothing is taken over from anywhere
 
         caps = self.call("/api/v1/capabilities")["features"]
         self.assertEqual((caps["sound"]["available"], caps["sound"]["songs"], caps["sound"]["prefix"]),
@@ -341,7 +305,7 @@ class PullTest(Service):
         self.assertEqual([s["item_id"] for s in like], ["t122", "t96w"])
         self.assertEqual(like[0]["author"], "House Test")
         feats = self.call(f"{am}/api/sync?ids=t122,t140,bad&include_embeddings=false")["tracks"]
-        # The tempo is Beat This!'s, never AudioMuse-AI's (which said 61 and 128 for these): the owner, 11 Nov.
+        # The tempo is Beat This!'s (the owner, 11 Nov).
         self.assertEqual([(t["id"], t["tempo"], t["tempo_source"], t["other_features"]) for t in feats],
                          [("t122", 122.0, "beat_this", "danceable:0.7,happy:0.4"),
                           ("t140", 140.0, "beat_this", "danceable:0.7,happy:0.4")])
@@ -360,13 +324,13 @@ class PullTest(Service):
         self.assertEqual([s["item_id"] for s in yours][0], "t96w")
         self.assertEqual(self.call(f"{am}/api/sonic_fingerprint/generate", "POST", {"n": 2, "ids": ["t140"]})[0]["item_id"], "t140")
 
-        # Similar albums and artists come from here now, not from AudioMuse-AI's plugin.
+        # Similar albums and artists come from here.
         artists = self.call("/api/v1/similar/artists?track_id=t140")
         self.assertEqual((artists["source"], {a["artist"] for a in artists["similar"]}), ("beats", {"House Test", "Three"}))
         self.assertEqual(self.call("/api/v1/similar/albums?track_id=t140")["source"], "beats")
 
         with self.assertRaises(urllib.error.HTTPError) as e:
-            self.call(f"{am}/api/similar_tracks?item_id=bad")  # known, but AudioMuse-AI never analysed it
+            self.call(f"{am}/api/similar_tracks?item_id=bad")  # known, but its sound isn't
         self.assertEqual(e.exception.code, 404)
         with self.assertRaises(urllib.error.HTTPError) as e:
             self.call(f"{am}/api/similar_tracks?item_id=who")
@@ -378,8 +342,7 @@ class PullTest(Service):
         self.start()
         self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
-        self.fake.sync = {s["id"]: track(s) for s in CATALOG if s["id"] != "bad"}
-        self.pulled()
+        self.heard()
         got = self.call("/api/v1/songs/families?ids=t140,nope")["songs"]
         self.assertEqual(got["nope"]["error"], "not a song here")
         fam = got["t140"]["families"]
@@ -389,20 +352,19 @@ class PullTest(Service):
         self.assertIn("gated", got["t140"])
 
     def test_music_is_found_by_describing_it(self):
-        """The search by words (0.26), as AudioMuse-AI answers it: the songs nearest the words, steered by concepts."""
+        """The search by words (0.26): the songs nearest the words, steered by concepts."""
         self.words = FakeWords()
         self.start()
         self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
         am = "/api/v1/audiomuse"
         caps = self.call("/api/v1/capabilities")["features"]
-        self.assertEqual((caps["words"]["available"], caps["sound"]["answers"]), (False, []))  # nothing taken over yet
+        self.assertEqual((caps["words"]["available"], caps["sound"]["answers"]), (False, []))  # nothing heard yet
         with self.assertRaises(urllib.error.HTTPError) as e:
             self.call(f"{am}/api/clap/search", "POST", {"query": "deep"})
         self.assertEqual(e.exception.code, 503)
 
-        self.fake.sync = {s["id"]: track(s) for s in CATALOG if s["id"] != "bad"}
-        self.pulled()
+        self.heard()
         caps = self.call("/api/v1/capabilities")["features"]
         self.assertEqual((caps["words"]["available"], caps["words"]["songs"], caps["words"]["steering"]), (True, 3, True))
         self.assertIn("/api/clap/search", caps["sound"]["answers"])
@@ -419,7 +381,7 @@ class PullTest(Service):
         self.assertEqual(steered["results"][0]["item_id"], "t96w")
         self.assertEqual(steered["steering"], [{"term": "waltz", "weight": 3.0, "direction": "more"}])
         self.assertEqual(steered["steering_warnings"], ['"bagpipes" is not a validated concept for this library'])
-        with self.assertRaises(urllib.error.HTTPError) as e:  # nothing usable to steer by: refused, as AudioMuse-AI
+        with self.assertRaises(urllib.error.HTTPError) as e:  # nothing usable to steer by: refused
             self.call(f"{am}/api/clap/search", "POST", {"query": "deep", "steering": [{"term": "bagpipes"}]})
         self.assertEqual(e.exception.code, 400)
         with self.assertRaises(urllib.error.HTTPError) as e:
@@ -428,12 +390,11 @@ class PullTest(Service):
         self.assertEqual(self.call(f"{am}/api/clap/concepts")["categories"][0]["terms"][0]["term"], "deep")
         self.assertEqual(self.call("/api/status")["sound"]["text_model"]["available"], True)
 
-    def test_new_songs_are_heard_here_without_audiomuse(self):
-        """0.27: Siansa Beats hears each song's sound itself while it analyses it, with AudioMuse-AI's models; what
-        can't be heard is kept and not tried again; AudioMuse-AI's own, taken over later, replaces it."""
+    def test_new_songs_are_heard_here(self):
+        """0.27: Siansa Beats hears each song's sound itself while it analyses it; what can't be heard is kept and
+        not tried again."""
         self.hearer, self.words = FakeHearer(), FakeWords()
         self.start()
-        self.call("/api/audiomuse", "DELETE")
         self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
         state = self.call("/api/status")["sound"]
@@ -451,19 +412,10 @@ class PullTest(Service):
         self.assertEqual(self.call(f"{am}/api/clap/search", "POST", {"query": "deep"})["results"][0]["item_id"], "t122")
         # The one that couldn't be heard isn't tried again and again.
         self.assertEqual(self.app.store.without_sound(), [])
-        # AudioMuse-AI's own analysis, taken over later, takes its place (and the place of what was heard here).
-        self.call("/api/audiomuse", "POST", {"url": self.fake.url, "token": TOKEN})
-        self.fake.sync = {s["id"]: track(s) for s in CATALOG if s["id"] != "bad"}
-        end = time.time() + 10
-        while time.time() < end and self.call("/api/status")["sound"]["pull"].get("running"):
-            time.sleep(0.05)
-        state = self.pulled()
-        self.assertEqual(state["sources"], {"audiomuse": 3, "beats": 0, "failed": 0})
 
     def test_songs_analysed_before_are_heard_when_theres_nothing_else_to_do(self):
         self.hearer = FakeHearer(available=False)  # an image from before 0.27
         self.start()
-        self.call("/api/audiomuse", "DELETE")
         self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
         self.assertEqual(self.call("/api/status")["sound"]["sound"], 0)
@@ -484,7 +436,7 @@ class PullTest(Service):
         return [e["message"] for e in self.call("/api/status")["events"]]
 
     def test_songs_gone_from_the_server_are_forgotten(self):
-        """0.27's cleaning, as AudioMuse-AI's: a song removed from the server goes from here with its analysis when its
+        """0.27's cleaning: a song removed from the server goes from here with its analysis when its
         library is read again; a library that suddenly lists far fewer songs is left alone, and that's said."""
         self.hearer = FakeHearer()
         self.start()
@@ -511,21 +463,19 @@ class PullTest(Service):
         self.assertEqual(self.call("/api/status")["counts"]["songs"], 3)
         self.fake.songs[:] = everything
 
-    def test_a_pull_that_cant_be_done_says_why(self):
+    def test_before_a_songs_sound_is_known_similar_music_is_empty_not_an_error(self):
+        """0.43: nothing else is asked; the app gets an empty list with why."""
         self.start()
         self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
-        self.assertIn("no export for apps", self.pulled()["pull"]["error"])  # an older AudioMuse-AI
-        self.assertEqual(self.call("/api/v1/capabilities")["features"]["sound"]["available"], False)
-        # Similar music is still asked of AudioMuse-AI's plugin meanwhile.
-        self.assertEqual(self.call("/api/v1/similar/artists?artist=Ecsape")["source"], "audiomuse")
-
-    def test_a_song_without_a_vector_isnt_kept(self):
-        self.assertIsNone(pull.row_of("x", {"embedding": None, "fp": "f"}))
-        self.assertIsNone(pull.row_of("x", {"embedding": base64.b64encode(b"short").decode()}))
-        row = pull.row_of("x", track(CATALOG[0], clap_embedding=None, year="1999"))
-        self.assertEqual((len(row["musicnn"]), row["clap"], row["year"]), (800, None, None))
-        self.assertNotIn("tempo", row)  # AudioMuse-AI's tempo is never kept
+        caps = self.call("/api/v1/capabilities")["features"]
+        self.assertEqual((caps["sound"]["available"], caps["similar"]), (False, {"available": False, "source": "beats"}))
+        answer = self.call("/api/v1/similar/artists?artist=Ecsape")
+        self.assertEqual((answer["similar"], answer["source"]), ([], "beats"))
+        for gone in ("/api/audiomuse", "/api/sound/pull"):
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                self.call(gone, "POST", {})
+            self.assertEqual(e.exception.code, 404, gone)
 
 
 class WordsTest(unittest.TestCase):

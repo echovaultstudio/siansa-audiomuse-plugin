@@ -25,59 +25,61 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--page); color: var(--text); font: 15px/1.45 var(--sans); }
 a { color: var(--amber-text); }
-.skip { position: absolute; left: -999px; } .skip:focus { left: 8px; top: 8px; z-index: 20; background: var(--raised); padding: 6px 10px; }
+.skip { position: absolute; left: -999px; } .skip:focus { left: 8px; top: 8px; z-index: 20; background: var(--raised); padding: 8px 12px; }
 header { position: sticky; top: 0; z-index: 6; background: color-mix(in srgb, var(--page) 88%, transparent);
   backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: var(--header-h); padding: 0 16px; }
-h1 { font-size: 1.15rem; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: 1.125rem; margin: 0; letter-spacing: -0.01em; }
 h1 b { color: var(--amber); font-weight: 800; }  /* the wordmark (0.42, the owner, 13 Nov): only the S in amber */
 h1 { font-weight: 700; }
 h1 a { color: inherit; text-decoration: none; }
-h1 .version { font-size: 0.72rem; font-weight: 500; color: var(--faint); margin-left: 6px; letter-spacing: 0; }
-h2 { font-size: 1.35rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+h1 .version { font-size: 0.75rem; font-weight: 500; color: var(--faint); margin-left: 8px; letter-spacing: 0; }
+h2 { font-size: 1.375rem; margin: 0 0 4px; letter-spacing: -0.01em; }
 h3 { font-size: 1rem; margin: 0 0 12px; }
-h4 { font-size: 0.82rem; margin: 18px 0 8px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.05em; }
+h4 { font-size: 0.8125rem; margin: 16px 0 8px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.05em; }
 h4 .sub { text-transform: none; letter-spacing: 0; }
-.pill { border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 10px; font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
-.pill.ok::before, .pill.bad::before, .pill.wait::before { content: "●"; margin-right: 6px; }
+.pill { border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 12px; font-size: 0.8125rem; color: var(--muted); white-space: nowrap; }
+.pill.ok::before, .pill.bad::before, .pill.wait::before { content: "●"; margin-right: 8px; }
 .pill.ok::before { color: var(--ok); } .pill.bad::before { color: var(--bad); } .pill.wait::before { color: var(--warn); }
 /* The connections in one button and its menu (the owner, 10 Nov: the row of them made the page too wide). */
 .status { position: relative; margin-left: auto; flex: 0 0 auto; }
-.status-button { gap: 8px; padding: 6px 12px; font-size: 0.86rem; color: var(--muted); max-width: 46vw; }
+.status-button { gap: 8px; padding: 8px 12px; font-size: 0.875rem; color: var(--muted); max-width: 46vw; }
 .status-button .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.status-button .caret { font-size: 0.7rem; color: var(--faint); transition: transform 0.15s ease; }
+.status-button .caret { font-size: 0.75rem; color: var(--faint); transition: transform 0.15s ease; }
 .status-button[aria-expanded=true] .caret { transform: rotate(180deg); }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: var(--faint); }
 .dot.ok { background: var(--ok); } .dot.wait { background: var(--warn); } .dot.bad { background: var(--bad); }
 .dot.off { background: var(--faint); }  /* not in use: nothing to look at */
 .status-panel { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; width: min(380px, calc(100vw - 24px));
-  background: var(--raised); border: 1px solid var(--line-strong); border-radius: 14px; padding: 8px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); }
+  background: var(--raised); border: 1px solid var(--line-strong); border-radius: 16px; padding: 8px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); }
 .status-panel[hidden] { display: none; }
-.status-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; align-items: baseline; padding: 9px 10px; border-radius: 10px; }
+.status-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: baseline; padding: 8px 12px; border-radius: 12px; }
 .status-row + .status-row { border-top: 1px solid var(--line); border-radius: 0; }
 .status-row .dot { transform: translateY(1px); }
-.status-row .name { font-weight: 600; font-size: 0.9rem; }
-.status-row .detail { grid-column: 2; color: var(--muted); font-size: 0.82rem; overflow-wrap: anywhere; }
-.status-foot { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px 4px; font-size: 0.82rem; color: var(--faint); border-top: 1px solid var(--line); margin-top: 4px; }
+.status-row .name { font-weight: 600; font-size: 0.875rem; }
+.status-row .detail { grid-column: 2; color: var(--muted); font-size: 0.8125rem; overflow-wrap: anywhere; }
+.status-foot .foot-links { display: flex; gap: 12px; align-items: center; }
+.status-foot button { border: 0; background: none; padding: 0; color: var(--amber-text); font-size: inherit; text-decoration: underline; border-radius: 4px; }
+.status-foot { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px 4px; font-size: 0.8125rem; color: var(--faint); border-top: 1px solid var(--line); margin-top: 4px; }
 
 /* The page: a side menu of three groups (the owner, 10 Nov: "easily navigable and structured"), one page at a time. */
 .shell { display: grid; grid-template-columns: var(--nav-w) minmax(0, 1fr); max-width: 1440px; margin: 0 auto; }
 .nav { position: sticky; top: var(--header-h); align-self: start; height: calc(100vh - var(--header-h)); overflow-y: auto;
   padding: 16px 12px 32px; border-right: 1px solid var(--line); }
-.nav .group { margin-bottom: 18px; }
-.nav .group-name { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); padding: 0 10px 6px; }
-.nav a { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px; color: var(--muted); text-decoration: none; font-size: 0.92rem; }
+.nav .group { margin-bottom: 16px; }
+.nav .group-name { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); padding: 0 12px 8px; }
+.nav a { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 12px; color: var(--muted); text-decoration: none; font-size: 0.9375rem; }
 .nav a:hover { background: var(--raised-2); color: var(--text); }
 .nav a[aria-current=page] { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--text); font-weight: 600; }
-.nav .count { margin-left: auto; font-size: 0.75rem; border-radius: 999px; padding: 0 7px; background: var(--raised-2); color: var(--muted); }
+.nav .count { margin-left: auto; font-size: 0.75rem; border-radius: 999px; padding: 0 8px; background: var(--raised-2); color: var(--muted); }
 .nav .count:empty { display: none; }
-main { padding: 20px 24px 64px; min-width: 0; outline: none; }
+main { padding: 24px 24px 64px; min-width: 0; outline: none; }
 main > section { display: none; }
 main > section.on { display: grid; gap: 16px; }
 .page-head { margin-bottom: 4px; } .page-head .sub { max-width: 72ch; }
 .page-name, .scrim, .nav-close { display: none; }
 /* On a wide screen the menu folds away behind the same ☰ (0.42, the owner, 13 Nov), remembered; the page takes the room. */
-.menu-button { display: inline-flex; border: 0; padding: 8px 10px; font-size: 1.25rem; line-height: 1; border-radius: 12px; background: transparent; color: var(--muted); }
+.menu-button { display: inline-flex; border: 0; padding: 8px 12px; font-size: 1.125rem; line-height: 1; border-radius: 12px; background: transparent; color: var(--muted); }
 .menu-button:hover { background: var(--raised-2); color: var(--text); }
 @media (min-width: 901px) {
   body.nav-folded .shell { grid-template-columns: minmax(0, 1fr); }
@@ -86,8 +88,8 @@ main > section.on { display: grid; gap: 16px; }
 @media (max-width: 900px) {
   /* On a phone the menu is a drawer behind a menu button (the owner, 10 Nov: the row of tabs was hard to use). */
   .shell { grid-template-columns: minmax(0, 1fr); }
-  .bar { flex-wrap: nowrap; gap: 10px; padding: 0 8px 0 4px; }
-  .menu-button { padding: 10px; font-size: 1.35rem; }
+  .bar { flex-wrap: nowrap; gap: 12px; padding: 0 8px 0 4px; }
+  .menu-button { padding: 12px; font-size: 1.375rem; }
   .page-name { display: block; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .page-name::before { content: "·"; margin-right: 8px; color: var(--faint); }
   h1 { white-space: nowrap; }
@@ -98,31 +100,31 @@ main > section.on { display: grid; gap: 16px; }
     background: var(--raised); border-right: 1px solid var(--line); transform: translateX(-102%); transition: transform 0.22s ease;
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.45); }
   body.menu-open .nav { transform: none; }
-  .nav-close { display: flex; justify-content: space-between; align-items: center; padding: 4px 4px 14px 10px; }
-  .nav-close button { border: 0; font-size: 1.2rem; padding: 8px 12px; }
+  .nav-close { display: flex; justify-content: space-between; align-items: center; padding: 4px 4px 16px 12px; }
+  .nav-close button { border: 0; font-size: 1.125rem; padding: 8px 12px; }
   .nav a { padding: 12px 12px; font-size: 1rem; }
   .scrim { display: block; position: fixed; inset: 0; z-index: 25; background: rgba(0, 0, 0, 0.5); opacity: 0; pointer-events: none; transition: opacity 0.22s ease; }
   body.menu-open .scrim { opacity: 1; pointer-events: auto; }
   body.menu-open { overflow: hidden; }
   main { padding: 16px 16px 48px; }
-  .status-button { padding: 8px 10px; }
+  .status-button { padding: 8px 12px; }
   .status-button .label { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .nav, .scrim { transition: none; } }
 
-.card { background: var(--raised); border: 1px solid var(--line); border-radius: 14px; padding: 16px; min-width: 0; }
+.card { background: var(--raised); border: 1px solid var(--line); border-radius: 16px; padding: 16px; min-width: 0; }
 /* Listening: the time machine. A period in big letters, the years and months to travel to, then its numbers. */
-.tm-hero { position: relative; overflow: hidden; isolation: isolate; border-radius: 18px; padding: 22px 20px 18px; border: 1px solid var(--line);
+.tm-hero { position: relative; overflow: hidden; isolation: isolate; border-radius: 16px; padding: 22px 24px 16px; border: 1px solid var(--line);
   background: radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--amber) 22%, transparent), transparent 60%), var(--raised); min-width: 0; }
 /* The time's most played artist, faint behind its name. */
 .tm-hero::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--face, none) center 22% / cover no-repeat; opacity: 0.34;
   -webkit-mask-image: linear-gradient(to left, #000 0%, rgba(0, 0, 0, 0.5) 45%, transparent 85%); mask-image: linear-gradient(to left, #000 0%, rgba(0, 0, 0, 0.5) 45%, transparent 85%); }
-.tm-kicker { font-size: 0.74rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--amber-text); font-weight: 700; }
-.tm-hero h2 { font-size: clamp(2rem, 7vw, 3.4rem); line-height: 1.05; letter-spacing: -0.03em; margin: 6px 0 4px; }
-.tm-hero .sub { font-size: 0.95rem; color: var(--muted); }
-.tm-who { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
-.tm-strip { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 6px; margin-top: 12px; scrollbar-width: thin; }
-.tm-strip button { flex: 0 0 auto; padding: 6px 12px; font-variant-numeric: tabular-nums; }
+.tm-kicker { font-size: 0.75rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--amber-text); font-weight: 700; }
+.tm-hero h2 { font-size: clamp(2rem, 7vw, 3.4rem); line-height: 1.05; letter-spacing: -0.03em; margin: 8px 0 4px; }
+.tm-hero .sub { font-size: 0.9375rem; color: var(--muted); }
+.tm-who { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; }
+.tm-strip { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 8px; margin-top: 12px; scrollbar-width: thin; }
+.tm-strip button { flex: 0 0 auto; padding: 8px 12px; font-variant-numeric: tabular-nums; }
 .tm-strip button[aria-pressed=true] { background: var(--amber); color: var(--on-amber); border-color: var(--amber); font-weight: 700; }
 .tm-strip button.empty { opacity: 0.45; }
 /* A picture's place: the cover or the artist's picture over a tile in the name's own colour with its first letters,
@@ -132,13 +134,13 @@ main > section.on { display: grid; gap: 16px; }
   font-weight: 700; letter-spacing: 0.02em; user-select: none; }
 .art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .art.round { border-radius: 50%; }
-.art.s { width: 44px; font-size: 0.8rem; } .art.m { width: 56px; font-size: 0.95rem; } .art.xs { width: 22px; font-size: 0.55rem; }
-.tm-now { padding: 12px 14px; }
+.art.s { width: 44px; font-size: 0.8125rem; } .art.m { width: 56px; font-size: 0.9375rem; } .art.xs { width: 22px; font-size: 0.75rem; }
+.tm-now { padding: 12px 16px; }
 .tm-now .row { display: flex; gap: 12px; align-items: center; min-width: 0; }
-.tm-now .row + .row { margin-top: 10px; }
+.tm-now .row + .row { margin-top: 12px; }
 .tm-now .t { min-width: 0; } .tm-now .t b, .tm-now .t span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tm-now .t span { color: var(--muted); font-size: 0.86rem; }
-.tm-now .kicker { display: flex; gap: 6px; align-items: center; color: var(--amber-text); }
+.tm-now .t span { color: var(--muted); font-size: 0.875rem; }
+.tm-now .kicker { display: flex; gap: 8px; align-items: center; color: var(--amber-text); }
 .tm-now .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); flex: 0 0 auto; animation: tm-pulse 1.6s ease-in-out infinite; }
 /* The favourites of a time: a picture each, the name over it. Side by side; on a phone a row to swipe through. */
 .tm-podium { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -148,15 +150,15 @@ main > section.on { display: grid; gap: 16px; }
 .tm-feature::after { content: ""; position: absolute; inset: 0; z-index: -1;
   background: linear-gradient(to top, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.45) 38%, rgba(0, 0, 0, 0) 70%); }
 .tm-feature .txt { position: absolute; left: 14px; right: 14px; bottom: 12px; display: grid; gap: 2px; }
-.tm-feature small { font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--amber); font-weight: 700; }
-.tm-feature b { font-size: 1.25rem; line-height: 1.15; letter-spacing: -0.01em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.tm-feature i { font-style: normal; font-size: 0.86rem; color: rgba(255, 255, 255, 0.8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tm-feature small { font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--amber); font-weight: 700; }
+.tm-feature b { font-size: 1.125rem; line-height: 1.15; letter-spacing: -0.01em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tm-feature i { font-style: normal; font-size: 0.875rem; color: rgba(255, 255, 255, 0.8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tm-feature:hover { border-color: var(--amber); }
-.tm-feature.wide { aspect-ratio: auto; height: 300px; cursor: default; margin-bottom: 10px; }
-.tm-feature.wide b { font-size: 1.7rem; }
+.tm-feature.wide { aspect-ratio: auto; height: 300px; cursor: default; margin-bottom: 12px; }
+.tm-feature.wide b { font-size: 1.625rem; }
 .tm-feature.wide:hover { border-color: var(--line); }
 @media (max-width: 700px) {
-  .tm-podium { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 10px; margin: 0 -16px; padding: 0 16px 4px; scrollbar-width: none; }
+  .tm-podium { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 12px; margin: 0 -16px; padding: 0 16px 4px; scrollbar-width: none; }
   .tm-podium::-webkit-scrollbar { display: none; }
   .tm-podium .tm-feature { flex: 0 0 68%; scroll-snap-align: center; }
   .tm-feature.wide { aspect-ratio: 1; height: auto; }
@@ -164,9 +166,9 @@ main > section.on { display: grid; gap: 16px; }
 @keyframes tm-pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .tm-now .dot { animation: none; } }
 .tm-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
-.tm-chart { display: flex; align-items: flex-end; gap: 3px; height: 150px; }
+.tm-chart { display: flex; align-items: flex-end; gap: 4px; height: 150px; }
 .tm-chart .col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px;
-  border: 0; background: none; padding: 0; border-radius: 6px; color: var(--faint); font-size: 0.68rem; cursor: default; }
+  border: 0; background: none; padding: 0; border-radius: 8px; color: var(--faint); font-size: 0.75rem; cursor: default; }
 .tm-chart button.col { cursor: pointer; }
 .tm-chart .col i { display: block; width: 100%; min-height: 2px; border-radius: 4px 4px 1px 1px; background: var(--amber); }
 .tm-chart .col.none i { background: var(--line-strong); }
@@ -174,250 +176,284 @@ main > section.on { display: grid; gap: 16px; }
 .tm-chart .col span { white-space: nowrap; overflow: hidden; max-width: 100%; }
 .tm-chart.small { height: 90px; }
 .tm-rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: rank 1; }
-.tm-rank li { counter-increment: rank; display: grid; grid-template-columns: 2ch 44px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 8px;
+.tm-rank li { counter-increment: rank; display: grid; grid-template-columns: 2ch 44px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 8px;
   border-radius: 8px; position: relative; isolation: isolate; }
-.tm-rank li::before { content: counter(rank); color: var(--faint); font-variant-numeric: tabular-nums; text-align: right; font-size: 0.82rem; }
+.tm-rank li::before { content: counter(rank); color: var(--faint); font-variant-numeric: tabular-nums; text-align: right; font-size: 0.8125rem; }
 .tm-rank li::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--w, 0%); background: color-mix(in srgb, var(--amber) 10%, transparent); border-radius: 8px; z-index: -1; }
 .tm-listens { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.tm-listens li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.tm-listens li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 12px; align-items: center; }
 .tm-listens .t { min-width: 0; } .tm-listens .t b, .tm-listens .t span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tm-listens .t b { font-weight: 600; } .tm-listens .t span { font-size: 0.8rem; color: var(--faint); }
-.tm-listens time { font-size: 0.76rem; color: var(--faint); white-space: nowrap; }
+.tm-listens .t b { font-weight: 600; } .tm-listens .t span { font-size: 0.8125rem; color: var(--faint); }
+.tm-listens time { font-size: 0.75rem; color: var(--faint); white-space: nowrap; }
 .tm-faces { display: flex; flex-wrap: wrap; gap: 8px; }
 /* An artist's name or row opens its page. */
 [data-artist] { cursor: pointer; }
 .tm-rank li[data-artist]:hover, .tm-listens li[data-artist]:hover { background: color-mix(in srgb, var(--text) 5%, transparent); border-radius: 8px; }
 .tm-link { color: inherit; text-decoration: none; } .tm-link:hover { color: var(--amber-text); text-decoration: underline; }
 /* An artist's page: its picture big behind its name, then its numbers and its music. */
-.ar-hero { position: relative; overflow: hidden; isolation: isolate; border-radius: 18px; border: 1px solid var(--line); min-height: 300px;
-  display: flex; flex-direction: column; justify-content: flex-end; padding: 18px 20px; color: #fff; background: var(--raised-2); }
+.ar-hero { position: relative; overflow: hidden; isolation: isolate; border-radius: 16px; border: 1px solid var(--line); min-height: 300px;
+  display: flex; flex-direction: column; justify-content: flex-end; padding: 16px 24px; color: #fff; background: var(--raised-2); }
 .ar-hero .art { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 0; aspect-ratio: auto; font-size: 5rem; z-index: -2; }
 .ar-hero .art img { object-position: center 25%; }
 .ar-hero::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(to top, rgba(0, 0, 0, 0.92), rgba(0, 0, 0, 0.35) 55%, rgba(0, 0, 0, 0.1)); }
 .ar-hero .back { position: absolute; top: 14px; left: 14px; background: rgba(0, 0, 0, 0.45); color: #fff; border-color: rgba(255, 255, 255, 0.25); backdrop-filter: blur(6px); }
-.ar-hero h2 { font-size: clamp(2.1rem, 8vw, 3.6rem); line-height: 1.02; letter-spacing: -0.03em; margin: 4px 0 6px; }
-.ar-hero p { margin: 0; color: rgba(255, 255, 255, 0.82); font-size: 0.95rem; }
+.ar-hero h2 { font-size: clamp(2.1rem, 8vw, 3.6rem); line-height: 1.02; letter-spacing: -0.03em; margin: 4px 0 8px; }
+.ar-hero p { margin: 0; color: rgba(255, 255, 255, 0.82); font-size: 0.9375rem; }
 .ar-hero .tm-kicker { color: #ffb547; }  /* on the dark of the picture, in light and dark */
 #ar-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.ar-albums { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
-.ar-album { min-width: 0; } .ar-album .art { width: 100%; font-size: 1.6rem; border-radius: 10px; }
+.ar-albums { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; }
+.ar-album { min-width: 0; } .ar-album .art { width: 100%; font-size: 1.625rem; border-radius: 12px; }
 .ar-album > b, .ar-album > span:not(.art) { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ar-album > b { margin-top: 8px; font-size: 0.92rem; } .ar-album > span:not(.art) { font-size: 0.8rem; color: var(--faint); }
+.ar-album > b { margin-top: 8px; font-size: 0.9375rem; } .ar-album > span:not(.art) { font-size: 0.8125rem; color: var(--faint); }
 @media (max-width: 700px) { .ar-hero { min-height: 260px; } #ar-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ar-albums { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.tm-faces .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 3px; margin: 0; font-size: 0.82rem; }
+.tm-faces .chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px; margin: 0; font-size: 0.8125rem; }
 .tm-rank .t { min-width: 0; } .tm-rank .t b, .tm-rank .t span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tm-rank .t b { font-weight: 600; } .tm-rank .t span { font-size: 0.8rem; color: var(--faint); }
-.tm-rank .n { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.86rem; }
+.tm-rank .t b { font-weight: 600; } .tm-rank .t span { font-size: 0.8125rem; color: var(--faint); }
+.tm-rank .n { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.875rem; }
 .tm-facts { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; margin: 0; }
 .tm-facts dt { color: var(--muted); } .tm-facts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
-.tm-empty { text-align: center; padding: 28px 16px; color: var(--muted); }
-.tm-tabs { position: sticky; top: var(--header-h); z-index: 4; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 5px; border-radius: 999px;
+.tm-empty { text-align: center; padding: 32px 16px; color: var(--muted); }
+.tm-tabs { position: sticky; top: var(--header-h); z-index: 4; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 999px;
   background: color-mix(in srgb, var(--raised) 92%, transparent); backdrop-filter: blur(10px); border: 1px solid var(--line); }
-.tm-tabs button { justify-content: center; text-align: center; min-width: 0; border: 0; padding: 9px 4px; font-weight: 600; color: var(--muted); background: none;
+.tm-tabs button { justify-content: center; text-align: center; min-width: 0; border: 0; padding: 8px 4px; font-weight: 600; color: var(--muted); background: none;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background 0.15s ease, color 0.15s ease; }
 .tm-tabs button:hover { color: var(--text); }
 .tm-tabs button[aria-selected=true] { background: var(--amber); color: var(--on-amber); }
 .tm-panel { display: grid; gap: 16px; min-width: 0; }
 .tm-seg { margin-bottom: 12px; }
 .tm-seg button[aria-pressed=true] { background: var(--amber); color: var(--on-amber); }
-.tm-join { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.tm-join { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .tm-join button.primary { color: var(--on-amber); background: var(--amber); border-color: var(--amber); }
 @media (max-width: 600px) {
-  .tm-hero { padding: 16px 14px 12px; }
+  .tm-hero { padding: 16px 16px 12px; }
   .tm-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-  .tm-tiles .tile { padding: 10px; } .tm-tiles .tile .v { font-size: 1.15rem; } .tm-tiles .tile .s { display: none; }
+  .tm-tiles .tile { padding: 12px; } .tm-tiles .tile .v { font-size: 1.125rem; } .tm-tiles .tile .s { display: none; }
 }
 /* Phones: long lists show their first lines with "Show all" (data-cap), cards marked data-fold open and close by
    their heading, and a button goes back to the top: less scrolling, and the page's parts stay findable. */
-.cap-more { margin-top: 10px; width: 100%; }
+.cap-more { margin-top: 12px; width: 100%; }
 .card.foldable > h3, .card.foldable > .card-head h3 { cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 0; }
-.card.foldable > h3::after, .card.foldable > .card-head h3::after { content: "▾"; color: var(--faint); font-size: 0.85rem; transition: transform 0.15s ease; }
+.card.foldable > h3::after, .card.foldable > .card-head h3::after { content: "▾"; color: var(--faint); font-size: 0.875rem; transition: transform 0.15s ease; }
 .card.foldable:not(.folded) > h3, .card.foldable:not(.folded) > .card-head h3 { margin-bottom: 12px; }
 .card.foldable.folded > h3::after, .card.foldable.folded > .card-head h3::after { transform: rotate(-90deg); }
 .card.foldable.folded > :not(h3):not(.card-head) { display: none !important; }
-.to-top { position: fixed; right: 16px; bottom: 20px; z-index: 20; border-radius: 999px; padding: 10px 14px; font-weight: 600;
+.to-top { position: fixed; right: 16px; bottom: 20px; z-index: 20; border-radius: 999px; padding: 12px 16px; font-weight: 600;
   background: var(--raised-2); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); }
-.card-head { display: flex; align-items: baseline; gap: 12px; } .card-head .more { margin-left: auto; font-size: 0.88rem; }
-.kicker { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); margin-bottom: 2px; }
+.card-head { display: flex; align-items: baseline; gap: 12px; } .card-head .more { margin-left: auto; font-size: 0.875rem; }
+.kicker { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); margin-bottom: 2px; }
 .now { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 24px; align-items: center; }
-.what { font-size: 1.05rem; font-weight: 600; }
-.step { color: var(--muted); font-size: 0.9rem; }
+.what { font-size: 1rem; font-weight: 600; }
+.step { color: var(--muted); font-size: 0.875rem; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
 @media (max-width: 600px) {
-  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .tile { padding: 12px; } .tile .v { font-size: 1.35rem; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .tile { padding: 12px; } .tile .v { font-size: 1.375rem; }
 }
-.tile { background: var(--raised); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; text-decoration: none; color: inherit; display: block; }
+.tile { background: var(--raised); border: 1px solid var(--line); border-radius: 16px; padding: 16px 16px; text-decoration: none; color: inherit; display: block; }
 a.tile:hover { border-color: var(--amber); }
-.tile .k { font-size: 0.78rem; color: var(--faint); }
-.tile .v { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; margin: 2px 0; }
-.tile .v small { font-size: 0.9rem; font-weight: 500; color: var(--muted); }
-.tile .s { font-size: 0.82rem; color: var(--muted); }
-.tile .meter { height: 6px; border-radius: 99px; background: var(--raised-2); overflow: hidden; margin-top: 10px; display: flex; }
+.tile .k { font-size: 0.75rem; color: var(--faint); }
+.tile .v { font-size: 1.625rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; margin: 2px 0; }
+.tile .v small { font-size: 0.875rem; font-weight: 500; color: var(--muted); }
+.tile .s { font-size: 0.8125rem; color: var(--muted); }
+.tile .meter { height: 6px; border-radius: 999px; background: var(--raised-2); overflow: hidden; margin-top: 12px; display: flex; }
 .tile .meter span { display: block; height: 100%; }
 .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 @media (max-width: 760px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
-.progress { height: 8px; border-radius: 99px; background: var(--raised-2); overflow: hidden; display: flex; margin-bottom: 10px; }
+.progress { height: 8px; border-radius: 999px; background: var(--raised-2); overflow: hidden; display: flex; margin-bottom: 12px; }
 .progress span, .meter span { display: block; height: 100%; }
 .progress .done, .meter .done { background: var(--amber); } .progress .failed, .meter .failed { background: var(--bad); }
-.progress .busy, .meter .busy { background: var(--frost); } .meter .plugin { background: var(--ok); }
-.work { display: grid; gap: 10px; margin-top: 14px; }
-.work .job { display: grid; gap: 5px; }
-.work .job .head { display: flex; align-items: baseline; gap: 8px; font-size: 0.9rem; }
+.progress .busy, .meter .busy { background: var(--frost); }
+.work { display: grid; gap: 12px; margin-top: 16px; }
+.work .job { display: grid; gap: 4px; }
+.work .job .head { display: flex; align-items: baseline; gap: 8px; font-size: 0.875rem; }
 .work .job .head b { font-weight: 600; }
 .work .job .head .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.work .job .what { color: var(--muted); font-size: 0.82rem; }
-.work .job .what .spinner { display: inline-block; width: 12px; height: 12px; border-width: 2px; vertical-align: -2px; margin: 0 6px 0 0; }
-.work .meter { height: 6px; border-radius: 99px; background: var(--raised-2); overflow: hidden; display: flex; }
+.work .job .what { color: var(--muted); font-size: 0.8125rem; }
+.work .job .what .spinner { display: inline-block; width: 12px; height: 12px; border-width: 2px; vertical-align: -2px; margin: 0 8px 0 0; }
+.work .meter { height: 6px; border-radius: 999px; background: var(--raised-2); overflow: hidden; display: flex; }
 .work .meter .wait { background: var(--amber); opacity: 0.35; }
-.counts { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 0.88rem; }
+.counts { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--muted); font-size: 0.875rem; }
 .counts b { color: var(--text); font-variant-numeric: tabular-nums; }
 .libs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
 .libs button[aria-pressed=true] { background: var(--amber); color: var(--on-amber); border-color: var(--amber); }
 .libs button .n:empty { display: none; }
-.libs button .n { opacity: 0.75; font-size: 0.8rem; margin-left: 6px; font-variant-numeric: tabular-nums; }
+.libs button .n { opacity: 0.75; font-size: 0.8125rem; margin-left: 8px; font-variant-numeric: tabular-nums; }
 .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .controls.push { margin-left: auto; }
-.row-gap { margin: 10px 0; } .top-gap { margin-top: 12px; }
-button, .btn { font: inherit; font-size: 0.9rem; border-radius: 999px; padding: 7px 14px; border: 1px solid var(--line-strong);
-  background: transparent; color: var(--text); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+.row-gap { margin: 12px 0; } .top-gap { margin-top: 12px; }
+button, .btn { font: inherit; font-size: 0.875rem; border-radius: 999px; padding: 8px 16px; border: 1px solid var(--line-strong);
+  background: transparent; color: var(--text); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; }
 button:hover, .btn:hover { border-color: var(--amber); }
 button.primary { background: var(--amber); color: var(--on-amber); border-color: var(--amber); font-weight: 600; }
 button.mark { background: var(--mark); color: #1a0620; border-color: var(--mark); font-weight: 600; }
 button:disabled { opacity: 0.5; cursor: default; }
-.marks { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; align-items: center; }
-.marks .chip { display: inline-flex; gap: 6px; align-items: center; border-color: var(--mark); }
+.marks { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; align-items: center; }
+.marks .chip { display: inline-flex; gap: 8px; align-items: center; border-color: var(--mark); }
 .marks .chip button { border: 0; background: none; padding: 0 2px; color: inherit; cursor: pointer; }
 .marks .hint { color: var(--muted); font-size: 0.9em; }
-input[type=text], input[type=search], input[type=url], input[type=password], select { font: inherit; font-size: 0.9rem; border-radius: 999px; padding: 7px 12px;
+input[type=text], input[type=search], input[type=url], input[type=password], select { font: inherit; font-size: 0.875rem; border-radius: 999px; padding: 8px 12px;
   border: 1px solid var(--line-strong); background: var(--raised-2); color: var(--text); min-width: 0; }
 :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
-.tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
 .tools .grow { flex: 1 1 200px; }
 .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 999px; overflow: hidden; }
-.seg button { border: 0; border-radius: 0; padding: 6px 12px; }
+.seg button { border: 0; border-radius: 0; padding: 8px 12px; }
 .seg button[aria-pressed=true] { background: var(--amber); color: var(--on-amber); }
 .table { overflow-x: auto; }
-table { width: 100%; min-width: 940px; border-collapse: collapse; font-size: 0.88rem; }
+table { width: 100%; min-width: 940px; border-collapse: collapse; font-size: 0.875rem; }
 #detail { scroll-margin-top: calc(var(--header-h) + 64px); }
 th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { color: var(--faint); font-weight: 600; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+th { color: var(--faint); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
 td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--raised-2); }
 tbody tr[aria-selected=true] { background: color-mix(in srgb, var(--amber) 12%, transparent); }
-.sub { color: var(--faint); font-size: 0.82rem; margin: 0; }
-.big { font-weight: 700; font-size: 0.98rem; }
-.chip { display: inline-block; border-radius: 999px; padding: 1px 8px; margin: 0 4px 4px 0; font-size: 0.76rem; border: 1px solid var(--line-strong); color: var(--muted); }
-.note { display: block; font-size: 0.8rem; margin-bottom: 2px; }
+.sub { color: var(--faint); font-size: 0.8125rem; margin: 0; }
+.big { font-weight: 700; font-size: 1rem; }
+.chip { display: inline-block; border-radius: 999px; padding: 1px 8px; margin: 0 4px 4px 0; font-size: 0.75rem; border: 1px solid var(--line-strong); color: var(--muted); }
+.note { display: block; font-size: 0.8125rem; margin-bottom: 2px; }
 .note.ok { color: var(--ok); } .note.warn { color: var(--warn); } .note.info { color: var(--faint); }
 .note.ok::before { content: "✓ "; } .note.warn::before { content: "! "; } .note.info::before { content: "· "; }
-.state { font-size: 0.8rem; white-space: nowrap; }
+.state { font-size: 0.8125rem; white-space: nowrap; }
 .state.failed { color: var(--bad); } .state.done { color: var(--ok); } .state.busy { color: var(--amber-text); }
-.events { list-style: none; margin: 0; padding: 0; max-height: 420px; overflow-y: auto; font-size: 0.86rem; }
+.events { list-style: none; margin: 0; padding: 0; max-height: 420px; overflow-y: auto; font-size: 0.875rem; }
 .events.tall { max-height: none; }
-.events li { padding: 7px 0; border-bottom: 1px solid var(--line); color: var(--muted); }
+.events li { padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--muted); }
 .events li:last-child { border-bottom: 0; }
-.events time { color: var(--faint); font-family: var(--mono); font-size: 0.76rem; margin-right: 8px; }
+.events time { color: var(--faint); font-family: var(--mono); font-size: 0.75rem; margin-right: 8px; }
 .events .error { color: var(--bad); } .events .warn { color: var(--warn); }
-.log { margin: 4px 0 0; max-height: 65vh; overflow: auto; font: 0.74rem/1.45 var(--mono); color: var(--muted);
-  background: var(--page); border: 1px solid var(--line); border-radius: 10px; padding: 10px; white-space: pre-wrap; word-break: break-word; }
+.log { margin: 4px 0 0; max-height: 65vh; overflow: auto; font: 0.75rem/1.45 var(--mono); color: var(--muted);
+  background: var(--page); border: 1px solid var(--line); border-radius: 12px; padding: 12px; white-space: pre-wrap; word-break: break-word; }
 .log .warn { color: var(--warn); } .log .error { color: var(--bad); } .log .debug { color: var(--faint); }
 .empty { color: var(--faint); padding: 24px 8px; text-align: center; }
 #detail[hidden] { display: none; }
 .detail-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; margin-bottom: 12px; }
-.detail-head .title { font-size: 1.15rem; font-weight: 700; }
-audio { width: 100%; margin: 6px 0 4px; }
-canvas { width: 100%; display: block; border-radius: 10px; background: var(--raised-2); }
-.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.78rem; color: var(--faint); margin: 6px 0 14px; }
-.legend i { display: inline-block; width: 12px; height: 3px; vertical-align: middle; margin-right: 5px; }
-.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
-.fact { background: var(--raised-2); border-radius: 10px; padding: 10px; }
-.fact .k { font-size: 0.74rem; color: var(--faint); text-transform: uppercase; letter-spacing: 0.04em; }
+.detail-head .title { font-size: 1.125rem; font-weight: 700; }
+audio { width: 100%; margin: 8px 0 4px; }
+canvas { width: 100%; display: block; border-radius: 12px; background: var(--raised-2); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 0.75rem; color: var(--faint); margin: 8px 0 16px; }
+.legend i { display: inline-block; width: 12px; height: 3px; vertical-align: middle; margin-right: 4px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.fact { background: var(--raised-2); border-radius: 12px; padding: 12px; }
+.fact .k { font-size: 0.75rem; color: var(--faint); text-transform: uppercase; letter-spacing: 0.04em; }
 .fact .v { font-size: 1rem; font-weight: 650; font-variant-numeric: tabular-nums; }
-label.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 0.9rem; color: var(--muted); }
-.banner { border: 1px solid var(--bad); color: var(--bad); border-radius: 12px; padding: 10px 14px; display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
+label.toggle { display: inline-flex; gap: 8px; align-items: center; font-size: 0.875rem; color: var(--muted); }
+.banner { border: 1px solid var(--bad); color: var(--bad); border-radius: 12px; padding: 12px 16px; display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
 .banner[hidden], .btn[hidden] { display: none; }
 [hidden] { display: none !important; }  /* a button's or a card's own display would show it all the same */
 .banner span { flex: 1; }
-.banner button { padding: 2px 10px; border-color: currentColor; color: inherit; }
+.banner button { padding: 2px 12px; border-color: currentColor; color: inherit; }
 .banner.warn { border-color: var(--warn); color: var(--warn); }
 /* Charts: plain bars, drawn with the page's colours in light and dark. */
-.bars { display: flex; align-items: flex-end; gap: 2px; height: 140px; padding-top: 6px; }
-.bars span { flex: 1 1 0; background: var(--amber); border-radius: 3px 3px 0 0; min-height: 1px; opacity: 0.9; }
+.bars { display: flex; align-items: flex-end; gap: 2px; height: 140px; padding-top: 8px; }
+.bars span { flex: 1 1 0; background: var(--amber); border-radius: 4px 3px 0 0; min-height: 1px; opacity: 0.9; }
 .bars span:hover { opacity: 1; outline: 1px solid var(--text); }
-.axis { display: flex; justify-content: space-between; font: 0.72rem var(--mono); color: var(--faint); margin-top: 4px; }
-.hbars { display: grid; gap: 6px; max-height: 420px; overflow-y: auto; padding-right: 4px; }
-.hbar { display: grid; grid-template-columns: minmax(90px, 30%) minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 0.86rem; }
+.axis { display: flex; justify-content: space-between; font: 0.75rem var(--mono); color: var(--faint); margin-top: 4px; }
+.hbars { display: grid; gap: 8px; max-height: 420px; overflow-y: auto; padding-right: 4px; }
+.hbar { display: grid; grid-template-columns: minmax(90px, 30%) minmax(0, 1fr) auto; gap: 12px; align-items: center; font-size: 0.875rem; }
 .hbar .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-.hbar .track { height: 10px; border-radius: 99px; background: var(--raised-2); overflow: hidden; }
-.hbar .track span { display: block; height: 100%; background: var(--frost); border-radius: 99px; }
-.hbar .n { font-variant-numeric: tabular-nums; color: var(--faint); font-size: 0.8rem; }
-dl.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 0; font-size: 0.9rem; }
+.hbar .track { height: 10px; border-radius: 999px; background: var(--raised-2); overflow: hidden; }
+.hbar .track span { display: block; height: 100%; background: var(--frost); border-radius: 999px; }
+.hbar .n { font-variant-numeric: tabular-nums; color: var(--faint); font-size: 0.8125rem; }
+dl.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 0; font-size: 0.875rem; }
 dl.kv dt { color: var(--faint); } dl.kv dd { margin: 0; overflow-wrap: anywhere; }
 .yes { color: var(--ok); } .no { color: var(--faint); }
-.steps { margin: 0 0 10px; padding-left: 20px; } .steps li { margin: 4px 0; }
-code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2); padding: 1px 6px; border-radius: 6px; }
+.steps { margin: 0 0 12px; padding-left: 24px; } .steps li { margin: 4px 0; }
+code { font-family: var(--mono); font-size: 0.8125rem; background: var(--raised-2); padding: 1px 8px; border-radius: 8px; }
 /* Which music server's songs the pages show (0.23.0): at the top of the menu, only when there's more than one. */
 .server-switch { padding: 0 2px 16px; }
 .server-switch[hidden] { display: none; }
-.server-switch label { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); padding: 0 10px 6px; }
-.server-switch select { width: 100%; border-radius: 10px; padding: 9px 12px; }
+.server-switch label { display: block; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); padding: 0 12px 8px; }
+.server-switch select { width: 100%; border-radius: 12px; padding: 8px 12px; }
 /* The music servers under Setup: one row each, its buttons wrapping under it on a phone. */
 .servers { list-style: none; margin: 0 0 4px; padding: 0; }
-.servers li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.servers li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .servers .who { flex: 1 1 220px; min-width: 0; }
 .servers .who b { font-weight: 600; }
 .servers .who .sub { overflow-wrap: anywhere; }
 .servers .acts { display: flex; flex-wrap: wrap; gap: 8px; }
-.tag { font-size: 0.72rem; border-radius: 999px; padding: 1px 8px; margin-left: 6px; background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--text); white-space: nowrap; }
+.tag { font-size: 0.75rem; border-radius: 999px; padding: 1px 8px; margin-left: 8px; background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--text); white-space: nowrap; }
 .tag.plain { background: var(--raised-2); color: var(--muted); }
 .form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
-.form label { display: grid; gap: 4px; font-size: 0.82rem; color: var(--muted); min-width: 0; }
+.form label { display: grid; gap: 4px; font-size: 0.8125rem; color: var(--muted); min-width: 0; }
 .form label.wide { grid-column: 1 / -1; }
 /* The style models to choose from (0.39): one card each, the chosen one outlined in amber. */
-.choices { display: grid; gap: 10px; margin: 10px 0 6px; }
-.choice { display: grid; grid-template-columns: auto 1fr; gap: 10px 12px; align-items: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; background: var(--raised-2); }
+.choices { display: grid; gap: 12px; margin: 12px 0 8px; }
+.choice { display: grid; grid-template-columns: auto 1fr; gap: 12px 12px; align-items: start; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; background: var(--raised-2); }
 .choice[aria-checked="true"] { border-color: var(--amber); box-shadow: inset 0 0 0 1px var(--amber); }
-.choice input { margin-top: 3px; accent-color: var(--amber); }
-.choice b { display: block; font-size: 0.95rem; }
+.choice input { margin-top: 4px; accent-color: var(--amber); }
+.choice b { display: block; font-size: 0.9375rem; }
 .choice .sub { margin: 4px 0 0; }
-.choice .cost { color: var(--muted); font-size: 0.78rem; margin-top: 4px; }
+.choice .cost { color: var(--muted); font-size: 0.75rem; margin-top: 4px; }
 .choice[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
-.form input, .form select { width: 100%; border-radius: 10px; padding: 9px 12px; }
+.form input, .form select { width: 100%; border-radius: 12px; padding: 8px 12px; }
 @media (max-width: 600px) { .form { grid-template-columns: minmax(0, 1fr); } }
 #key-text { overflow-wrap: anywhere; user-select: all; }
 /* A library being read: what, how far, and why (0.24.1). */
-.tasks { display: grid; gap: 6px; margin: 2px 0 10px; }
-.tasks .lib { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.85rem; }
+.tasks { display: grid; gap: 8px; margin: 2px 0 12px; }
+.tasks .lib { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 0.875rem; }
 .tasks .lib > b { min-width: 7rem; font-weight: 600; }
-.tasks .lib button { font-size: 0.78rem; padding: 3px 9px; border-radius: 999px; }
+.tasks .lib button { font-size: 0.75rem; padding: 4px 8px; border-radius: 999px; }
 .tasks .lib button[aria-pressed=false] { opacity: 0.55; text-decoration: line-through; }
 .tasks .lib button[aria-pressed=true] { border-color: var(--amber); }
-.clean-group { padding: 10px 0; border-top: 1px solid var(--line); }
-.clean-group label { display: flex; gap: 10px; align-items: baseline; cursor: pointer; }
+.clean-group { padding: 12px 0; border-top: 1px solid var(--line); }
+.clean-group label { display: flex; gap: 12px; align-items: baseline; cursor: pointer; }
 .clean-group label input { accent-color: var(--amber); }
 .clean-group .n { color: var(--muted); font-variant-numeric: tabular-nums; }
 .clean-group .sub { margin: 4px 0 0 26px; }
-.clean-group .warn-line { color: var(--warn); margin: 4px 0 0 26px; font-size: 0.82rem; }
-.clean-group details { margin: 6px 0 0 26px; font-size: 0.82rem; }
-.clean-group details ul { margin: 6px 0 0; padding-left: 18px; columns: 2; column-gap: 24px; color: var(--muted); }
+.clean-group .warn-line { color: var(--warn); margin: 4px 0 0 26px; font-size: 0.8125rem; }
+.clean-group details { margin: 8px 0 0 26px; font-size: 0.8125rem; }
+.clean-group details ul { margin: 8px 0 0; padding-left: 16px; columns: 2; column-gap: 24px; color: var(--muted); }
 .clean-group details ul li { break-inside: avoid; }
-.checks { list-style: none; margin: 12px 0 4px; padding: 0; display: grid; gap: 6px; }
-.checks li { display: grid; grid-template-columns: 1.1rem 1fr; gap: 8px; align-items: start; font-size: 0.9rem; }
+.checks { list-style: none; margin: 12px 0 4px; padding: 0; display: grid; gap: 8px; }
+.checks li { display: grid; grid-template-columns: 1.1rem 1fr; gap: 8px; align-items: start; font-size: 0.875rem; }
 .checks li::before { content: "✓"; color: var(--ok); font-weight: 700; line-height: 1.35; }
 .checks li.warn::before { content: "!"; color: var(--warn); }
 .checks li.fail::before { content: "✕"; color: var(--bad); }
 .checks li b { font-weight: 600; }
 .checks li .sub { display: inline; margin: 0; }
 .checks li .sub::before { content: " · "; }
-.reading { display: flex; gap: 12px; align-items: flex-start; margin: 12px 0 4px; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--amber) 12%, transparent); }
+.reading { display: flex; gap: 12px; align-items: flex-start; margin: 12px 0 4px; padding: 12px 16px; border-radius: 12px; background: color-mix(in srgb, var(--amber) 12%, transparent); }
 .spinner { flex: none; width: 18px; height: 18px; margin-top: 2px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--amber) 30%, transparent); border-top-color: var(--amber); animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 .picks { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 4px; }
-.picks button { width: 100%; justify-content: flex-start; border-radius: 10px; text-align: left; }
-.list { margin: 0; padding-left: 22px; font-size: 0.9rem; } .list li { margin: 4px 0; }
+.picks button { width: 100%; justify-content: flex-start; border-radius: 12px; text-align: left; }
+.list { margin: 0; padding-left: 22px; font-size: 0.875rem; } .list li { margin: 4px 0; }
+/* ---- 0.43 (the owner, 13 Nov): one scale for type (12 to 26 px) and for space (4, 8, 12, 16, 24, 32), the menu's
+   groups said in a line, and the same gap between a card's text and what follows it. ---- */
+.nav .group-note { font-size: 0.75rem; color: var(--faint); padding: 0 12px 8px; line-height: 1.35; }
+.nav .group-name { font-size: 0.75rem; padding: 0 12px 4px; }
+.card > h3 + .sub, .card > .card-head + .sub { margin-top: -4px; }
+.card > .sub + .controls, .card > .sub + button, .card > .sub + .btn, .card > .sub + a.btn, .card > .sub + .hbars,
+.card > .sub + .choices, .card > .sub + dl, .card > .sub + ul, .card > .sub + ol, .card > .sub + details, .card > .sub + form { margin-top: 12px; }
+.card > .sub + *:not(.sub):not([hidden]) { margin-top: 12px; }
+.card dl + .sub, .card form .controls + .sub, .card form .sub + .sub, .card form .controls + div { margin-top: 12px; }
+.card > .controls.row-gap { margin: 12px 0 0; }
+.card > .controls.row-gap + * { margin-top: 12px; }
+button, .btn, summary, select, label.toggle, .choice, input[type=checkbox], input[type=radio], input[type=range] { cursor: pointer; }
+button:disabled, .choice[aria-disabled="true"] { cursor: not-allowed; }
+button.danger, .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
+button.danger:hover, .btn.danger:hover { border-color: var(--bad); }
+a.btn.primary { background: var(--amber); color: var(--on-amber); border-color: var(--amber); font-weight: 600; }
+details.how { margin-top: 12px; } details.how summary { font-size: 0.8125rem; color: var(--muted); } details.how .sub { margin-top: 8px; max-width: 72ch; }
+.sub { max-width: 80ch; }
+@media (max-width: 700px) {
+  /* The songs as cards on a phone: the nine-column table ran to 973 px on a 390 px screen. */
+  section[data-view="songs"] .table { overflow: visible; }
+  section[data-view="songs"] table, section[data-view="songs"] tbody { display: block; width: 100%; min-width: 0; }
+  section[data-view="songs"] thead { display: none; }
+  section[data-view="songs"] tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  section[data-view="songs"] tbody td { display: block; padding: 0; border: 0; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  section[data-view="songs"] tbody td:nth-child(1) { grid-column: 1; grid-row: 1; }
+  section[data-view="songs"] tbody td:nth-child(9) { grid-column: 2; grid-row: 1; text-align: right; }
+  section[data-view="songs"] tbody td:nth-child(4) { grid-column: 1 / -1; color: var(--muted); }
+  section[data-view="songs"] tbody td:nth-child(2), section[data-view="songs"] tbody td:nth-child(3), section[data-view="songs"] tbody td:nth-child(5),
+  section[data-view="songs"] tbody td:nth-child(6) { display: none; }
+  section[data-view="songs"] tbody td:nth-child(7), section[data-view="songs"] tbody td:nth-child(8) { grid-column: 1 / -1; color: var(--muted); font-size: 0.8125rem; }
+  section[data-view="songs"] tbody td:empty { display: none; }
+  section[data-view="songs"] tbody td.empty { grid-column: 1 / -1; }
+}
 </style>
 </head>
 <body>
@@ -433,7 +469,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       </button>
       <div class="status-panel" id="status-panel" role="dialog" aria-label="Connections and the model" hidden>
         <div id="status-rows" aria-live="polite"></div>
-        <div class="status-foot"><span id="status-version"></span><a href="#setup" id="status-setup">Setup ›</a></div>
+        <div class="status-foot"><span id="status-version"></span><span class="foot-links"><button class="more" id="sign-out" hidden>Sign out</button><a href="#setup" id="status-setup">Setup ›</a></span></div>
       </div>
     </div>
   </div>
@@ -453,21 +489,28 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       <a href="#songs" data-view="songs">Songs</a>
     </div>
     <div class="group">
-      <div class="group-name">Your music</div>
+      <div class="group-name">Your listening</div>
       <a href="#listening" data-view="listening">Listening</a>
     </div>
     <div class="group">
-      <div class="group-name">For the Siansa app</div>
-      <a href="#loudness" data-view="loudness">Loudness &amp; keys</a>
+      <div class="group-name">Used by the Siansa app</div>
+      <div class="group-note">What the app reads from here. Nothing to set up.</div>
+      <a href="#loudness" data-view="loudness">Loudness</a>
+      <a href="#keys" data-view="keys">Keys</a>
       <a href="#genres" data-view="genres">Genres</a>
       <a href="#similar" data-view="similar">Similar music</a>
-      <a href="#blends" data-view="blends">Bad blends<span class="count" id="tab-blends"></span></a>
     </div>
     <div class="group">
       <div class="group-name">Service</div>
       <a href="#activity" data-view="activity">Activity</a>
-      <a href="#log" data-view="log">Log</a>
       <a href="#setup" data-view="setup">Setup</a>
+    </div>
+    <div class="group">
+      <div class="group-name">Troubleshooting</div>
+      <div class="group-note">For when something's wrong.</div>
+      <a href="#log" data-view="log">Log</a>
+      <a href="#blends" data-view="blends">Bad blends<span class="count" id="tab-blends"></span></a>
+      <a href="#report" data-view="report">Debug report</a>
     </div>
   </nav>
 
@@ -478,7 +521,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 
     <!-- Overview: how far everything is, at a glance -->
     <section data-view="overview">
-      <div class="page-head"><h2>Overview</h2><p class="sub">How far Siansa Beats is with your music, and what it's doing now.</p></div>
+      <div class="page-head"><h2>Overview</h2><p class="sub">How much of your music is analysed, and what Siansa Beats is doing now.</p></div>
       <div class="card now">
         <div>
           <div class="kicker">Now</div>
@@ -496,9 +539,10 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 
     <!-- Libraries: what to analyse -->
     <section data-view="libraries">
-      <div class="page-head"><h2>Libraries</h2><p class="sub">Which libraries of <span data-server-name>your music server</span> Siansa Beats analyses. Start analysis checks everything first, then looks for new songs in the ticked libraries and analyses them; they're read again every 6 hours anyway. Nothing is ever written to the server. A song another of your servers has too is analysed once.</p></div>
+      <div class="page-head"><h2>Libraries</h2><p class="sub">Choose which libraries of <span data-server-name>your music server</span> to analyse, and what to work out for each. Nothing is ever changed on the server.</p></div>
       <div class="card">
-        <h3>Libraries to analyse</h3>
+        <h3>Libraries</h3>
+        <p class="sub">Tick a library to analyse it. Start analysis checks everything first, then analyses what's new; it also runs by itself every 6 hours.</p>
         <div class="libs" role="group" aria-label="Libraries to analyse"><span id="libs" class="controls"><span class="sub">Asking the server…</span></span></div>
         <div class="tasks" id="lib-tasks" role="group" aria-label="What each library gets" hidden></div>
         <div class="sub" id="libs-note" role="status"></div>
@@ -516,22 +560,22 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         <div class="counts top-gap" id="counts"></div>
       </div>
       <div class="card">
-        <h3>Tidy the database</h3>
-        <p class="sub">Songs the server no longer has, songs of libraries left out, songs linked to no server and songs that couldn't be analysed. Looking removes nothing: what's found is shown, and goes only when you say so, after a copy of the database is kept beside it (<code>beats-before-clean.db</code>). Nothing changes on the server.</p>
+        <h3>Tidy up</h3>
+        <p class="sub">Find songs your server no longer has, songs of libraries you left out and songs that couldn't be analysed. Nothing is removed until you say so, and a copy of the database is kept first (<code>beats-before-clean.db</code>).</p>
         <div class="controls row-gap"><button id="clean-look">Look for what's gone</button><span class="sub" id="clean-note"></span></div>
         <div id="clean-groups" hidden></div>
         <div class="controls row-gap" id="clean-do" hidden><button class="primary" id="clean-remove">Remove</button></div>
       </div>
       <div class="card">
         <h3>Start over</h3>
-        <p class="sub">Every song through the model again, for a new model or after a big change. For a big library that takes days.</p>
-        <button id="all-again">Analyse every song again</button>
+        <p class="sub">Analyse every song again, for a new model or after a big change. For a big library this takes days.</p>
+        <div class="controls row-gap"><button class="danger" id="all-again">Analyse every song again</button></div>
       </div>
     </section>
 
     <!-- Songs: the table and one song -->
     <section data-view="songs">
-      <div class="page-head"><h2>Songs</h2><p class="sub">Every song with what Siansa Beats found. Tap one to hear it with clicks on its beats.</p></div>
+      <div class="page-head"><h2>Songs</h2><p class="sub">Every song and what was found. Tap one to hear it with clicks on its beats.</p></div>
       <div class="card" id="detail" hidden aria-label="Song">
         <div class="detail-head">
           <span class="title" id="d-title"></span><span class="sub" id="d-sub"></span>
@@ -592,24 +636,18 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       </div>
     </section>
 
-    <!-- Loudness & keys: what the Siansa plugin used to measure -->
+    <!-- Loudness: how loud each song is, and how it starts and ends -->
     <section data-view="loudness">
-      <div class="page-head"><h2>Loudness &amp; keys</h2><p class="sub">What the Siansa app levels the volume, shapes its fades and mixes in key by:
-        each song's loudness (EBU R128), how it starts and ends, and its key. Measured here from each song's file, or taken
-        from the Siansa plugin on AudioMuse-AI when it already had them.</p></div>
+      <div class="page-head"><h2>Loudness</h2><p class="sub">How loud each song is, and how it starts and ends. The Siansa app uses these to play every song at the same level and to time its fades.</p></div>
       <div class="tiles" id="l-tiles"></div>
       <div class="card" id="l-now-card" hidden><div class="kicker">Measuring now</div><div class="what" id="l-now"></div></div>
+      <div class="card">
+        <h3>How loud the songs are</h3>
+        <div class="bars" id="l-lufs" aria-label="Songs by loudness"></div>
+        <div class="axis" id="l-lufs-axis"></div>
+        <p class="sub" id="l-lufs-note"></p>
+      </div>
       <div class="grid2">
-        <div class="card">
-          <h3>How loud the songs are</h3>
-          <div class="bars" id="l-lufs" aria-label="Songs by loudness"></div>
-          <div class="axis" id="l-lufs-axis"></div>
-          <p class="sub" id="l-lufs-note"></p>
-        </div>
-        <div class="card">
-          <h3>Keys</h3>
-          <div class="hbars" id="l-keys" data-cap="12"></div>
-        </div>
         <div class="card">
           <h3>How songs start</h3>
           <div class="bars" id="l-intro" aria-label="Seconds until each song is up to the fade level"></div>
@@ -629,19 +667,27 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       </div>
     </section>
 
+    <!-- Keys: each song's musical key (0.43: a page of its own) -->
+    <section data-view="keys">
+      <div class="page-head"><h2>Keys</h2><p class="sub">The musical key of each song. The Siansa app uses it to blend songs that sound right together.</p></div>
+      <div class="tiles" id="k-tiles"></div>
+      <div class="card">
+        <h3>Songs in each key</h3>
+        <div class="hbars" id="l-keys" data-cap="24"></div>
+      </div>
+    </section>
+
     <!-- Genres -->
     <section data-view="genres" id="genre-card">
-      <div class="page-head"><h2>Genres</h2><p class="sub">Each song's genres from its sound alone (Essentia's Discogs-EffNet, 400 Discogs styles): a song is in every
-        style it scores 0.15 or more, and always in its best one. Siansa's genre list, genre pages and genre radios go by this; its tags are shown beside it and play no part.</p></div>
+      <div class="page-head"><h2>Genres</h2><p class="sub">Each song's genres, heard from its sound. The Siansa app's genre list, genre pages and genre radios use these.</p></div>
       <div class="card">
         <div id="genre-progress" class="sub">Loading the genres…</div>
         <div id="genre-agree"></div>
+        <details class="how"><summary>How it works</summary><p class="sub">A model hears each song and scores it against 400 styles (the Discogs list). A song is in every style it scores 0.15 or more, and always in its best one. The genre tags in your files are shown beside for comparison and play no part.</p></details>
       </div>
       <div class="card" data-fold>
         <div class="card-head"><h3>Descriptions</h3><button class="more" id="about-fetch">Fetch all now</button></div>
-        <p class="sub">Each genre's page in the app opens with a short description from Wikipedia. They're fetched in the
-          background and kept (a found one for 90 days, a genre Wikipedia has nothing on for a week, one it couldn't be
-          asked about for half an hour), so the app shows them at once.</p>
+        <p class="sub">Each genre's page in the app opens with a short description from Wikipedia. They're fetched in the background and kept, so the app shows them at once.</p>
         <div class="counts top-gap" id="about-counts"></div>
       </div>
       <div class="card">
@@ -653,8 +699,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 
     <!-- Similar music -->
     <section data-view="similar">
-      <div class="page-head"><h2>Similar music</h2><p class="sub">Albums and artists that sound alike, for Siansa's "Similar albums" and "Fans also like".
-        Siansa Beats works them out from how each song sounds, as taken over from AudioMuse-AI.</p></div>
+      <div class="page-head"><h2>Similar music</h2><p class="sub">Albums and artists that sound alike. The Siansa app's "Similar albums" and "Fans also like" use these.</p></div>
       <div class="card" id="s-status"></div>
       <div class="card">
         <h3>Try it</h3>
@@ -669,7 +714,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 
     <!-- Bad blends -->
     <section data-view="blends" id="bad-card">
-      <div class="page-head"><h2>Bad blends</h2><p class="sub">Song changes marked as bad in Siansa Dev, with how the app blended them. Tap a song to check its beats.</p></div>
+      <div class="page-head"><h2>Bad blends</h2><p class="sub">Song changes you marked as bad in Siansa Dev, with how the app blended them. A testing tool: tap a song to check its beats.</p></div>
       <div class="card">
         <p class="marks"><a class="btn" href="api/bad-blends/export" download title="Every bad blend with both songs' beats and sound levels: the one file to send">Download bad blends</a> <button class="btn" id="bad-clear" title="Takes every marked blend away, for a fresh start">Clear all</button></p>
         <ul class="events" id="bad" data-cap="10"></ul>
@@ -776,15 +821,13 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
     </section>
 
     <section data-view="activity">
-      <div class="page-head"><h2>Activity</h2><p class="sub">What Siansa Beats did, newest first.</p></div>
+      <div class="page-head"><h2>Activity</h2><p class="sub">What Siansa Beats has done, newest first.</p></div>
       <div class="card"><ul class="events tall" id="events" data-cap="25"></ul></div>
     </section>
 
     <!-- Log -->
     <section data-view="log">
-      <div class="page-head"><h2>Log</h2><p class="sub">Everything Siansa Beats does, as in the container's log. <strong>Debug details</strong> adds every
-        step of every song, with its times, and every request to Navidrome and AudioMuse-AI: turn it on to find a problem, off when
-        it's found. Passwords and tokens are never written.</p></div>
+      <div class="page-head"><h2>Log</h2><p class="sub">Everything the service does, line by line. Turn on <strong>Debug details</strong> to find a problem, and off again when it's found. Passwords and tokens are never written.</p></div>
       <div class="card">
         <div class="tools">
           <label class="toggle"><input type="checkbox" id="log-debug"> Debug details</label>
@@ -801,17 +844,14 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 
     <!-- Setup -->
     <section data-view="setup">
-      <div class="page-head"><h2>Setup</h2><p class="sub">What Siansa Beats connects to, who may open it, and how the Siansa app connects to it. All of it is set here: nothing secret goes in the container's YAML.</p></div>
+      <div class="page-head"><h2>Setup</h2><p class="sub">Your music servers, who may open this page, and how the Siansa app connects.</p></div>
       <div class="card" id="left-card" hidden>
         <h3>You can tidy the container's settings</h3>
-        <p class="sub">These are still in the container's YAML and are no longer read: <strong id="left-names"></strong>. They were taken over
-          once (hashed or encrypted) and are set on this page since, so you can delete those lines.</p>
+        <p class="sub">These lines are still in the container's YAML and are no longer read: <strong id="left-names"></strong>. You can delete them.</p>
       </div>
       <div class="card" id="servers-card" data-fold="open">
         <h3>Music servers</h3>
-        <p class="sub">Navidrome, Emby and Jellyfin, as many as you have, and more than one user of the same server (each
-          sees the libraries that user may). A song two servers have is found by its file or its tags and analysed once.
-          The default server is the one the Siansa app is answered for when it doesn't say which it plays from.</p>
+        <p class="sub">Navidrome, Emby or Jellyfin. Add as many as you have, or more than one user of the same server. A song two servers both have is analysed once.</p>
         <ul class="servers" id="servers"></ul>
         <details id="server-add">
           <summary class="btn" role="button" id="sf-title">Add a server or a user</summary>
@@ -835,34 +875,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
           </form>
         </details>
       </div>
-      <div class="grid2">
-        <div class="card" id="audiomuse-card" data-fold>
-          <h3>AudioMuse-AI</h3>
-          <p class="sub">What it has worked out about each song (how it sounds, its moods and genres) is taken over
-            from it, so nothing is analysed twice; Siansa Beats then answers similar songs, albums and artists, song paths,
-            blends and moods itself. A song's tempo is never AudioMuse-AI's: it's the one Beat This! finds here. <span id="am-state"></span></p>
-          <form id="am-form" autocomplete="off">
-            <div class="form">
-              <label class="wide">Address <input type="url" id="am-url" placeholder="http://192.168.1.10:8000"></label>
-              <label class="wide">API token <input type="password" id="am-token" autocomplete="new-password" placeholder="One of AudioMuse-AI's API tokens"></label>
-            </div>
-            <div class="controls">
-              <button type="submit" class="primary" id="am-save">Connect</button>
-              <button type="button" id="am-test">Test</button>
-              <button type="button" id="am-remove" hidden>Disconnect</button>
-            </div>
-            <p class="sub" id="am-note" role="status"></p>
-            <p class="sub">The token is kept encrypted and never shown again.</p>
-          </form>
-          <div id="pull-box" hidden>
-            <p class="sub" id="pull-state" role="status"></p>
-            <div class="controls">
-              <button type="button" id="pull-now">Take over what's new</button>
-              <button type="button" id="pull-all" title="Asks AudioMuse-AI for every song again, not only new and changed ones">Take over everything again</button>
-            </div>
-          </div>
-        </div>
-        <div class="card" id="access-card" data-fold>
+      <div class="card" id="access-card" data-fold>
           <h3>Access</h3>
           <dl class="kv" id="setup-connections"></dl>
           <form id="pw-form" autocomplete="off">
@@ -880,35 +893,34 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
               <p class="sub">The app's key, shown this once (only its hash is kept). Copy it into Siansa now:</p>
               <div class="controls"><code id="key-text"></code><button type="button" id="key-copy">Copy</button></div>
             </div>
-            <p class="sub">Only a hash of the password and of the key is kept: neither can be read back. Your browser asks for
-              the password (user name <code>siansa</code>). Forgotten it? On the server, run <code>docker exec siansa-beats python -m beats.reset</code>: it takes the
-              password and the key away at once, and you set new ones here.</p>
+            <p class="sub">With a password set, you sign in on a page of its own and stay signed in on this browser. Only a hash of the password and of the key is kept: neither can be read back. Forgotten the password? On the server, run <code>docker exec siansa-beats python -m beats.reset</code>.</p>
           </form>
         </div>
-      </div>
-      <div class="card" data-fold><h3>The model</h3><dl class="kv" id="setup-model"></dl></div>
+      <div class="card" data-fold><h3>Models</h3><p class="sub">What analyses your music, and where it runs.</p><dl class="kv" id="setup-model"></dl>
+        <p class="sub">The models are other people's work, each under its own licence: their authors are credited in the README.</p></div>
       <div class="card" data-fold id="style-card">
-        <h3>Genres by sound</h3>
-        <p class="sub">Which model hears each song's styles, for the genre pages and the genre radios. Both give the same 400
-          Discogs styles, so changing the model changes nothing in how genres are named or read; every song is heard
-          again with the new one (its old styles stay in use until then).</p>
+        <h3>Genre model</h3>
+        <p class="sub">Which model hears each song's genres. Both name the same 400 styles. Changing it hears every song again; the old genres stay in use until then.</p>
         <div class="choices" id="style-choices" role="radiogroup" aria-label="Style model"></div>
         <p class="sub" id="style-note" role="status"></p>
       </div>
       <div class="card" data-fold>
         <h3>Connect the Siansa app</h3>
         <ol class="steps">
-          <li>In Siansa Dev: Settings › Connections › <strong>Siansa Beats</strong>.</li>
+          <li>In the Siansa app: Settings › Services › <strong>Siansa Beats</strong> › Set up.</li>
           <li>Address: <code id="setup-address"></code></li>
           <li id="setup-key"></li>
           <li>Tap <strong>Test</strong>: it says how many songs have beat grids and loudness.</li>
         </ol>
-        <p class="sub">The app's API is described in <a href="api/v1/openapi.json" target="_blank" rel="noopener">openapi.json</a>; <a href="api/v1/capabilities" target="_blank" rel="noopener">capabilities</a> shows what it answers now.</p>
+        <p class="sub">For developers: the app's API is described in <a href="api/v1/openapi.json" target="_blank" rel="noopener">openapi.json</a>; <a href="api/v1/capabilities" target="_blank" rel="noopener">capabilities</a> shows what it answers now.</p>
       </div>
-      <div class="card" data-fold>
-        <h3>When something's wrong</h3>
-        <p class="sub">The debug report has the versions, the setup (no passwords), where each part is right now, the queue and the log: the one file to send.</p>
-        <a class="btn" href="api/debug" download>Download debug report</a>
+    </section>
+
+    <!-- Debug report (0.43: a page of its own, under Troubleshooting) -->
+    <section data-view="report">
+      <div class="page-head"><h2>Debug report</h2><p class="sub">One file with the versions, the setup (never passwords), the queue and the log: the file to send when asking for help.</p></div>
+      <div class="card">
+        <div class="controls"><a class="btn primary" href="api/debug" download>Download debug report</a></div>
       </div>
     </section>
   </main>
@@ -930,15 +942,17 @@ let genreList = [];  // the genres as the Genres page lists them (drawGenreBars)
 // The music server whose songs the pages show: none chosen means the default one. Kept in this browser.
 let server = null;
 try { server = localStorage.getItem("beats-server") || null; } catch (e) { /* private window */ }
-// A request about a server's songs names it; the servers themselves, the log and similar music (whose ?server= is
-// AudioMuse-AI's own name for one) don't.
+// A request about a server's songs names it; the servers themselves, the log and similar music don't.
 function forServer(path) {
-  if (!server || !path.startsWith("api/") || /^api\/(servers|audiomuse|access|log|health|debug|v1\/similar)/.test(path)) return path;
+  if (!server || !path.startsWith("api/") || /^api\/(servers|access|log|health|debug|v1\/similar)/.test(path)) return path;
   return path + (path.includes("?") ? "&" : "?") + "server=" + encodeURIComponent(server);
 }
+let signingOut = false;
 async function api(path, options = {}) {
   const r = await fetch(forServer(path), {headers: {"Content-Type": "application/json"}, ...options});
   const body = r.headers.get("Content-Type")?.includes("json") ? await r.json() : await r.text();
+  // Signed out (the session ended, or the password changed elsewhere): the sign-in page takes over.
+  if (r.status === 401 && !signingOut) { signingOut = true; location.reload(); }
   if (!r.ok) throw new Error(body?.error || r.statusText);
   return body;
 }
@@ -1198,7 +1212,7 @@ $("start").addEventListener("click", async () => {
 showLastChecks();
 $("left-out").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-remove]");
-  if (!b || !confirm(`Remove the ${b.dataset.songs} songs of ${b.dataset.name} from Siansa Beats, with their beats and marks (a song another server has too stays)? Nothing changes on the server. Siansa Dev then gets their beats from the Siansa Beats (dev) plugin's own reading, or none (its page's choice).`)) return;
+  if (!b || !confirm(`Remove the ${b.dataset.songs} songs of ${b.dataset.name} from Siansa Beats, with their beats and marks (a song another server has too stays)? Nothing changes on the server.`)) return;
   b.disabled = true;
   try { await api(`api/libraries/${encodeURIComponent(b.dataset.remove)}/songs`, {method: "DELETE"}); banner(null); }
   catch (err) { banner(err.message); }
@@ -1580,7 +1594,7 @@ function chooseServer(id) {
   $("genre-top").innerHTML = ""; $("libs").innerHTML = '<span class="sub">Asking the server…</span>';
   drawRows(); exportLinks();
   statusLoop(); refreshLibraries(); refreshSongs(); refreshGenres(true);
-  if (currentView === "loudness") refreshLoudness();
+  if (currentView === "loudness" || currentView === "keys") refreshLoudness();
 }
 $("server").addEventListener("change", (e) => { chooseServer(e.target.value); menu(false); });
 $("servers").addEventListener("click", async (e) => {
@@ -1647,7 +1661,6 @@ function statusRows(s) {
   const servers = (s.servers || []).map((x) => ["ok", x.name, `${x.url} · ${num(x.songs)} songs${x.default && s.servers.length > 1 ? " · default" : ""}`]);
   return [
     ...(servers.length ? servers : [["bad", "Music server", "None yet: add one under Setup"]]),
-    [cn.audiomuse ? "ok" : "off", "AudioMuse-AI", cn.audiomuse ? "What it worked out about each song is taken over" : "Not connected: Siansa Beats does its work itself (Setup connects one)"],
     [s.model_loaded ? (s.device_note ? "wait" : "ok") : "off", `Beat This! ${s.model}`, s.model_loaded ? `On the ${where}` + (s.model_load_seconds ? `, loaded in ${fmt(s.model_load_seconds)} s` : "") + (s.device_note ? `. ${s.device_note}` : "") : `Not loaded: loads with the first song, on ${where}`],
     [(s.styles || {}).available ? "ok" : "wait", "Style model", (s.styles || {}).available ? "Gives each song its genres from its sound" : "Not in this image: genres are the songs' tags"],
     ["ok", "The Siansa app", cn.api_key ? "Connects with BEATS_API_KEY" : cn.password ? "Connects with this page's password" : "Connects without a key"],
@@ -1663,8 +1676,14 @@ function drawStatus(s) {
   $("status-button").title = rows.map((r) => `${r[1]}: ${r[2]}`).join("\n");
   $("status-rows").innerHTML = rows.map(([st, name, detail]) => `<div class="status-row"><span class="dot ${st}"></span><span class="name">${esc(name)}</span><span class="detail">${esc(detail)}</span></div>`).join("");
   $("status-version").textContent = `Siansa Beats ${s.version}`;
+  $("sign-out").hidden = !(s.connections || {}).password;
   $("header-version").textContent = s.version || "";
 }
+$("sign-out").addEventListener("click", async () => {
+  signingOut = true;
+  try { await fetch("api/signout", {method: "POST"}); } catch (e) { /* signed out all the same once the page reloads */ }
+  location.reload();
+});
 function statusMenu(open) {
   $("status-panel").hidden = !open;
   $("status-button").setAttribute("aria-expanded", String(open));
@@ -1751,7 +1770,7 @@ window.addEventListener("scroll", () => { toTop.hidden = window.scrollY < window
 // ---- pages ----
 // One page at a time, chosen in the side menu (tabs on a phone) and kept in the address (#songs, #song=<id>), so Back
 // and a bookmark work.
-const VIEWS = ["overview", "libraries", "songs", "listening", "artist", "loudness", "genres", "similar", "blends", "activity", "log", "setup"];
+const VIEWS = ["overview", "libraries", "songs", "listening", "artist", "loudness", "keys", "genres", "similar", "blends", "activity", "log", "setup", "report"];
 let currentView = null;
 function showView(view, keepHash) {
   if (!VIEWS.includes(view)) view = "overview";
@@ -1765,7 +1784,7 @@ function showView(view, keepHash) {
   document.title = `${document.querySelector(`.nav [data-view="${view}"]`)?.textContent.trim() || "Overview"} · Siansa Beats`;
   if (view === "genres") refreshGenres(true);
   if (view === "log") refreshLog(true);
-  if (view === "loudness") refreshLoudness();
+  if (view === "loudness" || view === "keys") refreshLoudness();
   if (view === "similar") drawSimilarStatus();
   if (view === "listening") refreshListening();
   if (view === "artist") {  // part of Listening: its menu entry stays marked
@@ -2187,9 +2206,9 @@ function drawTiles(s) {
   const l = s.loudness || {}, st = s.styles || {};
   $("tiles").innerHTML = [
     tile("#songs", "Beats", num(done), total, `${waiting ? num(waiting) + " to go" : "all done"}${failed ? ` · ${num(failed)} failed` : ""}${c.skipped ? ` · ${num(c.skipped)} left out` : ""}`, [["done", done], ["failed", failed], ["busy", waiting]]),
-    tile("#loudness", "Loudness, fades & key", num(l.measured), done, l.waiting ? `${num(l.waiting)} to go${l.measuring ? " · measuring now" : ""}` : `all measured${l.failed ? ` · ${num(l.failed)} couldn't be` : ""}`, [["done", l.measured || 0], ["failed", l.failed || 0]]),
-    tile("#genres", "Genres", st.available ? num(st.done) : "–", st.available ? st.total : null, st.available ? (st.current ? "hearing a song now" : "songs heard by the style model") : "no style model in this image", st.available ? [["done", st.done || 0], ["failed", st.failed || 0]] : null),
-    tile("#blends", "Bad blends", num(s.bad_blends), null, "marked in Siansa Dev", null),
+    tile("#loudness", "Loudness & key", num(l.measured), done, l.waiting ? `${num(l.waiting)} to go${l.measuring ? " · measuring now" : ""}` : `all measured${l.failed ? ` · ${num(l.failed)} couldn't be` : ""}`, [["done", l.measured || 0], ["failed", l.failed || 0]]),
+    tile("#genres", "Genres", st.available ? num(st.done) : "–", st.available ? st.total : null, st.available ? (st.current ? "hearing a song now" : (st.done >= st.total ? "all songs heard" : "songs heard so far")) : "this image has no genre model", st.available ? [["done", st.done || 0], ["failed", st.failed || 0]] : null),
+    tile("#similar", "Sound", num((s.sound || {}).sound), (s.sound || {}).songs ?? null, "for similar music and moods", [["done", (s.sound || {}).sound || 0]]),
   ].join("");
 }
 
@@ -2205,18 +2224,13 @@ function drawSetup(s) {
   $("pw-remove").hidden = !cn.password; $("key-remove").hidden = !cn.api_key;
   $("key-new").textContent = cn.api_key ? "Make a new key" : "Make a key for the app";
   $("key-new").disabled = !cn.password; $("key-new").title = cn.password ? "" : "Set the page's password first: without one the page is open and the app needs no key";
-  $("am-state").innerHTML = cn.audiomuse ? `Connected to <strong>${esc(cn.audiomuse_url)}</strong>${cn.audiomuse_token ? "" : " (no token)"}.` : "Not connected.";
-  $("am-remove").hidden = !cn.audiomuse; $("am-save").textContent = cn.audiomuse ? "Save" : "Connect";
-  if (cn.audiomuse && !$("am-url").value && document.activeElement !== $("am-url")) $("am-url").value = cn.audiomuse_url;
-  $("am-token").placeholder = cn.audiomuse_token ? "Kept: leave empty to keep it" : "One of AudioMuse-AI's API tokens";
-  drawPull(status.sound);
   const left = cn.left_in_container || [];
   $("left-card").hidden = !left.length; $("left-names").textContent = left.join(", ");
   $("setup-model").innerHTML = [
     ["Beat tracker", `Beat This! ${esc(s.model)}`],
     ["Runs on", s.model_loaded ? esc(s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") : esc(s.device) + " (loads with the first song)"],
     ["Half precision", s.float16 ? "on" : "off"],
-    ["Style model", (s.styles || {}).available ? `${esc((s.styles || {}).model_name || "Discogs-EffNet")} on the ${esc((s.styles || {}).device || "CPU")}${(s.styles || {}).precision === "fp16" ? ", half precision" : ""}` : "not in this image"],
+    ["Genre model", (s.styles || {}).available ? `${esc((s.styles || {}).model_name || "Discogs-EffNet")} on the ${esc((s.styles || {}).device || "CPU")}${(s.styles || {}).precision === "fp16" ? ", half precision" : ""}` : "not in this image"],
     ["Version", esc(s.version)], ["Running for", `${Math.floor((s.uptime_seconds || 0) / 3600)} h ${Math.floor((s.uptime_seconds || 0) % 3600 / 60)} min`],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
   $("setup-address").textContent = location.origin + location.pathname.replace(/\/$/, "");
@@ -2249,53 +2263,7 @@ async function chooseStyleModel(id) {
 }
 drawStyleModels();
 
-// ---- what AudioMuse-AI has worked out, taken over (0.25) ----
-function drawPull(sound) {
-  $("pull-box").hidden = !sound || !sound.audiomuse;
-  if (!sound) return;
-  const p = sound.pull || {};
-  const model = sound.text_model || {};
-  const have = `The sound of ${num(sound.sound)} of ${num(sound.songs)} songs is here` +
-    (model.available ? `; ${num(sound.words)} can be found by describing them in words` : "; this image has no text model, so music can't be found by words (0.26 has it)") +
-    (sound.sources ? ` (${num(sound.sources.audiomuse)} from AudioMuse-AI, ${num(sound.sources.beats)} heard here` + (sound.sources.failed ? `, ${num(sound.sources.failed)} couldn't be heard` : "") + ")" : "") +
-    (sound.hearing ? `. Hearing ${sound.hearing.artist || ""} – ${sound.hearing.title || ""} now` : "") +
-    (sound.hears === false ? ". This image can't hear songs itself (0.27 can)" : "");
-  let text;
-  if (p.running) text = p.total ? `Taking over from AudioMuse-AI: ${num(p.done || 0)} of ${num(p.total)} songs…` : "Asking AudioMuse-AI what it has…";
-  else if (p.error) text = `${have}. The last try failed: ${p.error}`;
-  else if (p.finished) text = `${have}. Last taken over ${new Date(p.finished * 1000).toLocaleString()}: ${num(p.kept || 0)} new or changed` +
-    (p.unknown ? `, ${num(p.unknown)} of AudioMuse-AI's songs aren't in the libraries chosen here` : "") +
-    ((p.servers || []).length > 1 ? ` (its music servers: ${p.servers.map((m) => `${m.name} ${num(m.total)} songs, ${num(m.kept)} taken over`).join("; ")})` : "") + ".";
-  else text = `${have}. Nothing taken over yet.`;
-  $("pull-state").textContent = text;
-  $("pull-now").disabled = $("pull-all").disabled = !!p.running;
-}
-async function pull(everything) {
-  try { await api("api/sound/pull", {method: "POST", body: JSON.stringify({everything})}); statusLoop(); }
-  catch (e) { $("pull-state").textContent = e.message; }
-}
-$("pull-now").addEventListener("click", () => pull(false));
-$("pull-all").addEventListener("click", () => { if (confirm("Ask AudioMuse-AI for every song again? This takes a few minutes for a big library.")) pull(true); });
-
-// ---- AudioMuse-AI and access, set here (0.24.0) ----
-const amFields = () => ({url: $("am-url").value.trim(), token: $("am-token").value});
-$("am-test").addEventListener("click", async () => {
-  $("am-note").textContent = "Asking…";
-  try { const r = await api("api/audiomuse/test", {method: "POST", body: JSON.stringify(amFields())}); $("am-note").textContent = `It answers and takes the token (${r.plugin === "export" ? "its export for apps; no Siansa plugin there, and none is needed" : "its " + r.plugin + " plugin"}).`; }
-  catch (err) { $("am-note").textContent = err.message; }
-});
-$("am-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  if (!amFields().url) { $("am-note").textContent = "An address is needed."; return; }
-  $("am-note").textContent = "Asking AudioMuse-AI…";
-  try { const r = await api("api/audiomuse", {method: "POST", body: JSON.stringify(amFields())}); $("am-token").value = ""; $("am-note").textContent = `Connected (${r.plugin === "export" ? "its export for apps; no Siansa plugin there, and none is needed" : "its " + r.plugin + " plugin"}).`; statusLoop(); }
-  catch (err) { $("am-note").textContent = err.message; }
-});
-$("am-remove").addEventListener("click", async () => {
-  if (!confirm("Disconnect AudioMuse-AI? Siansa gets no similar albums and artists from Siansa Beats until it's connected again.")) return;
-  try { await api("api/audiomuse", {method: "DELETE"}); $("am-url").value = ""; $("am-token").value = ""; $("am-note").textContent = "Disconnected."; statusLoop(); }
-  catch (err) { $("am-note").textContent = err.message; }
-});
+// ---- access, set here (0.24.0) ----
 $("pw-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const password = $("pw-new").value;
@@ -2332,7 +2300,7 @@ $("key-remove").addEventListener("click", async () => {
 function soundCell(m) {
   if (!m) return '<span class="sub">–</span>';
   if (m.error) return `<span class="sub" title="${esc(m.error)}">couldn't</span>`;
-  return `${m.ref_lufs != null ? fmt(m.ref_lufs) + " LUFS" : "–"}<div class="sub">${esc([m.key, m.scale].filter(Boolean).join(" ")) || "no key"}${m.source === "plugin" ? " · plugin" : ""}</div>`;
+  return `${m.ref_lufs != null ? fmt(m.ref_lufs) + " LUFS" : "–"}<div class="sub">${esc([m.key, m.scale].filter(Boolean).join(" ")) || "no key"}</div>`;
 }
 const crossing = (points, db) => (points || []).find(([level]) => level === db)?.[1];
 function soundFacts(m) {
@@ -2344,7 +2312,6 @@ function soundFacts(m) {
     ["Key", [m.key, m.scale].filter(Boolean).join(" ") || "–"],
     ["Up to the fade level", into != null ? `after ${fmt(into)} s` : "–"],
     ["Quiet before the end", out != null ? `${fmt(out)} s` : "–"],
-    ["From", m.source === "plugin" ? "the Siansa plugin on AudioMuse-AI" : "measured here"],
     ["Measured", m.measured_at ? new Date(m.measured_at * 1000).toLocaleString() : "–"],
   ];
 }
@@ -2358,11 +2325,14 @@ async function refreshLoudness() {
   let r;
   try { r = await api("api/loudness"); } catch (e) { return; }
   const measured = r.measured || 0;
+  const all = (measured + (r.waiting || 0) + (r.failed || 0)) || null;
   $("l-tiles").innerHTML = [
-    tile("#loudness", "Measured", num(measured), (measured + (r.waiting || 0) + (r.failed || 0)) || null, r.waiting ? `${num(r.waiting)} to go` : "all songs analysed for their beats", [["done", r.sources.beats], ["plugin", r.sources.plugin], ["failed", r.failed || 0]]),
-    tile("#loudness", "Measured here", num(r.sources.beats), null, "from each song's file", null),
-    tile("#loudness", "Taken from the plugin", num(r.sources.plugin), null, r.audiomuse ? "AudioMuse-AI's Siansa plugin had them" : "AudioMuse-AI isn't set up", null),
-    tile("#loudness", "With a key", num(r.with_key), measured || null, "for blends in key", null),
+    tile("#loudness", "Measured", num(measured), all, r.waiting ? `${num(r.waiting)} to go` : "all songs", [["done", measured], ["failed", r.failed || 0]]),
+    r.failed ? tile("#loudness", "Couldn't be measured", num(r.failed), null, "listed below", null) : "",
+  ].join("");
+  $("k-tiles").innerHTML = [
+    tile("#keys", "With a key", num(r.with_key), measured || null, measured ? `${Math.round(100 * r.with_key / measured)}% of the songs measured` : "nothing measured yet", [["done", r.with_key]]),
+    tile("#keys", "Without", num(Math.max(0, measured - r.with_key)), null, "no clear key: spoken word, noise, drums alone", null),
   ].join("");
   $("l-now-card").hidden = !r.measuring;
   if (r.measuring) $("l-now").textContent = `${r.measuring.artist} – ${r.measuring.title}`;
@@ -2376,7 +2346,7 @@ async function refreshLoudness() {
   $("l-keys").innerHTML = keys.map(([k, n]) => `<div class="hbar"><span class="name">${esc(k)}</span><span class="track"><span style="width:${100 * n / most}%"></span></span><span class="n">${num(n)}</span></div>`).join("") || '<p class="sub">No keys yet.</p>';
   $("l-failed").innerHTML = (r.failed_songs || []).map((f) => `<li><a href="#song=${encodeURIComponent(f.id)}">${esc(f.artist || "")} – ${esc(f.title || f.id)}</a><br><span class="sub">${esc(f.error)}</span></li>`).join("") || '<li class="sub">None.</li>';
 }
-setInterval(() => { if (currentView === "loudness" && !document.hidden) refreshLoudness(); }, 10000);
+setInterval(() => { if ((currentView === "loudness" || currentView === "keys") && !document.hidden) refreshLoudness(); }, 10000);
 
 // ---- genres as bars ----
 function drawGenreBars() {
@@ -2395,10 +2365,12 @@ $("about-fetch").addEventListener("click", async () => {
 
 // ---- similar music ----
 function drawSimilarStatus() {
-  const on = status && (status.connections || {}).audiomuse;
-  $("s-status").innerHTML = on
-    ? '<span class="pill ok">AudioMuse-AI is set up</span> <span class="sub">Similar albums and artists come from the songs\' sound taken over from it (Setup › AudioMuse-AI); for a song whose sound isn\'t here yet, its Siansa plugin is asked.</span>'
-    : '<span class="pill wait">AudioMuse-AI isn\'t set up</span> <p class="sub">Connect it under <a href="#setup">Setup › AudioMuse-AI</a> with its address and one of its API tokens. Until then the app asks the plugin itself, when it can.</p>';
+  const sound = (status && status.sound) || {};
+  const heard = sound.sound || 0, of = sound.songs || 0;
+  $("s-status").innerHTML = !of ? '<span class="pill">No songs yet</span> <span class="sub">Choose libraries to analyse under <a href="#libraries">Libraries</a>.</span>'
+    : heard >= of ? `<span class="pill ok">Ready</span> <span class="sub">${num(heard)} songs heard. Worked out here, from how each song sounds.</span>`
+    : heard ? `<span class="pill wait">Getting there</span> <span class="sub">${num(heard)} of ${num(of)} songs heard so far. Similar music is found among those.</span>`
+    : `<span class="pill wait">Not ready yet</span> <span class="sub">None of the ${num(of)} songs has been heard yet. They're heard as they're analysed.</span>`;
 }
 let similarTimer = null;
 $("s-find").addEventListener("input", () => {
@@ -2416,7 +2388,7 @@ $("s-picks").addEventListener("click", async (e) => {
   if (!b) return;
   $("s-results").hidden = false;
   $("s-album").textContent = b.dataset.album; $("s-artist").textContent = b.dataset.artist;
-  $("s-albums").innerHTML = $("s-artists").innerHTML = '<li class="sub">Asking AudioMuse-AI…</li>';
+  $("s-albums").innerHTML = $("s-artists").innerHTML = '<li class="sub">Looking…</li>';
   const list = async (kind, el, text) => {
     try {
       const r = await api(`api/v1/similar/${kind}?track_id=${encodeURIComponent(b.dataset.similar)}`);

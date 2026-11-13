@@ -286,7 +286,7 @@
     },
     "/api/v1/similar/albums": {
       "get": {
-        "summary": "Albums that sound like a song's album (asked of AudioMuse-AI's Siansa plugin for now)",
+        "summary": "Albums that sound like a song's album, from the songs' sound here; an empty list while that song's sound isn't known",
         "parameters": [
           {
             "name": "track_id",
@@ -300,7 +300,7 @@
           {
             "name": "server",
             "in": "query",
-            "description": "The music server's name in AudioMuse-AI, when it has several",
+            "description": "The music server the app plays from (its id or name), when there are several",
             "schema": {
               "type": "string"
             }
@@ -336,23 +336,13 @@
           },
           "401": {
             "description": "The password or API key is needed"
-          },
-          "502": {
-            "description": "AudioMuse-AI isn't set up or couldn't answer: {\"error\": why}",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
           }
         }
       }
     },
     "/api/v1/similar/artists": {
       "get": {
-        "summary": "Artists that sound like an artist (asked of AudioMuse-AI's Siansa plugin for now)",
+        "summary": "Artists that sound like an artist, from the songs' sound here; an empty list while its sound isn't known",
         "parameters": [
           {
             "name": "track_id",
@@ -373,7 +363,7 @@
           {
             "name": "server",
             "in": "query",
-            "description": "The music server's name in AudioMuse-AI, when it has several",
+            "description": "The music server the app plays from (its id or name), when there are several",
             "schema": {
               "type": "string"
             }
@@ -409,23 +399,13 @@
           },
           "401": {
             "description": "The password or API key is needed"
-          },
-          "502": {
-            "description": "AudioMuse-AI isn't set up or couldn't answer: {\"error\": why}",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
           }
         }
       }
     },
     "/api/v1/audiomuse/api/similar_tracks": {
       "get": {
-        "summary": "Songs that sound like a song, as AudioMuse-AI answers it (0.25).",
+        "summary": "Songs that sound like a song (0.25).",
         "parameters": [
           {
             "name": "item_id",
@@ -620,7 +600,7 @@
     },
     "/api/v1/audiomuse/api/mood_centroids": {
       "get": {
-        "summary": "AudioMuse-AI's mood centres, each with its tags.",
+        "summary": "The mood centres, each with its tags.",
         "responses": {
           "200": {
             "description": "Mood name to its centres."
@@ -821,7 +801,7 @@
     },
     "/api/v1/audiomuse/api/clap/search": {
       "post": {
-        "summary": "Songs that sound like a description in words, as AudioMuse-AI answers it (0.26).",
+        "summary": "Songs that sound like a description in words (0.26).",
         "parameters": [
           {
             "name": "server",
@@ -1767,7 +1747,7 @@
         "properties": {
           "source": {
             "type": "string",
-            "description": "Where it came from: audiomuse"
+            "description": "Where it came from: beats"
           },
           "similar": {
             "type": "array",

@@ -2,7 +2,7 @@
 #
 # Two builds from this file: the CPU one (the default) and, with --build-arg TORCH_INDEX=…/whl/cu121, the cuda one
 # for an NVIDIA GPU (it also runs without one, on the CPU). The model's checkpoints are downloaded while the image is
-# built and kept in /models, so the service itself needs no internet: only your Navidrome (and AudioMuse-AI).
+# built and kept in /models, so the service itself needs no internet: only your music server.
 # How energetic a song is (0.35): Essentia's emoMusic arousal model (MTG, UPF; CC BY-NC-SA 4.0), published as a
 # TensorFlow file, made into ONNX here. TensorFlow is in this stage only: the image itself gets the one small file.
 FROM python:3.11-slim-bookworm AS arousal

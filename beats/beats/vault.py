@@ -74,7 +74,9 @@ class Vault:
         """Whether ``given`` is the password ``stored`` is the hash of."""
         if not stored or not given:
             return False
-        mark = hmac.new(self._run_key, (stored + "\0" + given).encode(), "sha256").digest()
+        # A password that was right once this run is remembered, so a request that carries it isn't slow every time.
+        # Kept in memory only, under a key made anew at each start, and with a password hash, not a plain one.
+        mark = hashlib.scrypt((stored + "\0" + given).encode(), salt=self._run_key, n=16, r=8, p=1, dklen=32)
         if mark in self._seen:
             return True
         try:

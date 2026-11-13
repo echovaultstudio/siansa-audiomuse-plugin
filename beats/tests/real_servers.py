@@ -165,7 +165,7 @@ def main(servers, library_path):
         status = call(f"/api/status?server={added['id']}")
         check(status["counts"].get("songs") == len(wanted) and status["counts"].get("done") == len(wanted),
               f"{kind}: its own numbers: {status['counts']}")
-    # What songs sound like (0.25): each song a made-up vector, as if taken over from AudioMuse-AI. Asked by each
+    # What songs sound like (0.25): each song a made-up vector, as if heard. Asked by each
     # server's own ids, the answer is in that server's ids; "your sound" reads the server's most played songs.
     import numpy
 
