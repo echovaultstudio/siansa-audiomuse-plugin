@@ -45,6 +45,7 @@ LIBRARY_RESCAN_SECONDS = 6 * 3600  # how often the chosen libraries are read aga
 STYLE_KEEP = 15  # the top styles kept for each song (beats.style.KEEP)
 STYLE_RATE = 16_000  # the style model's sample rate: songs analysed before are decoded again at it
 STYLE_REPORT_EVERY = 500  # the agreement with the tags is worked out again after this many more songs
+SONGS_AT_ONCE_MOST = 2  # the most songs a pass may hold (beats.style.SONGS_AT_ONCE_GPU): this many fetched ahead, twice
 
 
 def measure_sound(path, samples, rate):
@@ -515,13 +516,16 @@ class Worker:
         downloading and decoding in the background while this one is heard. How many were dealt with."""
         from concurrent.futures import ThreadPoolExecutor
 
-        at_once = max(1, int(getattr(self.style, "songs_at_once", 1) or 1))
+        # Asked again for each pass: the model loads with the first song, and a GPU hears two from then on.
+        def at_once():
+            return max(1, int(getattr(self.style, "songs_at_once", 1) or 1))
+
         ids, dealt = iter(waiting), 0
         with ThreadPoolExecutor(max_workers=1, thread_name_prefix="beats-style-fetch") as pool:
             fetched = []
 
             def ahead():
-                while len(fetched) < 2 * at_once:
+                while len(fetched) < 2 * SONGS_AT_ONCE_MOST:
                     song_id = next(ids, None)
                     if song_id is None:
                         return
@@ -536,7 +540,7 @@ class Worker:
                         if not f.cancelled():
                             self._drop_fetched(f.result())
                     break
-                group = [fetched.pop(0).result() for _ in range(min(at_once, len(fetched)))]
+                group = [fetched.pop(0).result() for _ in range(min(at_once(), len(fetched)))]
                 ahead()
                 self._style_pass(group)
                 dealt += len(group)
