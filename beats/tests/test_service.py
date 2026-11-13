@@ -832,6 +832,9 @@ class ServiceTest(Service):
         again = self.call("/api/v1/songs/styles/again?ids=t140")
         self.assertEqual(again["songs"]["t140"]["cpu"][0], ["Trance", 0.71])
         self.assertIsNone(again["songs"]["t140"]["gpu"])
+        self.assertEqual(again["songs"]["t140"]["song"]["title"], "Control")
+        self.assertEqual(again["songs"]["t140"]["from"][0][1], "t140")
+        self.assertGreater(again["songs"]["t140"]["file"]["seconds"], 0)
 
     def test_without_the_style_model_the_app_falls_back_to_tags(self):
         self.start()
