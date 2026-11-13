@@ -436,13 +436,18 @@ class Worker:
         fd, path = tempfile.mkstemp(prefix="style-", dir=self.data_dir)
         os.close(fd)
         try:
-            self.download(song_id, path)
+            size = self.download(song_id, path)
             samples = self.decode(path, STYLE_RATE) if self.decode_takes_rate else self.decode(path)
             rate = STYLE_RATE if self.decode_takes_rate else self.decode_rate
             both = self.style.both(samples, rate)
             self._style(song, samples, rate)
-            return {way: None if ranked is None else [(l.partition("---")[2] or l, round(v, 4)) for l, v in ranked[:5]]
-                    for way, ranked in both.items()}
+            out = {way: None if ranked is None else [(l.partition("---")[2] or l, round(v, 4)) for l, v in ranked[:5]]
+                   for way, ranked in both.items()}
+            # What was heard: the song as Beats has it and the file it got, so a song taken for another shows.
+            out["song"] = {k: song.get(k) for k in ("id", "title", "artist", "album", "duration", "path", "server")}
+            out["from"] = [list(w) for w in (self.store.where(song_id) or [])]
+            out["file"] = {"bytes": size, "seconds": round(len(samples) / rate, 1)}
+            return out
         finally:
             if os.path.exists(path):
                 os.remove(path)
