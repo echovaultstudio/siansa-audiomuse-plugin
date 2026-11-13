@@ -1039,6 +1039,11 @@ class ServiceTest(Service):
         with self.assertRaises(urllib.error.HTTPError) as e:
             signin("third password")  # even the right one waits now
         self.assertEqual(e.exception.code, 429)
+        # The same limit for a password said in a request itself (Basic, or a Bearer that isn't the key).
+        for headers in ({"Authorization": "Bearer nope"}, {"Authorization": "Basic " + base64.b64encode(b"siansa:nope").decode()}):
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                self.call("/api/status", password="", headers=headers)
+            self.assertEqual(e.exception.code, 429, headers)
 
     def test_chosen_libraries(self):
         for song in self.fake.songs:

@@ -384,6 +384,7 @@ class App:
             access["api_key"] = Vault.hash_key(c.api_key)
         if access != (store.setting("access") or {}):
             store.set_setting("access", access)
+            store.set_setting("sessions", {})  # a password that's new here: nobody is signed in with it yet
         if store.setting("audiomuse"):
             store.set_setting("audiomuse", None)
             store.event("The connection to AudioMuse-AI was removed: Siansa Beats hears every song itself. What was "
@@ -421,9 +422,10 @@ class App:
         sessions.pop(self._session_mark(token), None)
         self.store.set_setting("sessions", sessions)
 
-    def sign_in(self, password, address):
-        """A session's token when ``password`` is the page's; None when it isn't. Too many wrong ones from one
-        address in a minute and it must wait (``PermissionError``)."""
+    def password_ok(self, password, address):
+        """Whether ``password`` is the page's, however it was said (the sign-in page, or a request's own
+        Authorization). Too many wrong ones from one address in a minute and that address must wait
+        (``PermissionError``), whichever way it tries."""
         now = time.time()
         with self._kept_lock:
             tries = self.__dict__.setdefault("_sign_in_tries", {})
@@ -432,10 +434,15 @@ class App:
                 raise PermissionError("Too many tries: wait a minute")
             if self.vault.check_password(str(password or ""), self.access().get("password")):
                 tries.pop(address, None)
-                return self.new_session()
+                return True
             tries[address] = recent + [now]
-        _log.warning("A wrong password was tried on the sign-in page (from %s)", address)
-        return None
+        _log.warning("A wrong password was tried (from %s)", address)
+        return False
+
+    def sign_in(self, password, address):
+        """A session's token when ``password`` is the page's; None when it isn't (``PermissionError``: too many
+        wrong tries, :meth:`password_ok`)."""
+        return self.new_session() if self.password_ok(password, address) else None
 
     def set_password(self, password):
         """Sets (or with "" takes away) the page's password; only its salted hash is kept. Every browser signed in
@@ -1070,15 +1077,19 @@ class Handler(BaseHTTPRequestHandler):
         if self.app.session_ok(self._session()):
             return True
         header = self.headers.get("Authorization", "")
-        if header.startswith("Bearer "):
-            given = header[7:].strip()
-            return vault.check_key(given, api_key) or vault.check_password(given, password)
-        if header.startswith("Basic ") and password:
-            try:
-                user, _, given = base64.b64decode(header[6:]).decode().partition(":")
-            except (ValueError, UnicodeDecodeError):
-                return False
-            return vault.check_password(given, password)
+        # A password said in a request counts towards the same limit as the sign-in page's (self._limited: 429).
+        try:
+            if header.startswith("Bearer "):
+                given = header[7:].strip()
+                return vault.check_key(given, api_key) or (bool(password) and self.app.password_ok(given, self.client_address[0]))
+            if header.startswith("Basic ") and password:
+                try:
+                    user, _, given = base64.b64decode(header[6:]).decode().partition(":")
+                except (ValueError, UnicodeDecodeError):
+                    return False
+                return self.app.password_ok(given, self.client_address[0])
+        except PermissionError:
+            self._limited = True
         return False
 
     SQUEEZE_FROM = 1024  # bytes: answers this big are sent gzipped to a browser or app that takes it
@@ -1196,7 +1207,11 @@ class Handler(BaseHTTPRequestHandler):
             with open(SIGN_IN, "rb") as f:
                 self._send(HTTPStatus.OK, f.read(), "text/html; charset=utf-8")
             return False
-        self._send(HTTPStatus.UNAUTHORIZED, {"error": "password or API key needed"})
+        if getattr(self, "_limited", False):
+            self._limited = False
+            self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "Too many tries: wait a minute"})
+        else:
+            self._send(HTTPStatus.UNAUTHORIZED, {"error": "password or API key needed"})
         return False
 
     # ---- routes ----
@@ -1404,9 +1419,10 @@ class Handler(BaseHTTPRequestHandler):
                     app.set_password(body.get("password"))
                 except ValueError as e:
                     return self._error(HTTPStatus.BAD_REQUEST, str(e))
-                # This browser stays signed in with the new password; every other one signs in again.
-                return self._send(HTTPStatus.OK, {"password": bool(app.access().get("password"))},
-                                  headers=self._cookie(app.new_session()))
+                # This browser stays signed in with the new password; every other one signs in again. With the
+                # password taken away there's nothing to be signed in to: no session is made.
+                has = bool(app.access().get("password"))
+                return self._send(HTTPStatus.OK, {"password": has}, headers=self._cookie(app.new_session() if has else None))
             if path == "/api/access/key":  # said this once: only its hash is kept
                 try:
                     return self._json({"key": app.new_api_key()})

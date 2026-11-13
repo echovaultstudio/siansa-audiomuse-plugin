@@ -9,6 +9,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 
@@ -201,6 +202,24 @@ class SecretsTest(Service):
         self.assertEqual(self.refused("/api/status", "GET")[0], 401)
         self.restart(BEATS_RESET_ACCESS="yes")
         self.assertFalse(self.call("/api/status")["connections"]["password"])
+
+    def test_no_session_is_made_without_a_password(self):
+        """Taking the password away signs everyone out and gives nobody a session that a later password would
+        honour; nor does signing in while there's none."""
+        self.start(password="correct horse")
+        gone, _ = self.call("/api/access/password", "POST", {"password": ""}, raw=True)
+        self.assertIn("Max-Age=0", gone.headers["Set-Cookie"])
+        self.assertEqual(self.app.store.setting("sessions"), {})
+        request = urllib.request.Request(self.base + "/api/signin", method="POST", data=b'{"password": "x"}')
+        self.assertIsNone(urllib.request.urlopen(request, timeout=10).headers["Set-Cookie"])
+        self.assertEqual(self.app.store.setting("sessions"), {})
+        # A password from the container at the next start: a session kept from before isn't honoured.
+        self.app.store.set_setting("sessions", {self.app._session_mark("stale"): time.time() + 3600})
+        self.app.store.set_setting("container_taken_access", [])
+        self.restart(BEATS_PASSWORD="from the yaml")
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/status", password="", headers={"Cookie": "beats_session=stale"})
+        self.assertEqual(e.exception.code, 401)
 
     def test_a_connection_to_audiomuse_kept_before_is_forgotten(self):
         """0.43 (the owner, 13 Nov): Siansa Beats does that work itself. The address and the token kept by an earlier
