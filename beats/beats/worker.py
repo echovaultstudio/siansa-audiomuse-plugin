@@ -591,17 +591,23 @@ class Worker:
             if many is not None and len(heard) > 1:
                 try:
                     ranked = many([(got["samples"], got["rate"]) for got in heard])
-                except Exception as e:  # one of them is odd: each on its own says which
-                    _log.warning("Styles: a pass of %d songs failed (%s); heard one by one", len(heard), e)
-            seconds = time.monotonic() - started
+                except Exception as e:  # one of them is odd, or they don't fit the GPU together: each on its own
+                    if "out of memory" in str(e).lower() and callable(getattr(self.style, "one_at_a_time", None)):
+                        # Not tried again (0.42.2): a card that can't take two pays for every try.
+                        if self.style.one_at_a_time(f"a pass of {len(heard)} songs ran out of its memory ({str(e)[:80]})"):
+                            self.store.event(self.style.problem, "warn")
+                            _log.warning("Styles: %s", self.style.problem)
+                    else:
+                        _log.warning("Styles: a pass of %d songs failed (%s); heard one by one", len(heard), e)
+            pass_seconds = time.monotonic() - started
             for i, got in enumerate(heard):
                 song = got["song"]
+                own = time.monotonic()
                 self._style(song, got["samples"], got["rate"], ranked[i] if ranked is not None else None, first=loads and i == 0)
                 _log.debug("%s – %s: style of a song analysed before: download %.2fs, decode %.2fs, model %.2fs%s",
                            song.get("artist"), song.get("title"), got["downloaded"], got["decoded"],
-                           seconds / len(heard) if ranked is not None else time.monotonic() - started - seconds,
+                           pass_seconds / len(heard) if ranked is not None else time.monotonic() - own,
                            f" (one of {len(heard)} in a pass)" if ranked is not None else "")
-                started = time.monotonic() if ranked is None else started
         finally:
             self.styling = None
             for got in group:

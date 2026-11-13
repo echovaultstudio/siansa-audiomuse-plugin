@@ -163,6 +163,7 @@ class StyleModel:
         # RTX, any card of compute capability 7 or more), full precision elsewhere; "fp16" and "fp32" insist.
         self.requested_precision = (precision or "auto").strip().lower()
         self.half = False  # hearing in half precision now (fp16 autocast on the GPU)
+        self._one_at_a_time = False  # a pass of several songs didn't fit the GPU's memory: one from then on
         self._torch = None  # the model as a PyTorch module, on the GPU
         self._lock = threading.Lock()
         self._session = None
@@ -360,8 +361,24 @@ class StyleModel:
 
     @property
     def songs_at_once(self):
-        """How many songs are best heard in one pass: a few on a GPU (one launch, the card kept busy), one on a CPU."""
-        return SONGS_AT_ONCE_GPU if self._torch is not None else 1
+        """How many songs are best heard in one pass: a few on a GPU (one launch, the card kept busy), one on a CPU,
+        and one on a GPU that ran out of memory on a pass of several (:meth:`one_at_a_time`)."""
+        return 1 if self._torch is None or self._one_at_a_time else SONGS_AT_ONCE_GPU
+
+    def one_at_a_time(self, why):
+        """From now on one song a pass (0.42.2, the owner, 13 Nov: an RTX 3050 with 6 GB ran out of memory on every
+        pass of two, and each try cost more than it saved). True the first time, when it's worth saying."""
+        if self._one_at_a_time:
+            return False
+        self._one_at_a_time = True
+        self.problem = f"the style model hears one song at a time on the GPU: {why}"
+        try:
+            import torch
+
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+        return True
 
     def __call__(self, samples, rate=RATE):
         """``[(label, score)]``: every style's score for the song, best first. ``samples`` mono at ``rate``."""

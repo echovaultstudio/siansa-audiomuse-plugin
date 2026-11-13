@@ -813,13 +813,16 @@ class ServiceTest(Service):
 
     def test_on_a_gpu_songs_analysed_before_are_heard_two_at_a_time(self):
         """0.41 (the owner, 13 Nov): a GPU hears the waiting songs in passes of two, the next ones fetched meanwhile;
-        each song still gets its own styles, and a pass that fails is heard one by one."""
+        each song still gets its own styles, and a pass that fails is heard one by one. A pass that runs out of the
+        GPU's memory (0.42.2) is the last pass of two: one a pass from then on, said once in Activity."""
         class Gpu(FakeStyle):
-            songs_at_once = 2
-
             def __init__(self, *a, **k):
                 super().__init__(*a, **k)
-                self.passes, self.fail_once = [], True
+                self.passes, self.fail_once, self.songs_at_once, self.problem = [], True, 2, None
+
+            def one_at_a_time(self, why):
+                self.songs_at_once, self.problem = 1, f"the style model hears one song at a time on the GPU: {why}"
+                return True
 
             def many(self, songs):
                 self.loaded = True
@@ -827,7 +830,7 @@ class ServiceTest(Service):
                 self.passes.append(ids)
                 if self.fail_once:
                     self.fail_once = False
-                    raise RuntimeError("CUDA out of memory (a test)")
+                    raise RuntimeError("CUDA out of memory. Tried to allocate 2.03 GiB")
                 return [self.HEARD.get(i, []) for i in ids]
 
         style = Gpu(os.path.join(self.tmp, "models"), on=False)
@@ -839,8 +842,10 @@ class ServiceTest(Service):
         while time.time() < end and self.call("/api/status")["styles"].get("done", 0) < 3:
             time.sleep(0.2)
         self.assertEqual(self.call("/api/status")["styles"]["done"], 3)
-        self.assertEqual([len(p) for p in style.passes], [2])  # two in a pass; the one left over goes alone
-        self.assertEqual(len(style.calls), 3)  # the failed pass of two heard one by one, then the lone one
+        self.assertEqual([len(p) for p in style.passes], [2])  # the one pass of two, which didn't fit
+        self.assertEqual(len(style.calls), 3)  # its two heard one by one, then the third alone: one a pass now
+        self.assertEqual(style.songs_at_once, 1)
+        self.assertIn("one song at a time", " ".join(e["message"] for e in self.app.store.events()))
         self.assertEqual(set(self.call("/api/genre?name=Trance")["ids"]), {"t140", "t96w"})
         self.assertEqual(self.call("/api/genre?name=" + urllib.parse.quote("Deep House"))["ids"], ["t122"])
 
