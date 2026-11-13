@@ -13,10 +13,10 @@ the most out of the app.
   so the app can mix one song into the next on the beat (DJ mixes), and each song's tempo.
 - **Loudness, fades and key.** How loud each song is (EBU R128) for levelling, how it starts and ends for smooth
   crossfades, and its key for mixing.
-- **How songs sound.** The same analysis AudioMuse-AI does, with its models: similar songs, albums and artists,
-  song paths, blends, mood radios, "your sound", and finding music by describing it in words (vibes and their
-  sliders, sound cards). It takes over what AudioMuse-AI has already worked out, from every music server it
-  analyses, and hears new songs itself, so AudioMuse-AI can then be switched off.
+- **How songs sound.** Similar songs, albums and artists, song paths, blends, mood radios, "your sound", and
+  finding music by describing it in words (vibes and their sliders, sound cards). Siansa Beats hears every song
+  itself, with the models the [AudioMuse-AI](https://github.com/NeptuneHub/AudioMuse-AI) project publishes (see the
+  credits in [beats/README.md](beats/README.md#credits)); it needs no other service.
 - **Genres from the sound.** Each song's genres from what it sounds like (400 styles, from Progressive Trance to
   Boom Bap), for the app's genre list, genre pages and genre radios, with a short description of each genre.
 - **Your listening history.** Siansa sends it your listens ("Scrobble to Siansa Beats"); its Listening page is a

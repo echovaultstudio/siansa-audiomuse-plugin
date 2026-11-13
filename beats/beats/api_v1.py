@@ -43,6 +43,7 @@ from . import loudness
 API = 1
 SCHEMA_VERSION = 1  # of the profiles' layout: the plugin's, which the app reads (PluginProfiles.SCHEMA_VERSION)
 MAX_IDS = 500
+SIMILAR_ASKED = ("track_id", "artist", "server", "limit")  # what the app asks similar albums and artists by
 SPEC = os.path.join(os.path.dirname(__file__), "openapi.json")
 
 
@@ -77,10 +78,9 @@ def capabilities(app, server=None):
                        "per_song": True},  # /api/v1/songs/genres (0.32)
             "genre_about": {"available": True, "source": "Wikipedia"},
             "bad_blends": {"available": True},
-            # Similar albums and artists: from the songs' sound here once it's known (0.25), else asked of AudioMuse-AI.
-            "similar": {"available": bool(sound["sound"]) or app.audiomuse.configured,
-                        "source": "beats" if sound["sound"] else "audiomuse"},
-            # What songs sound like, answered as AudioMuse-AI answers it, under /api/v1/audiomuse/… (0.25).
+            # Similar albums and artists: from the songs' sound here (0.25).
+            "similar": {"available": bool(sound["sound"]), "source": "beats"},
+            # What songs sound like, under /api/v1/audiomuse/… (0.25): the paths and answers the app already knows.
             "sound": {"available": bool(sound["sound"]), "songs": sound["sound"], "of": sound["songs"],
                       "answers": (list(SOUND_ANSWERS) if sound["sound"] else [])
                       + (list(WORD_ANSWERS) if sound["words"] and app.words.available else []),
@@ -150,18 +150,16 @@ def get(handler, path, query, server=None):
     if path.startswith(AUDIOMUSE + "/"):
         return sound_get(handler, path[len(AUDIOMUSE):], arg, server)
     if path in ("/api/v1/similar/albums", "/api/v1/similar/artists"):
-        from .audiomuse import AudioMuseError, PASSED_ON
-
-        asked = {k: arg(k) for k in PASSED_ON if arg(k)}
+        asked = {k: arg(k) for k in SIMILAR_ASKED if arg(k)}
         if not asked.get("track_id") and not (path.endswith("artists") and asked.get("artist")):
             return handler._error(HTTPStatus.BAD_REQUEST, "track_id needed (or artist, for artists)") or True
-        own = similar_here(app, path.rsplit("/", 1)[1], asked, server)
+        kind = path.rsplit("/", 1)[1]
+        own = similar_here(app, kind, asked, server)
         if own is not None:
             return handler._json(own) or True
-        try:
-            return handler._json(app.audiomuse.similar(path.rsplit("/", 1)[1], asked)) or True
-        except AudioMuseError as e:
-            return handler._error(HTTPStatus.BAD_GATEWAY, str(e)) or True
+        # The sound of that song (or artist) isn't known here yet: nothing similar to give, said as such.
+        return handler._json({"schema_version": SCHEMA_VERSION, "similar": [], "source": "beats",
+                              "note": "its sound isn't known here yet"}) or True
     if path == "/api/v1/listens/top":  # the most listened songs, artists or albums of a listener in a stretch of time
         kind = arg("kind", "songs")
         if kind not in ("songs", "artists", "albums"):
@@ -283,8 +281,8 @@ def _here(app, song_id, server):
 
 
 def similar_here(app, kind, asked, server):
-    """Similar albums or artists from the songs' sound here, in the plugin's layout; None when the sound of the song
-    (or artist) asked about isn't known here, so AudioMuse-AI is asked instead."""
+    """Similar albums or artists from the songs' sound here; None when the sound of the song (or artist) asked about
+    isn't known here."""
     from .sound import Unknown
 
     song_id = _here(app, asked["track_id"], server) if asked.get("track_id") else None
@@ -296,10 +294,6 @@ def similar_here(app, kind, asked, server):
             name, found = app.sound.similar_artists(song_id, asked.get("artist"))
             extra = {"name": name, "artist_asked": name}
     except Unknown:
-        return None
-    # Nothing found: AudioMuse-AI is asked when it can be, and always while no song's sound is here at all (then
-    # the answer is why not, as before 0.25, not an empty list).
-    if not found and (app.audiomuse.configured or not app.sound.count()):
         return None
     try:
         limit = max(1, min(50, int(asked.get("limit") or 20)))
@@ -426,8 +420,8 @@ def sound_post(handler, path, body, server):
                 return handler._error(HTTPStatus.BAD_REQUEST, '"limit" must be a whole number') or True
             if not app.sound.word_count():
                 return handler._error(HTTPStatus.SERVICE_UNAVAILABLE,
-                                      "No song has the vector the search by words needs yet: take AudioMuse-AI's "
-                                      "analysis over (Setup › AudioMuse-AI)") or True
+                                      "No song has the vector the search by words needs yet: they're made as the "
+                                      "songs are heard (Overview shows how far that is)") or True
             steering, warnings = app.words.terms(body.get("steering"))
             if body.get("steering") and not steering and warnings:
                 return handler._error(HTTPStatus.BAD_REQUEST, warnings[0]) or True

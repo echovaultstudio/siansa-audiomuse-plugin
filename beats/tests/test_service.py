@@ -1,4 +1,4 @@
-"""The service end to end without the model: Navidrome and AudioMuse-AI are tests/fakes.py, and a stand-in tracker
+"""The service end to end without the model: Navidrome is tests/fakes.py, and a stand-in tracker
 gives each song the beats of its known tempo. The model itself is checked by e2e.py in the Docker image."""
 
 import base64
@@ -389,8 +389,8 @@ class ServiceTest(Service):
 
         status = self.call("/api/status")
         self.assertNotIn("plugin", status)
-        # Nothing is asked of AudioMuse-AI any more.
-        self.assertFalse([path for path, _ in self.fake.requests if path.startswith("/plugins/")])
+        # Nothing but the music server is asked anything (0.43).
+        self.assertFalse([path for path, _ in self.fake.requests if path.startswith(("/plugins/", "/api/sync"))])
         self.assertTrue(any("Library Music: 4 songs, 4 new" in e["message"] for e in status["events"]))
         self.assertTrue(any("Broken failed" in e["message"] for e in status["events"]))
         self.assertTrue(status["model_loaded"])
@@ -512,7 +512,7 @@ class ServiceTest(Service):
         empty = self.call("/api/v1/capabilities")
         self.assertEqual((empty["service"], empty["api"]), ("siansa-beats", 1))
         self.assertEqual(empty["features"]["beat_grids"]["songs"], 0)
-        self.assertTrue(empty["features"]["similar"]["available"])  # AUDIOMUSE_URL is set
+        self.assertFalse(empty["features"]["similar"]["available"])  # no song's sound is here yet
         self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
         caps = self.call("/api/v1/capabilities")
@@ -558,9 +558,8 @@ class ServiceTest(Service):
         self.assertIn("nope", row["sound"]["error"])
         status = self.call("/api/status")
         self.assertEqual(status["connections"], {
-            "navidrome": True, "audiomuse": True, "audiomuse_url": self.fake.url, "audiomuse_token": True,
-            "api_key": False, "password": False, "secret_key": "data folder",
-            "left_in_container": ["NAVIDROME_PASSWORD", "AUDIOMUSE_TOKEN"]})
+            "navidrome": True, "api_key": False, "password": False, "secret_key": "data folder",
+            "left_in_container": ["NAVIDROME_PASSWORD", "AUDIOMUSE_URL", "AUDIOMUSE_TOKEN"]})
 
     def test_v1_genres_about_and_bad_blends(self):
         self.start(style=FakeStyle(os.path.join(self.tmp, "models"), on=True))
@@ -603,43 +602,15 @@ class ServiceTest(Service):
                      "/api/v1/songs/genres"):
             self.assertIn(path, spec["paths"])
 
-    def test_v1_similar_albums_and_artists_asked_of_audiomuse(self):
+    def test_v1_similar_albums_and_artists_need_the_songs_sound(self):
         self.start()
-        self.assertTrue(self.call("/api/v1/capabilities")["features"]["similar"]["available"])
+        self.assertFalse(self.call("/api/v1/capabilities")["features"]["similar"]["available"])
         albums = self.call("/api/v1/similar/albums?track_id=t140")
-        self.assertEqual((albums["source"], albums["similar"][0]["album"], albums["similar"][0]["track_id"]), ("audiomuse", "Deep", "t122"))
-        self.assertEqual(albums["similar"][0]["asked"], {"track_id": "t140"})
-        artists = self.call("/api/v1/similar/artists?artist=Ecsape&server=Home")
-        self.assertEqual(artists["similar"][0]["artist"], "House Test")
-        self.assertEqual(artists["similar"][0]["asked"], {"artist": "Ecsape", "server": "Home"})
-        for path, code in (("/api/v1/similar/albums", 400), ("/api/v1/similar/albums?artist=x", 400),
-                           ("/api/v1/similar/albums?track_id=nope", 502)):
+        self.assertEqual((albums["source"], albums["similar"]), ("beats", []))  # not known yet: empty, never an error
+        for path, code in (("/api/v1/similar/albums", 400), ("/api/v1/similar/albums?artist=x", 400)):
             with self.assertRaises(urllib.error.HTTPError) as caught:
                 self.call(path)
             self.assertEqual(caught.exception.code, code, path)
-
-    def test_loudness_already_measured_by_the_plugin_is_taken_not_measured_again(self):
-        Worker.MEASURE_IDLE_SECONDS = 0.5
-        self.addCleanup(setattr, Worker, "MEASURE_IDLE_SECONDS", 60.0)
-        self.start()
-        for song in self.fake.songs:  # the plugin measured t122 (the fake AudioMuse-AI hands its "plugin" profile on)
-            if song["id"] == "t122":
-                song["plugin"] = {"ref_lufs": -7.5, "start_ramp": "xAAA", "end_ramp": "xAAA", "duration_ms": 50000,
-                                  "key": "F#", "scale": "major"}
-        self.call("/api/libraries", "POST", {"ids": ["1"]})
-        self.wait_done()
-        with self.app.store.lock, self.app.store.db:  # as 0.19 left them: beats, no loudness
-            self.app.store.db.execute("DELETE FROM measures")
-        measured = []
-        self.app.worker.sound = lambda path, samples, rate: measured.append(samples.song_id) or fake_sound(path, samples, rate)
-        end = time.time() + 20
-        while time.time() < end and self.app.store.measure_counts(1)["waiting"]:
-            time.sleep(0.2)
-        p = self.call("/api/v1/profiles?ids=t122")["profiles"][0]
-        self.assertEqual((p["ref_lufs"], p["key"], p["scale"]), (-7.5, "F#", "major"))
-        self.assertNotIn("t122", measured)  # taken from the plugin, not downloaded again
-        self.assertIn("t140", measured)  # the plugin's t140 has no loudness: measured here
-        self.assertIn("taken from AudioMuse-AI", " ".join(e["message"] for e in self.app.store.events()))
 
     def test_an_api_key_for_the_app(self):
         self.start(password="s3cret", api_key="k3y")
@@ -950,9 +921,9 @@ class ServiceTest(Service):
         report = json.loads(body)
         self.assertEqual(report["versions"]["siansa_beats"], __version__)
         self.assertEqual([(s["id"], s["signed_in"]) for s in report["setup"]["servers"]], [("main", True)])
-        self.assertEqual(report["setup"]["secrets_left_in_container"], ["NAVIDROME_PASSWORD", "AUDIOMUSE_TOKEN", "BEATS_PASSWORD"])
+        self.assertEqual(report["setup"]["secrets_left_in_container"], ["NAVIDROME_PASSWORD", "BEATS_PASSWORD", "AUDIOMUSE_URL", "AUDIOMUSE_TOKEN"])
         self.assertEqual(report["setup"]["page_password"], "set")
-        self.assertEqual(report["setup"]["audiomuse_token"], "set")
+        self.assertNotIn("audiomuse_token", report["setup"])
         self.assertNotIn(f'"{TOKEN}"', body.decode())
         self.assertIn("beats-model", report["threads"])
         self.assertEqual(report["status"]["counts"]["failed"], 1)
@@ -996,16 +967,78 @@ class ServiceTest(Service):
     def test_a_password_guards_everything_but_health(self):
         self.start(password="s3cret")
         self.assertEqual(self.call("/api/health", password="")["status"], "ok")
-        for path in ("/", "/api/status", "/api/songs", "/api/audio/t140", "/api/export.csv"):
+        for path in ("/api/status", "/api/songs", "/api/audio/t140", "/api/export.csv"):
             with self.assertRaises(urllib.error.HTTPError) as e:
                 self.call(path, password="")
             self.assertEqual(e.exception.code, 401, path)
-            self.assertIn("Basic", e.exception.headers["WWW-Authenticate"])
+            self.assertIsNone(e.exception.headers["WWW-Authenticate"])  # no browser's own password box (0.43)
         with self.assertRaises(urllib.error.HTTPError):
             self.call("/api/status", password="wrong")
         self.assertIn("counts", self.call("/api/status"))
         _, page = self.call("/", raw=True)
         self.assertIn(b"<title>Siansa Beats</title>", page)
+
+    def test_a_browser_signs_in_on_a_page_of_its_own(self):
+        """0.43 (the owner, 13 Nov): with a password set, opening the page gives the sign-in page; the right password
+        gives a session in a cookie scripts can't read; signing out, a changed password and the reset from Docker end
+        it; a few wrong tries and the address must wait."""
+        from beats import reset
+        from beats import server as server_module
+
+        self.start(password="correct horse")
+        r, page = self.call("/", password="", raw=True)
+        self.assertEqual(r.status, 200)
+        self.assertIn(b"Sign in", page)
+        self.assertNotIn(b"api/status", page)  # nothing of the page itself
+        self.assertNotIn(b"correct horse", page)
+
+        def signin(password):
+            request = urllib.request.Request(self.base + "/api/signin", method="POST",
+                                             data=json.dumps({"password": password}).encode())
+            return urllib.request.urlopen(request, timeout=10)
+
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            signin("wrong")
+        self.assertEqual((e.exception.code, e.exception.headers["Set-Cookie"]), (401, None))
+        cookie = signin("correct horse").headers["Set-Cookie"]
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=Strict", cookie)
+        token = cookie.split(";")[0]
+        self.assertTrue(token.startswith(server_module.SESSION_COOKIE + "="))
+        self.assertIn("counts", self.call("/api/status", password="", headers={"Cookie": token}))
+        self.assertIn(b"<title>Siansa Beats</title>", self.call("/", password="", headers={"Cookie": token}, raw=True)[1])
+        self.assertNotIn(token.split("=", 1)[1], json.dumps(self.app.store.setting("sessions")))  # only its hash is kept
+        # Signing out ends it, and the browser forgets the cookie.
+        out, _ = self.call("/api/signout", "POST", {}, password="", headers={"Cookie": token}, raw=True)
+        self.assertIn("Max-Age=0", out.headers["Set-Cookie"])
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/status", password="", headers={"Cookie": token})
+        self.assertEqual(e.exception.code, 401)
+        # A changed password signs every other browser out; the one that changed it gets a new session.
+        other = signin("correct horse").headers["Set-Cookie"].split(";")[0]
+        mine = signin("correct horse").headers["Set-Cookie"].split(";")[0]
+        changed, _ = self.call("/api/access/password", "POST", {"password": "a newer password"}, password="",
+                               headers={"Cookie": mine}, raw=True)
+        fresh = changed.headers["Set-Cookie"].split(";")[0]
+        self.assertIn("counts", self.call("/api/status", password="", headers={"Cookie": fresh}))
+        for old in (other, mine):
+            with self.assertRaises(urllib.error.HTTPError):
+                self.call("/api/status", password="", headers={"Cookie": old})
+        # The reset from Docker: the password and every session go; the page is open.
+        reset.reset(os.path.join(self.tmp, "data"))
+        self.assertIsNone(self.app.store.setting("sessions"))
+        self.assertIn("counts", self.call("/api/status", password=""))
+        # Wrong tries: after a few, that address waits.
+        self.call("/api/access/password", "POST", {"password": "third password"}, password="")
+        codes = []
+        for _ in range(server_module.SIGN_IN_TRIES + 1):
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                signin("nope")
+            codes.append(e.exception.code)
+        self.assertEqual(codes, [401] * server_module.SIGN_IN_TRIES + [429])
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            signin("third password")  # even the right one waits now
+        self.assertEqual(e.exception.code, 429)
 
     def test_chosen_libraries(self):
         for song in self.fake.songs:

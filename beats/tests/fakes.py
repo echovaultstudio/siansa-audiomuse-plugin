@@ -1,9 +1,8 @@
-"""Stand-ins for Navidrome and the Siansa plugin on AudioMuse-AI, for the tests and the end-to-end check.
+"""Stand-ins for the music servers, for the tests and the end-to-end check.
 
 ``FakeServer(folder)`` serves the songs listed in ``folder/catalog.json`` (made by make_test_songs.py) as a Navidrome
-with two libraries, "Music" (every song, unless a song's ``library`` says "2") and "Compilations", and the plugin's
-profiles from each song's ``plugin`` entry. It checks the login
-(user ``test``, password ``test``; AudioMuse-AI token ``token``) the way the real ones do.
+with two libraries, "Music" (every song, unless a song's ``library`` says "2") and "Compilations". It checks the login
+(user ``test``, password ``test``) the way the real one does.
 
 ``FakeServer`` also answers Navidrome's own API (``/auth/login``, ``/api/song``) with where each file really is
 (``/music/<artist>/<album>/<file>``), while its Subsonic ``path`` is made up from the tags, as Navidrome's is; a
@@ -58,11 +57,6 @@ class FakeServer:
         self.requests = []
         self.search_all = True  # whether search3 finds every song for an empty query (else: album by album)
         self.native = True  # whether Navidrome's own API answers (else only Subsonic's made-up paths)
-        # AudioMuse-AI's export for apps (/api/sync): {song id: its track, as AudioMuse-AI gives it}; None: it has none.
-        self.sync = None
-        # AudioMuse-AI's music servers (/api/servers), each with the song ids its user sees; None: it has no list.
-        # [{"server_id", "name", "server_type", "is_default", "sees": {ids}}]
-        self.am_servers = None
         self.played = {}  # song id -> plays, for Navidrome's own API's play counts
         # Pictures (0.30): the cover ids ("mf-<song>") and artist ids ("ar-artist-of-<song>") that have one; any other
         # is answered with the stand-in, as Navidrome does: an ordinary picture marked "don't keep", with no version.
@@ -98,40 +92,6 @@ class FakeServer:
                 url = urllib.parse.urlparse(self.path)
                 q = {k: v[0] for k, v in urllib.parse.parse_qs(url.query, keep_blank_values=True).items()}
                 fake.requests.append((url.path, q))
-                if url.path.startswith("/plugins/siansa_analysis/"):
-                    if len(self.requestline) > 4094:  # as AudioMuse-AI's web server (gunicorn's limit_request_line)
-                        return self.reply(400, {"error": "Request Line is too large"})
-                    return self.plugin(url.path, q)
-                if url.path == "/api/sync":
-                    if self.headers.get("Authorization") != f"Bearer {TOKEN}":
-                        return self.reply(401, {"error": "login needed"})
-                    if fake.sync is None:
-                        return self.reply(404, {"error": "not found"})
-                    if len(self.requestline) > 4094:
-                        return self.reply(400, {"error": "Request Line is too large"})
-                    tracks = [fake.sync[i] for i in sorted(fake.sync)]
-                    if fake.am_servers is not None:  # only what the asked server's user sees; its default's without one
-                        asked = [m for m in fake.am_servers if q.get("server") in (m["server_id"], m["name"])] \
-                            if q.get("server") else [m for m in fake.am_servers if m["is_default"]]
-                        if not asked:
-                            return self.reply(400, {"error": "Invalid server selection."})
-                        tracks = [t for t in tracks if t["id"] in asked[0]["sees"]]
-                    if "ids" in q:
-                        tracks = [t for t in tracks if t["id"] in q["ids"].split(",")]
-                    total, limit, page = len(tracks), int(q.get("limit", 500)), int(q.get("page", 1))
-                    tracks = tracks[(page - 1) * limit:page * limit]
-                    if q.get("fields") == "index":
-                        tracks = [{"id": t["id"], "fp": t["fp"]} for t in tracks]
-                    more = page * limit < total and "ids" not in q
-                    return self.reply(200, {"tracks": tracks, "total_tracks": total, "has_more": more,
-                                            "next_page": page + 1 if more else None, "provider_type": "navidrome"})
-                if url.path == "/api/servers":
-                    if self.headers.get("Authorization") != f"Bearer {TOKEN}":
-                        return self.reply(401, {"error": "login needed"})
-                    if fake.am_servers is None:
-                        return self.reply(404, {"error": "not found"})
-                    return self.reply(200, {"servers": [{k: v for k, v in m.items() if k != "sees"} | {"music_libraries": ""}
-                                                        for m in fake.am_servers], "multi_server_enabled": True})
                 if url.path == "/api/song" and fake.native:
                     if self.headers.get("X-ND-Authorization") not in [f"Bearer nd-{u}" for u in USERS]:
                         return self.reply(401, {"error": "login needed"})
@@ -219,29 +179,6 @@ class FakeServer:
                     if USERS.get(body.get("username")) != body.get("password"):
                         return self.reply(401, {"error": "Invalid username or password"})
                     return self.reply(200, {"token": f"nd-{body['username']}", "name": body["username"]})
-                return self.reply(404, {"error": "not found"})
-
-            def plugin(self, path, q):
-                if self.headers.get("Authorization") != f"Bearer {TOKEN}":
-                    return self.reply(401, {"error": "login needed"})
-                if path.endswith("/api/health"):
-                    return self.reply(200, {"plugin": "siansa_analysis", "plugin_version": "0.5.7-fake", "status": "ok"})
-                if path.endswith("/api/profiles") and "/siansa_beats/" in path:
-                    return self.reply(404, {"error": "not installed"})
-                if path.endswith("/api/profiles"):
-                    ids = [i for i in q.get("ids", "").split(",") if i]
-                    profiles = [{"track_id": s["id"], **s["plugin"]} for s in fake.songs
-                                if s["id"] in ids and s.get("plugin")]
-                    return self.reply(200, {"schema_version": 1, "profiles": profiles,
-                                            "pending": [i for i in ids if i not in {p["track_id"] for p in profiles}]})
-                # Only the Siansa Analysis plugin is installed here: Siansa Beats asks the dev plugin first.
-                if "/siansa_analysis/" in path and "/api/similar/" in path:
-                    if q.get("track_id") == "nope":
-                        return self.reply(404, {"error": "unknown song"})
-                    kind = path.rsplit("/", 1)[1]
-                    key = "album" if kind == "albums" else "artist"
-                    return self.reply(200, {"similar": [{key: "Deep", "artist": "House Test", "track_id": "t122",
-                                                         "score": 0.91, "asked": q}]})
                 return self.reply(404, {"error": "not found"})
 
         self.server = ThreadingHTTPServer(("127.0.0.1" if port == 0 else "0.0.0.0", port), Handler)
@@ -410,6 +347,6 @@ if __name__ == "__main__":
         media = FakeMediaServer(args[0], jellyfin=flag == "--jellyfin", port=port).start()
         print(f"Fake {'Jellyfin' if media.jellyfin else 'Emby'} on port {port}, {len(media.songs)} songs", flush=True)
     server = FakeServer(args[0], int(args[1]) if len(args) > 1 else 4533)
-    print(f"Fake Navidrome and AudioMuse-AI on port {server.server.server_address[1]}, {len(server.songs)} songs",
+    print(f"Fake Navidrome on port {server.server.server_address[1]}, {len(server.songs)} songs",
           flush=True)
     server.server.serve_forever()

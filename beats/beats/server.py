@@ -1,7 +1,7 @@
 """Siansa Beats: Beat This! for the songs of the chosen libraries of your music servers (Navidrome, Emby, Jellyfin),
 with a page to watch it, its log and a debug report.
 
-Run with ``python -m beats.server``. The connections are made on the page (Setup): the music servers, AudioMuse-AI,
+Run with ``python -m beats.server``. The connections are made on the page (Setup): the music servers,
 the page's password and the app's key; none of their secrets is kept as plain text or in the container's YAML
 (:mod:`beats.vault`). What's left for the container's environment (see the README):
 
@@ -15,7 +15,7 @@ the page's password and the app's key; none of their secrets is kept as plain te
     BEATS_RESET_ACCESS (yes)                             takes the page's password and the app's key away at the start:
                                                          the way back in when the password is forgotten
 
-    NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASSWORD, AUDIOMUSE_URL, AUDIOMUSE_TOKEN, BEATS_PASSWORD, BEATS_API_KEY
+    NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASSWORD, BEATS_PASSWORD, BEATS_API_KEY
         how it was set up until 0.24: each is taken over once (hashed or encrypted) and not read again, so they can go
         from the YAML; the page says which are still there
 
@@ -32,9 +32,8 @@ page (JSON):
     POST /api/servers/<id>/default    makes it the default: read first, and meant when a request names no server
     DELETE /api/servers/<id>          takes it away, with the songs only it had
     GET  /api/libraries               the server's libraries, each with "on" (analysed) and its songs here and done
-    POST /api/audiomuse               {"url", "token"}: connects AudioMuse-AI once its Siansa plugin answers (an empty
-                                      token keeps the one there is); /api/audiomuse/test asks without keeping
-    DELETE /api/audiomuse             disconnects it
+    POST /api/signin                  {"password"}: signs a browser in (a session cookie, 30 days); open to all
+    POST /api/signout                 signs it out
     POST /api/access/password         {"password"}: sets the page's password (8 characters or more); only its hash is kept
     DELETE /api/access/password       takes it away
     POST /api/access/key              makes a new key for the app: {"key"}, said this once (its hash is kept)
@@ -79,6 +78,7 @@ id or name: the default server's without it.
 
 import base64
 import csv
+import hashlib
 import hmac
 import io
 import json
@@ -86,6 +86,7 @@ import os
 
 import numpy as np
 import re
+import secrets
 import threading
 import time
 import urllib.error
@@ -97,7 +98,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import gzip
 
 from . import __version__, api_v1, grid, loudness
-from .audiomuse import AudioMuse, AudioMuseError
 from .checks import Checks
 from .clean import Cleaner
 from .servers import KINDS, MAIN, Servers, folders_key
@@ -115,6 +115,10 @@ _log = log.get("server")
 SURE = 0.4
 
 PAGE = os.path.join(os.path.dirname(__file__), "page.html")
+SIGN_IN = os.path.join(os.path.dirname(__file__), "signin.html")  # shown instead of the page until signed in (0.43)
+SESSION_COOKIE = "beats_session"
+SESSION_SECONDS = 30 * 24 * 3600  # how long a browser stays signed in
+SIGN_IN_TRIES, SIGN_IN_WITHIN = 5, 60.0  # wrong passwords from one address before it must wait, and for how long
 PASSTHROUGH = ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges")
 
 
@@ -139,15 +143,13 @@ class Config:
         self.secret_key = env.get("BEATS_SECRET_KEY", "")
         self.reset_access = env.get("BEATS_RESET_ACCESS", "").strip().lower() in ("1", "true", "yes", "on")
         # The names of the secrets the container still has, for the page to say they can go from the YAML.
-        self.secrets_left = [k for k in ("NAVIDROME_PASSWORD", "AUDIOMUSE_TOKEN", "BEATS_PASSWORD", "BEATS_API_KEY")
-                             if env.get(k)]
+        # AUDIOMUSE_URL and AUDIOMUSE_TOKEN among them: nothing reads them since 0.43.
+        self.secrets_left = [k for k in ("NAVIDROME_PASSWORD", "BEATS_PASSWORD", "BEATS_API_KEY", "AUDIOMUSE_URL",
+                                         "AUDIOMUSE_TOKEN") if env.get(k)]
         self.data_dir = env.get("DATA_DIR", "/data")
         self.models_dir = env.get("MODELS_DIR", "/models")
         self.port = int(env.get("PORT", "8090"))
         self.log_level = env.get("LOG_LEVEL", "info")
-        # AudioMuse-AI, for similar albums and artists (0.20.0; until 0.14.0 it was for comparing with the plugin).
-        self.audiomuse_url = env.get("AUDIOMUSE_URL", "")
-        self.audiomuse_token = env.get("AUDIOMUSE_TOKEN", "")
 
 
 class Kept:
@@ -220,8 +222,6 @@ class App:
         self.vault = Vault(config.data_dir, config.secret_key)
         self.servers = Servers(self.store, config, self.vault)
         self._take_from_container()
-        saved = self.store.setting("audiomuse") or {}
-        self.audiomuse = AudioMuse(saved.get("url"), self.vault.open(saved.get("token")))
         self.tracker = tracker or analyser.BeatThis(config.model, config.device, config.models_dir, config.threads,
                                                     config.float16)
         # The style model (0.39): the one chosen in Setup, Discogs-EffNet unless MAEST was picked (and is in the image).
@@ -237,7 +237,7 @@ class App:
 
         self.words = words if words is not None else Words(config.models_dir)
         self._families = None  # beats.families.Families, made when first asked
-        # How a song sounds, heard here with AudioMuse-AI's models (0.27): new songs need no AudioMuse-AI.
+        # How a song sounds, heard here (0.27) with the models AudioMuse-AI publishes (credited in the README).
         self.hearer = hearer if hearer is not None else Hearer(config.models_dir, self.words, config.threads)
         # How energetic each song is (0.35, beats.drive): from the sound kept for it; nothing without the model.
         from .drive import Arousal
@@ -253,14 +253,10 @@ class App:
         from . import about as about_module
 
         self.about = about_module.Keeper(self.store, self.about_names)
-        # What the Siansa plugin already measured needn't be downloaded again (asked of whichever AudioMuse-AI is set).
-        self.worker.importer = lambda ids: self.audiomuse.profiles(ids)
-        # What songs sound like (0.25): taken over from AudioMuse-AI's export, and answered from here.
-        from .pull import Puller
+        # What songs sound like (0.25), answered from here.
         from .sound import Sound
 
         self.sound = Sound(self.store)
-        self.puller = Puller(self.store, lambda: self.audiomuse)
         # What was listened to (0.29): from the app as it happens, from exports, and on to Last.fm.
         from .listens import Listens
 
@@ -273,21 +269,14 @@ class App:
         self.art = Art(self.store, self.servers, config.data_dir)
 
 
-    PULL_EVERY = 6 * 3600  # AudioMuse-AI's new songs are taken over this often
-
-    def pull_now_and_then(self):
-        """Pulls from AudioMuse-AI a minute after the start and every :data:`PULL_EVERY` after (while it's connected)."""
+    def mind_memory_every_minute(self):
+        """Every minute from the start: the models nobody has needed for a while are let go (:meth:`mind_memory`)."""
         def loop():
-            time.sleep(60)
             while True:
-                if self.audiomuse.configured:
-                    self.puller.start()
-                # The text model goes when nobody has searched for a while (looked at every minute).
-                for _ in range(self.PULL_EVERY // 60):
-                    time.sleep(60)
-                    self.mind_memory()
+                time.sleep(60)
+                self.mind_memory()
 
-        threading.Thread(target=loop, name="sound-pull-timer", daemon=True).start()
+        threading.Thread(target=loop, name="memory-minder", daemon=True).start()
 
     def mind_memory(self):
         """Every minute: the text model goes when nobody has searched for a while, the models that analyse when
@@ -298,7 +287,7 @@ class App:
             if self.words.unload_if_idle():
                 memory.trim()
             self.worker.let_models_go_if_idle()
-            if self.arousal.catch_up():  # songs heard or pulled since the last minute
+            if self.arousal.catch_up():  # songs heard since the last minute
                 memory.trim()
         except Exception as e:  # never the timer's end
             _log.debug("Minding the memory failed: %s", e)
@@ -362,13 +351,13 @@ class App:
         return found
 
     def sound_status(self, server=None):
-        """How much of ``server``'s music has its sound here, and how the pull from AudioMuse-AI is going."""
+        """How much of ``server``'s music has its sound here."""
         # Kept ready (0.35.1): counting 45,000 sounds reads each one's row, vectors and all, and the page asks every
         # few seconds. Worked out again once anything was written, and at most a minute old.
         server = server or self.servers.default_id
         counts = self.kept("sound-counts", server, lambda only: self.store.sound_counts(only), 60, lambda: self.store.writes).get()
         sources = self.kept("sound-sources", server, lambda only: self.store.sound_sources(only), 60, lambda: self.store.writes).get()
-        return {**counts, "pull": dict(self.puller.state), "audiomuse": self.audiomuse.configured,
+        return {**counts,
                 "text_model": {"available": self.words.available, "steering": self.words.steers,
                                "loaded": self.words.loaded, "load_seconds": self.words.load_seconds},
                 # Heard here (0.27): whether this image can, where each song's sound came from, what's being heard.
@@ -378,9 +367,10 @@ class App:
     # ---- connections and access, set on the page (0.24.0) ----
 
     def _take_from_container(self):
-        """Once: what the container's settings said until 0.24 (``BEATS_PASSWORD``, ``BEATS_API_KEY``,
-        ``AUDIOMUSE_URL``, ``AUDIOMUSE_TOKEN``) goes into the data folder, hashed or encrypted, and isn't read again.
-        ``BEATS_RESET_ACCESS`` takes the page's password and the app's key away: the way back in."""
+        """Once: what the container's settings said until 0.24 (``BEATS_PASSWORD``, ``BEATS_API_KEY``) goes into the
+        data folder, hashed, and isn't read again. ``BEATS_RESET_ACCESS`` takes the page's password and the app's key
+        away: the way back in. The connection to AudioMuse-AI that was kept until 0.43 is forgotten, its token with
+        it (the owner, 13 Nov: Siansa Beats does all of that work itself)."""
         c, store = self.config, self.store
         if c.reset_access and store.setting("access"):
             store.set_setting("access", {})
@@ -394,10 +384,11 @@ class App:
             access["api_key"] = Vault.hash_key(c.api_key)
         if access != (store.setting("access") or {}):
             store.set_setting("access", access)
-        if c.audiomuse_url and "audiomuse" not in taken:
-            store.set_setting("audiomuse", {"url": c.audiomuse_url.rstrip("/"), "token": self.vault.seal(c.audiomuse_token)})
-        now = sorted(set(taken) | {name for name, value in (("password", c.password), ("api_key", c.api_key),
-                                                              ("audiomuse", c.audiomuse_url)) if value})
+        if store.setting("audiomuse"):
+            store.set_setting("audiomuse", None)
+            store.event("The connection to AudioMuse-AI was removed: Siansa Beats hears every song itself. What was "
+                        "taken over before stays.")
+        now = sorted(set(taken) | {name for name, value in (("password", c.password), ("api_key", c.api_key)) if value})
         if now != taken:
             store.set_setting("container_taken_access", now)
 
@@ -405,8 +396,50 @@ class App:
         """The hashes the page's password and the app's key are checked against: ``{"password", "api_key"}``."""
         return self.store.setting("access") or {}
 
+    # ---- signing in on the page (0.43): a session kept in a cookie, instead of the browser's own password box ----
+
+    @staticmethod
+    def _session_mark(token):
+        return hashlib.sha256(str(token).encode()).hexdigest()
+
+    def new_session(self):
+        """A new session: its token, for the browser's cookie. Only its hash is kept, with when it ends."""
+        token = secrets.token_urlsafe(32)
+        now = time.time()
+        sessions = {k: v for k, v in (self.store.setting("sessions") or {}).items() if v > now}
+        sessions[self._session_mark(token)] = now + SESSION_SECONDS
+        self.store.set_setting("sessions", sessions)
+        return token
+
+    def session_ok(self, token):
+        ends = (self.store.setting("sessions") or {}).get(self._session_mark(token)) if token else None
+        return bool(ends and ends > time.time())
+
+    def end_session(self, token=None):
+        """Signs one browser out (``token``), or every one."""
+        sessions = dict(self.store.setting("sessions") or {}) if token else {}
+        sessions.pop(self._session_mark(token), None)
+        self.store.set_setting("sessions", sessions)
+
+    def sign_in(self, password, address):
+        """A session's token when ``password`` is the page's; None when it isn't. Too many wrong ones from one
+        address in a minute and it must wait (``PermissionError``)."""
+        now = time.time()
+        with self._kept_lock:
+            tries = self.__dict__.setdefault("_sign_in_tries", {})
+            recent = [t for t in tries.get(address, []) if now - t < SIGN_IN_WITHIN]
+            if len(recent) >= SIGN_IN_TRIES:
+                raise PermissionError("Too many tries: wait a minute")
+            if self.vault.check_password(str(password or ""), self.access().get("password")):
+                tries.pop(address, None)
+                return self.new_session()
+            tries[address] = recent + [now]
+        _log.warning("A wrong password was tried on the sign-in page (from %s)", address)
+        return None
+
     def set_password(self, password):
-        """Sets (or with "" takes away) the page's password; only its salted hash is kept."""
+        """Sets (or with "" takes away) the page's password; only its salted hash is kept. Every browser signed in
+        is signed out (the one that set it is given a new session by the request)."""
         password = str(password or "")
         if password and len(password) < 8:
             raise ValueError("At least 8 characters")
@@ -417,6 +450,7 @@ class App:
             # The app's key goes with it: a key alone would shut the page to browsers, which can only say a password.
             access = {}
         self.store.set_setting("access", access)
+        self.end_session()
         self.store.event("The page's password was " + ("set" if password else "taken away (and the app's key with it)"))
 
     def new_api_key(self):
@@ -432,36 +466,6 @@ class App:
     def remove_api_key(self):
         self.store.set_setting("access", {k: v for k, v in self.access().items() if k != "api_key"})
         self.store.event("The app's key was taken away")
-
-    def set_audiomuse(self, url, token=None, check_only=False):
-        """Connects AudioMuse-AI once it answers and takes the token (an empty token keeps the one there is for the
-        same address): the plugin that answered. With no address, takes the connection away."""
-        url = str(url or "").strip().rstrip("/")
-        saved = self.store.setting("audiomuse") or {}
-        if not url:
-            self.store.set_setting("audiomuse", None)
-            self.audiomuse = AudioMuse("", "")
-            self.store.event("AudioMuse-AI was disconnected")
-            return None
-        if not re.match(r"^https?://[^\s/]+", url):
-            raise ValueError("The address starts with http:// or https://")
-        token = str(token or "") or (self.vault.open(saved.get("token")) if saved.get("url") == url else "")
-        client = AudioMuse(url, token)
-        try:
-            plugin = client.check()
-        except AudioMuseError as e:
-            # No Siansa plugin there: its export for apps is all that's needed since 0.25. A refused token is still said.
-            if "plugin" not in str(e):
-                raise
-            client.sync_check()
-            plugin = "export"
-        if not check_only:
-            self.store.set_setting("audiomuse", {"url": url, "token": self.vault.seal(token)})
-            self.audiomuse = client
-            self.store.event(f"AudioMuse-AI connected ({plugin} plugin)" if plugin != "export"
-                             else "AudioMuse-AI connected (its export for apps; no Siansa plugin there)")
-            self.puller.start()  # what it has analysed is taken over straight away
-        return plugin
 
     @property
     def navidrome(self):
@@ -644,7 +648,6 @@ class App:
             "sources": {"beats": sum(1 for r in rows if (r["source"] or "beats") == "beats"),
                         "plugin": sum(1 for r in rows if r["source"] == "plugin")},
             "with_key": sum(1 for r in rows if r["key"]),
-            "audiomuse": self.audiomuse.configured,
             "lufs": {**bins(lufs, -30, 0, 1), "median": lufs_sorted[len(lufs_sorted) // 2] if lufs_sorted else None,
                      "quietest": lufs_sorted[0] if lufs_sorted else None, "loudest": lufs_sorted[-1] if lufs_sorted else None},
             "intro_seconds": bins(intros, 0, 30, 2), "outro_seconds": bins(outros, 0, 30, 2), "fade_db": self.FADE_DB,
@@ -690,8 +693,7 @@ class App:
             "next": preparing,
             "bad_blends": self.store.bad_blend_count(),
             "styles": styles,
-            "connections": {"navidrome": bool(shown), "audiomuse": self.audiomuse.configured,
-                            "audiomuse_url": self.audiomuse.url or None, "audiomuse_token": bool(self.audiomuse.token),
+            "connections": {"navidrome": bool(shown),
                             "api_key": bool(self.access().get("api_key")), "password": bool(self.access().get("password")),
                             # Secrets the container still has though they're no longer read: they can go from the YAML.
                             "left_in_container": self.config.secrets_left,
@@ -744,7 +746,7 @@ class App:
             entry = {"song": {k: song.get(k) for k in ("title", "artist", "album")}}
             clap = rows.get(song_id)
             if clap is None:
-                entry["error"] = "no CLAP vector yet: not heard here or by AudioMuse-AI"
+                entry["error"] = "no CLAP vector yet: not heard here"
             else:
                 scores = self._families.scores(np.frombuffer(clap, dtype=np.float32))
                 had = [(l, w) for src in ("sound", "sound-doubted") for l, w in styles.get(song_id, {}).get(src, [])]
@@ -974,7 +976,6 @@ class App:
                  "servers": self.server_list(), "default_server": self.servers.default_id,
                  "device": c.device, "float16": c.float16, "threads": c.threads,
                  "page_password": "set" if c.password else "not set", "api_key": "set" if c.api_key else "not set",
-                 "audiomuse_url": self.audiomuse.url or None, "audiomuse_token": "set" if self.audiomuse.token else "not set",
                  "page_password": "set" if self.access().get("password") else "not set",
                  "app_key": "set" if self.access().get("api_key") else "not set",
                  "secrets_left_in_container": c.secrets_left, "data_dir": c.data_dir,
@@ -1065,6 +1066,8 @@ class Handler(BaseHTTPRequestHandler):
         access, vault = self.app.access(), self.app.vault
         password, api_key = access.get("password"), access.get("api_key")  # hashes: the secrets themselves aren't kept
         if not password and not api_key:
+            return True
+        if self.app.session_ok(self._session()):
             return True
         header = self.headers.get("Authorization", "")
         if header.startswith("Bearer "):
@@ -1170,11 +1173,30 @@ class Handler(BaseHTTPRequestHandler):
     def _query(self):
         return urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
 
+    def _session(self):
+        """The session token in this request's cookie, or None."""
+        for part in self.headers.get("Cookie", "").split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == SESSION_COOKIE:
+                return value
+        return None
+
+    def _cookie(self, token):
+        """The header that keeps (or with None forgets) the session in the browser: never read by scripts, never sent
+        to another site."""
+        return {"Set-Cookie": f"{SESSION_COOKIE}={token or ''}; Path=/; HttpOnly; SameSite=Strict; "
+                              f"Max-Age={SESSION_SECONDS if token else 0}"}
+
     def _guard(self):
         if self._authorised():
             return True
-        self._send(HTTPStatus.UNAUTHORIZED, {"error": "password or API key needed"},
-                   headers={"WWW-Authenticate": 'Basic realm="Siansa Beats", charset="UTF-8"'})
+        path = self.path.split("?", 1)[0]
+        if self.command in ("GET", "HEAD") and not path.startswith("/api/"):
+            # A browser opening the page: the sign-in page (0.43), not the browser's own password box.
+            with open(SIGN_IN, "rb") as f:
+                self._send(HTTPStatus.OK, f.read(), "text/html; charset=utf-8")
+            return False
+        self._send(HTTPStatus.UNAUTHORIZED, {"error": "password or API key needed"})
         return False
 
     # ---- routes ----
@@ -1198,7 +1220,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/servers":
                 return self._json({"servers": app.server_list(), "default": app.servers.default_id,
                                    "kinds": [{"id": k, "name": v} for k, v in KINDS.items()]})
-            # Similar music is asked of AudioMuse-AI, whose own name for the server is passed on as it is.
+            # Similar music: the server is named as the app names it.
             server = app.servers.find((query.get("server") or [""])[0]) or app.servers.default_id \
                 if path.startswith("/api/v1/similar/") else self._server(query)
             if server is None:
@@ -1326,35 +1348,34 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.BAD_GATEWAY, str(e))
 
     def do_POST(self):
+        path = self.path.split("?", 1)[0]
+        if path == "/api/signin":  # open: it's how a browser gets in
+            if not self.app.access().get("password"):
+                return self._json({"signed_in": True})
+            try:
+                token = self.app.sign_in(self._body().get("password"), self.client_address[0])
+            except PermissionError as e:
+                return self._error(HTTPStatus.TOO_MANY_REQUESTS, str(e))
+            if not token:
+                return self._error(HTTPStatus.UNAUTHORIZED, "That's not the password")
+            return self._send(HTTPStatus.OK, {"signed_in": True}, headers=self._cookie(token))
+        if path == "/api/signout":
+            self.app.end_session(self._session() or "none")
+            return self._send(HTTPStatus.OK, {"signed_in": False}, headers=self._cookie(None))
         if not self._guard():
             return
-        path = self.path.split("?", 1)[0]
         if path == "/api/listens/import":  # a file, as it is: it can be far bigger than any other request
             return self._import_listens()
         app, body = self.app, self._body()
         try:
             if path.startswith("/api/servers"):
                 return self._servers_post(path, body)
-            if path in ("/api/audiomuse", "/api/audiomuse/test"):
-                from .audiomuse import AudioMuseError
-                try:
-                    plugin = app.set_audiomuse(body.get("url"), body.get("token"), check_only=path.endswith("/test"))
-                except ValueError as e:
-                    return self._error(HTTPStatus.BAD_REQUEST, str(e))
-                except AudioMuseError as e:
-                    return self._error(HTTPStatus.BAD_GATEWAY, str(e))
-                return self._json({"plugin": plugin, "url": app.audiomuse.url or None})
             if path == "/api/style/model":  # the style model to hear genres with (0.39): {"model": "effnet" | "maest"}
                 try:
                     doubted = app.choose_style_model(str(body.get("model") or ""))
                 except ValueError as e:
                     return self._error(HTTPStatus.BAD_REQUEST, str(e))
                 return self._json({"doubted": doubted, **app.style_models()})
-            if path == "/api/sound/pull":  # everything again with {"everything": true}
-                if not app.audiomuse.configured:
-                    return self._error(HTTPStatus.BAD_REQUEST, "Connect AudioMuse-AI first (Setup › AudioMuse-AI)")
-                started = app.puller.start(bool(body.get("everything")))
-                return self._json({"started": started, "pull": dict(app.puller.state)})
             if path == "/api/listens/lastfm":  # on to Last.fm, with the listener's own API account
                 from .listens import LastFmError
                 user = str(body.get("user") or "")
@@ -1383,7 +1404,9 @@ class Handler(BaseHTTPRequestHandler):
                     app.set_password(body.get("password"))
                 except ValueError as e:
                     return self._error(HTTPStatus.BAD_REQUEST, str(e))
-                return self._json({"password": bool(app.access().get("password"))})
+                # This browser stays signed in with the new password; every other one signs in again.
+                return self._send(HTTPStatus.OK, {"password": bool(app.access().get("password"))},
+                                  headers=self._cookie(app.new_session()))
             if path == "/api/access/key":  # said this once: only its hash is kept
                 try:
                     return self._json({"key": app.new_api_key()})
@@ -1502,9 +1525,6 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guard():
             return
         path = self.path.split("?", 1)[0]
-        if path == "/api/audiomuse":
-            self.app.set_audiomuse("")
-            return self._json({"url": None})
         if path == "/api/access/password":
             self.app.set_password("")
             return self._json({"password": False})
@@ -1628,7 +1648,7 @@ def main():
     _log.info("Log level %s (%s)", log.level(), "chosen on the page" if chosen else "LOG_LEVEL")
     app.worker.start()
     app.about.start()
-    app.pull_now_and_then()
+    app.mind_memory_every_minute()
     app.relay_now_and_then()
     app.store.event(f"Started: model {config.model}, device {config.device}"
                     f"{' (half precision on a GPU)' if config.float16 else ''}")

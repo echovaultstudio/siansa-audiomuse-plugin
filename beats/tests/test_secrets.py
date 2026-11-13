@@ -126,7 +126,7 @@ class SecretsTest(Service):
             for secret in (EMBY_PASSWORD, SECOND_PASSWORD, "page-pass-5531", "app-key-from-yaml-8842", key, "tok-1", "enc:", "scrypt$"):
                 self.assertNotIn(secret, data.decode(), f"{secret} in {path}")
         left = self.call("/api/status")["connections"]["left_in_container"]
-        self.assertEqual(left, ["NAVIDROME_PASSWORD", "AUDIOMUSE_TOKEN", "BEATS_PASSWORD", "BEATS_API_KEY"])
+        self.assertEqual(left, ["NAVIDROME_PASSWORD", "BEATS_PASSWORD", "BEATS_API_KEY", "AUDIOMUSE_URL", "AUDIOMUSE_TOKEN"])
 
         # The container's settings gone from the YAML: everything still works from the data folder.
         self.restart()
@@ -140,7 +140,7 @@ class SecretsTest(Service):
         logins = emby.logins
         self.assertEqual(self.call("/api/libraries?server=emby")[0]["id"], "lib1")  # Emby the kept token
         self.assertEqual(emby.logins, logins)  # no new sign-in: there's no password to sign in with
-        self.assertEqual(self.call("/api/v1/similar/artists?artist=Ecsape")["source"], "audiomuse")
+        self.assertEqual(self.call("/api/v1/similar/artists?artist=Ecsape")["source"], "beats")
         for bearer in (key, "page-pass-5531"):
             self.assertEqual(self.call("/api/v1/capabilities", password="", headers={"Authorization": f"Bearer {bearer}"})["api"], 1)
         # The key from the YAML stopped working when a new one was made.
@@ -152,15 +152,14 @@ class SecretsTest(Service):
         self.call("/api/access/password", "POST", {"password": "a newer password"})
         self.password = "a newer password"
         self.call("/api/servers/main", "DELETE")
-        self.call("/api/audiomuse", "DELETE")
         # The YAML still says what it said: none of it comes back.
         self.restart(NAVIDROME_URL=self.fake.url, NAVIDROME_USER=USER, NAVIDROME_PASSWORD=PASSWORD,
                      AUDIOMUSE_URL=self.fake.url, AUDIOMUSE_TOKEN=TOKEN, BEATS_PASSWORD="page-pass-5531")
         self.assertEqual(self.refused("/api/status", "GET", password="page-pass-5531")[0], 401)
         status = self.call("/api/status")
         self.assertEqual(status["servers"], [])
-        self.assertFalse(status["connections"]["audiomuse"])
-        self.assertEqual(status["connections"]["left_in_container"], ["NAVIDROME_PASSWORD", "AUDIOMUSE_TOKEN", "BEATS_PASSWORD"])
+        self.assertNotIn("audiomuse", status["connections"])  # 0.43: no such connection any more
+        self.assertEqual(status["connections"]["left_in_container"], ["NAVIDROME_PASSWORD", "BEATS_PASSWORD", "AUDIOMUSE_URL", "AUDIOMUSE_TOKEN"])
 
     def test_the_pages_password_and_the_apps_key(self):
         self.start()
@@ -203,27 +202,19 @@ class SecretsTest(Service):
         self.restart(BEATS_RESET_ACCESS="yes")
         self.assertFalse(self.call("/api/status")["connections"]["password"])
 
-    def test_audiomuse_is_connected_on_the_page(self):
+    def test_a_connection_to_audiomuse_kept_before_is_forgotten(self):
+        """0.43 (the owner, 13 Nov): Siansa Beats does that work itself. The address and the token kept by an earlier
+        version go from the data folder at the next start, said once in Activity; nothing asks for them again."""
         self.start()
-        self.call("/api/audiomuse", "DELETE")
-        self.assertFalse(self.call("/api/status")["connections"]["audiomuse"])
-        self.assertEqual(self.refused("/api/v1/similar/artists?artist=Ecsape", "GET")[0], 502)
-        self.assertEqual(self.refused("/api/audiomuse", body={"url": "nas:8000"}), (400, "The address starts with http:// or https://"))
-        code, why = self.refused("/api/audiomuse", body={"url": self.fake.url, "token": "not it"})
-        self.assertEqual((code, why), (502, "AudioMuse-AI didn't take the token"))
-        self.assertEqual(self.refused("/api/audiomuse", body={"url": self.fake.url})[1], "AudioMuse-AI wants a token: one of its API tokens")
-        self.assertEqual(self.refused("/api/audiomuse", body={"url": "http://127.0.0.1:1", "token": TOKEN})[0], 502)
-        self.assertFalse(self.call("/api/status")["connections"]["audiomuse"])  # nothing kept from the tries
-        self.assertEqual(self.call("/api/audiomuse/test", "POST", {"url": self.fake.url, "token": TOKEN})["plugin"], "siansa_analysis")
-        self.assertFalse(self.call("/api/status")["connections"]["audiomuse"])
-        self.assertEqual(self.call("/api/audiomuse", "POST", {"url": self.fake.url + "/", "token": TOKEN}),
-                         {"plugin": "siansa_analysis", "url": self.fake.url})
-        cn = self.call("/api/status")["connections"]
-        self.assertEqual((cn["audiomuse"], cn["audiomuse_url"], cn["audiomuse_token"]), (True, self.fake.url, True))
-        self.assertEqual(self.call("/api/v1/similar/artists?artist=Ecsape")["source"], "audiomuse")
-        # The same address again with no token: the kept one stays.
-        self.assertEqual(self.call("/api/audiomuse", "POST", {"url": self.fake.url})["plugin"], "siansa_analysis")
-        self.assertNotIn(TOKEN.encode() + b'"', self.on_disk().replace(b'"token"', b""))
+        self.app.store.set_setting("audiomuse", {"url": self.fake.url, "token": self.app.vault.seal(TOKEN)})
+        self.restart()
+        self.assertIsNone(self.app.store.setting("audiomuse"))
+        said = [e["message"] for e in self.app.store.events() if "AudioMuse-AI was removed" in e["message"]]
+        self.assertEqual(len(said), 1)
+        self.restart()
+        self.assertEqual(len([e for e in self.app.store.events() if "AudioMuse-AI was removed" in e["message"]]), 1)
+        for path in ("/api/audiomuse", "/api/audiomuse/test"):
+            self.assertEqual(self.refused(path, body={"url": self.fake.url, "token": TOKEN})[0], 404)
 
     def test_a_sign_in_the_server_stops_taking_is_made_again_with_the_password(self):
         self.start()
