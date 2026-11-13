@@ -8,6 +8,7 @@ the page's password and the app's key; none of their secrets is kept as plain te
     BEATS_MODEL (final0 | small0), BEATS_DEVICE (auto | cpu | cuda | cuda:N), BEATS_FLOAT16, BEATS_THREADS
     DATA_DIR (/data), MODELS_DIR (/models), PORT (8090)
     STYLE_THREADS (2)                                   the style model's CPU threads
+    STYLE_PRECISION (auto | fp16 | fp32)                the style model on a GPU: half precision where the card has tensor cores
     LOG_LEVEL (info | debug)                             how much the log says at start (the page can change it)
     BEATS_SECRET_KEY                                     optional: the key the kept secrets are encrypted with, to keep
                                                          it out of the data folder (else a key file there)
@@ -128,6 +129,8 @@ class Config:
         self.float16 = env.get("BEATS_FLOAT16", "").strip().lower() in ("1", "true", "yes", "on")
         self.threads = int(env.get("BEATS_THREADS", "0") or 0)
         self.style_threads = int(env.get("STYLE_THREADS", "2") or 2)
+        # auto (half precision on a GPU with tensor cores), fp16 or fp32 (0.41).
+        self.style_precision = env.get("STYLE_PRECISION", "auto")
         # Taken over once into the data folder, hashed (0.24.0): the page sets them since (Setup › Access).
         self.password = env.get("BEATS_PASSWORD", "")
         self.api_key = env.get("BEATS_API_KEY", "")
@@ -226,7 +229,7 @@ class App:
         spec = style_module.MODELS.get(chosen, style_module.MODELS[style_module.DEFAULT_MODEL])
         if not spec.available(config.models_dir) and style is None:
             spec = style_module.MODELS[style_module.DEFAULT_MODEL]
-        self.style_factory = style_factory or (lambda chosen_spec: style_module.StyleModel(config.models_dir, config.style_threads, config.device, chosen_spec))
+        self.style_factory = style_factory or (lambda chosen_spec: style_module.StyleModel(config.models_dir, config.style_threads, config.device, chosen_spec, config.style_precision))
         self.style = style if style is not None else self.style_factory(spec)
         # Music found by describing it in words (0.26): the text model, loaded when first searched.
         from .hear import Hearer
@@ -830,8 +833,8 @@ class App:
         available = bool(style is not None and style.available)
         spec = getattr(style, "spec", None)
         out = {"available": available, "loaded": bool(available and style.loaded),
-               "device": getattr(style, "backend", None), "problem": getattr(style, "problem", None),
-               "checked": getattr(style, "checked", None),
+               "device": getattr(style, "backend", None), "precision": getattr(style, "precision", None),
+               "problem": getattr(style, "problem", None), "checked": getattr(style, "checked", None),
                "model": spec.id if spec else None, "model_name": spec.name if spec else None}
         if available:
             # Kept ready: the page asks every few seconds; its total follows songs added, too.

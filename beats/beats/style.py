@@ -69,6 +69,8 @@ MODELS = {
 DEFAULT_MODEL = "effnet"
 KEEP = 15  # the top styles kept for each song (with their scores), its genres (beats.genres) among them, and for the page
 CHECK_TOLERANCE = 0.05  # the GPU's scores may differ from ONNX Runtime's by this much before the GPU is distrusted
+TENSOR_CORES_FROM = 7  # compute capability (major) from which a card has tensor cores: half precision pays there
+SONGS_AT_ONCE_GPU = 2  # songs heard in one pass on a GPU (16 MAEST windows: fits a 6 GB card in half precision)
 
 
 def _hz_to_mel(f):
@@ -151,12 +153,16 @@ class StyleModel:
     """Discogs-EffNet, loaded with the first song. Thread-safe; ``available`` is False when the image has no model
     (an older image, or a test), and then nothing is asked of it."""
 
-    def __init__(self, models_dir, threads=2, device="auto", spec=None):
+    def __init__(self, models_dir, threads=2, device="auto", spec=None, precision="auto"):
         self.spec = spec or MODELS[DEFAULT_MODEL]
         self.models_dir = models_dir
         self.threads = threads
         self.requested = device  # BEATS_DEVICE: auto, cpu, cuda, cuda:N
         self.device = None  # where it runs once loaded: "cuda", "cuda:1" or "cpu"
+        # STYLE_PRECISION (0.41, the owner, 13 Nov): "auto" hears in half precision on a GPU with tensor cores (an
+        # RTX, any card of compute capability 7 or more), full precision elsewhere; "fp16" and "fp32" insist.
+        self.requested_precision = (precision or "auto").strip().lower()
+        self.half = False  # hearing in half precision now (fp16 autocast on the GPU)
         self._torch = None  # the model as a PyTorch module, on the GPU
         self._lock = threading.Lock()
         self._session = None
@@ -223,12 +229,41 @@ class StyleModel:
         return session.run([self._output], {self._input: batch})[0]
 
     def _gpu_scores(self, model, batch):
+        """The GPU's scores, in half precision when :attr:`half`; a GPU that can't run it in half (an op autocast
+        doesn't cover, a driver) goes back to full precision for good, and the batch is heard again."""
         import torch
 
-        with torch.inference_mode():
-            outputs = model(torch.from_numpy(batch).to(self.device))
+        try:
+            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16, enabled=self.half):
+                outputs = model(torch.from_numpy(batch).to(self.device))
+        except Exception as e:
+            if not self.half:
+                raise
+            self._full_precision(f"half precision failed on the GPU ({e.__class__.__name__}: {e})")
+            with torch.inference_mode():
+                outputs = model(torch.from_numpy(batch).to(self.device))
         outputs = outputs if isinstance(outputs, (list, tuple)) else (outputs,)
         return outputs[self._pick].float().cpu().numpy()
+
+    def _full_precision(self, why):
+        """Back to full precision on the GPU, saying why (kept in :attr:`problem` for the page)."""
+        self.half = False
+        self.problem = f"the style model runs in full precision on the GPU: {why}"
+
+    def _wants_half(self, device):
+        """Whether to hear in half precision on ``device``: asked for, or auto on a card with tensor cores."""
+        if self.requested_precision in ("fp32", "full", "float32", "32"):
+            return False
+        if self.requested_precision in ("fp16", "half", "float16", "16"):
+            return True
+        try:
+            import torch
+
+            index = int(device.split(":")[1]) if ":" in device else 0
+            major, _ = torch.cuda.get_device_capability(index)
+            return major >= TENSOR_CORES_FROM
+        except Exception:
+            return False
 
     def _check(self, batch, gpu_mean):
         """The GPU's scores for a real song against ONNX Runtime's, once: a GPU that disagrees (a conversion or a
@@ -238,7 +273,15 @@ class StyleModel:
         session = self._cpu_session()
         cpu_mean = np.asarray(self._cpu_scores(session, batch), dtype=np.float64).reshape(len(batch), -1).mean(axis=0)
         diff = float(np.abs(cpu_mean - gpu_mean).max())
-        self.checked = {"diff": round(diff, 4), "ok": diff <= CHECK_TOLERANCE}
+        if diff > CHECK_TOLERANCE and self.half:
+            # Half precision strayed: full precision gets its own chance before the GPU is given up on.
+            self._full_precision(f"its half-precision scores differed from ONNX Runtime's by {diff:.2f}")
+            gpu_mean = np.asarray(self._gpu_scores(self._torch, batch), dtype=np.float64).reshape(len(batch), -1).mean(axis=0)
+            diff = float(np.abs(cpu_mean - gpu_mean).max())
+            if diff <= CHECK_TOLERANCE:
+                self.checked = {"diff": round(diff, 4), "ok": True, "precision": "fp32"}
+                return gpu_mean
+        self.checked = {"diff": round(diff, 4), "ok": diff <= CHECK_TOLERANCE, "precision": self.precision}
         if diff <= CHECK_TOLERANCE:
             return None
         self.problem = (f"the style model's scores on the GPU differ from ONNX Runtime's by {diff:.2f} (more than "
@@ -299,6 +342,7 @@ class StyleModel:
             self._pick = next(i for i, o in enumerate(outputs)
                               if o.shape[-1] == len(self._labels) and float(o.min()) >= 0 and float(o.max()) <= 1)
             self._torch, self.device = module, device
+            self.half = self._wants_half(device)
             return True
         except Exception as e:  # no onnx2torch, an odd driver: the CPU does it
             self.problem = f"the style model couldn't use the GPU ({e.__class__.__name__}: {e}), so it runs on the CPU"
@@ -309,27 +353,56 @@ class StyleModel:
         """Where it runs, for the page: "GPU" or "CPU" (None until loaded)."""
         return None if self.device is None else ("GPU" if self.device.startswith("cuda") else "CPU")
 
+    @property
+    def precision(self):
+        """How it hears, for the page and the log: "fp16" or "fp32" (None until loaded)."""
+        return None if self.device is None else ("fp16" if self.half else "fp32")
+
+    @property
+    def songs_at_once(self):
+        """How many songs are best heard in one pass: a few on a GPU (one launch, the card kept busy), one on a CPU."""
+        return SONGS_AT_ONCE_GPU if self._torch is not None else 1
+
     def __call__(self, samples, rate=RATE):
         """``[(label, score)]``: every style's score for the song, best first. ``samples`` mono at ``rate``."""
+        return self.many([(samples, rate)])[0]
+
+    def many(self, songs):
+        """The styles of several songs in one pass (0.41): ``songs`` as ``[(samples, rate)]``, each answered as
+        :meth:`__call__` does, in order. Every song's patches go to the model together, so a GPU runs once for all
+        of them; the first real song is still checked against the CPU, and a change of mind there (full precision,
+        or the CPU) hears the whole pass again the trusted way."""
         import numpy as np
 
         model = self.load()
-        if rate != RATE:
-            import soxr
+        batches = []
+        for samples, rate in songs:
+            if rate != RATE:
+                import soxr
 
-            samples = soxr.resample(np.asarray(samples, dtype=np.float32), rate, RATE)
-        batch = self._patches(samples)
-        if model is self._torch:
-            scores = self._gpu_scores(model, batch)
-        else:
-            scores = self._cpu_scores(model, batch)
-        mean = np.asarray(scores, dtype=np.float64).reshape(len(batch), -1).mean(axis=0)
+                samples = soxr.resample(np.asarray(samples, dtype=np.float32), rate, RATE)
+            batches.append(self._patches(samples))
+        means = self._means(model, batches)
         if model is self._torch and self.checked is None:
             with self._lock:
-                taken_over = self._check(batch, mean)
+                taken_over = self._check(batches[0], means[0])
             if taken_over is not None:
-                mean = taken_over
-        return sorted(zip(self._labels, (float(v) for v in mean)), key=lambda p: -p[1])
+                # The CPU took over, or full precision did: every song of the pass heard the trusted way.
+                means = self._means(self._torch if self._torch is not None else self._session, batches)
+        return [sorted(zip(self._labels, (float(v) for v in mean)), key=lambda p: -p[1]) for mean in means]
+
+    def _means(self, model, batches):
+        """Each song's mean scores over its patches, the patches of all of them run as one batch."""
+        import numpy as np
+
+        stacked = np.concatenate(batches)
+        scores = self._gpu_scores(model, stacked) if model is self._torch else self._cpu_scores(model, stacked)
+        scores = np.asarray(scores, dtype=np.float64).reshape(len(stacked), -1)
+        means, at = [], 0
+        for batch in batches:
+            means.append(scores[at:at + len(batch)].mean(axis=0))
+            at += len(batch)
+        return means
 
     def both(self, samples, rate=RATE):
         """``{"gpu": ranked, "cpu": ranked}`` for one song, each way the model can run (the GPU's None without one):

@@ -72,7 +72,7 @@ class Worker:
         # downloading the song again (AudioMuse.profiles); None without AudioMuse-AI.
         self.importer = None
         self.style = style  # beats.style.StyleModel, or None
-        self.styling = None  # {"id", "title", "artist", "since"}: a song analysed before, getting its styles
+        self.styling = None  # {"id", "title", "artist", "since", "with"}: a song analysed before, getting its styles
         self.genre_report = None  # beats.genres.agreement: how often the sound agrees with the tags
         self._style_check_said = False
         self._taxonomy = None
@@ -410,19 +410,24 @@ class Worker:
             self._taxonomy = genres.Taxonomy(style_module.labels(self.style.models_dir))
         return self._taxonomy
 
-    def _style(self, song, samples, rate):
-        """Gives a song its styles from ``samples``: its genres (:mod:`beats.genres`). Never fails the song."""
+    def _style(self, song, samples, rate, ranked=None, first=None):
+        """Gives a song its styles from ``samples`` (or ``ranked``, heard already in a pass of several, ``first``
+        saying whether that pass loaded the model): its genres (:mod:`beats.genres`). Never fails the song."""
         if self.style is None or not self.style.available:
             return
-        first = not self.style.loaded
+        if first is None:
+            first = not self.style.loaded
         try:
             started = time.monotonic()
-            ranked = self.style(samples, rate)
+            if ranked is None:
+                ranked = self.style(samples, rate)
             seconds = time.monotonic() - started
             if first:
                 where = getattr(self.style, "backend", None) or "?"
+                precision = getattr(self.style, "precision", None)
                 name = getattr(getattr(self.style, "spec", None), "name", "Discogs-EffNet")
-                self.store.event(f"Style model ({name}) loaded on the {where} in {self.style.load_seconds or 0:.1f}s")
+                self.store.event(f"Style model ({name}) loaded on the {where}"
+                                 f"{' in half precision' if precision == 'fp16' else ''} in {self.style.load_seconds or 0:.1f}s")
                 if getattr(self.style, "problem", None):
                     self.store.event(self.style.problem, "warn")
             top = ranked[:STYLE_KEEP]
@@ -485,7 +490,8 @@ class Worker:
         return len(report)
 
     def _style_loop(self):
-        """Gives the songs analysed before the style model their styles, one at a time, while the queue is empty."""
+        """Gives the songs analysed before the style model their styles while the queue is empty: the next songs are
+        fetched and decoded while the model hears these (0.41, the owner, 13 Nov), and a GPU hears a few at once."""
         done_since_report = 0
         while not self._stop.wait(2.0):
             if self.style is None or not self.style.available or self.paused:
@@ -499,39 +505,103 @@ class Worker:
                     done_since_report = 0
                 self._stop.wait(60.0)
                 continue
-            for song_id in waiting:
-                if self._stop.is_set() or self.paused or self.store.counts().get("queued"):
-                    break
-                self._style_again(song_id)
-                done_since_report += 1
-                if done_since_report >= STYLE_REPORT_EVERY:
-                    self.compare_with_tags()
-                    done_since_report = 0
+            done_since_report += self._style_round(waiting)
+            if done_since_report >= STYLE_REPORT_EVERY:
+                self.compare_with_tags()
+                done_since_report = 0
 
-    def _style_again(self, song_id):
-        self.last_work = time.time()
+    def _style_round(self, waiting):
+        """Hears ``waiting`` (ids) in passes of :attr:`StyleModel.songs_at_once`, with the songs of the next pass
+        downloading and decoding in the background while this one is heard. How many were dealt with."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        at_once = max(1, int(getattr(self.style, "songs_at_once", 1) or 1))
+        ids, dealt = iter(waiting), 0
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="beats-style-fetch") as pool:
+            fetched = []
+
+            def ahead():
+                while len(fetched) < 2 * at_once:
+                    song_id = next(ids, None)
+                    if song_id is None:
+                        return
+                    fetched.append(pool.submit(self._fetch_for_style, song_id))
+
+            ahead()
+            while fetched:
+                if self._stop.is_set() or self.paused or self.store.counts().get("queued"):
+                    for f in fetched:  # what's already fetched is let go: its file is removed in _style_pass
+                        f.cancel()
+                    for f in fetched:
+                        if not f.cancelled():
+                            self._drop_fetched(f.result())
+                    break
+                group = [fetched.pop(0).result() for _ in range(min(at_once, len(fetched)))]
+                ahead()
+                self._style_pass(group)
+                dealt += len(group)
+        return dealt
+
+    def _fetch_for_style(self, song_id):
+        """A song's sound for the style model, got in the background: ``{"song", "path", "samples", "rate",
+        "downloaded", "decoded"}``, or ``{"song", "path", "error"}`` when it couldn't be got."""
         song = self.store.song(song_id) or {"id": song_id, "title": song_id, "artist": ""}
-        self.styling = {"id": song_id, "title": song.get("title"), "artist": song.get("artist"), "since": time.time()}
-        path = None
+        fd, path = tempfile.mkstemp(prefix="style-", dir=self.data_dir)
+        os.close(fd)
         try:
-            fd, path = tempfile.mkstemp(prefix="style-", dir=self.data_dir)
-            os.close(fd)
             started = time.monotonic()
             self.download(song_id, path)
             downloaded = time.monotonic() - started
             samples = self.decode(path, STYLE_RATE) if self.decode_takes_rate else self.decode(path)
-            decoded = time.monotonic() - started - downloaded
-            self._style(song, samples, STYLE_RATE if self.decode_takes_rate else self.decode_rate)
-            _log.debug("%s – %s: style of a song analysed before: download %.2fs, decode %.2fs, model %.2fs",
-                       song.get("artist"), song.get("title"), downloaded, decoded,
-                       time.monotonic() - started - downloaded - decoded)
-        except Exception as e:  # Navidrome away, a file ffmpeg can't read: marked, so it isn't tried again and again
-            _log.warning("%s – %s: couldn't get its sound for its style: %s", song.get("artist"), song.get("title"), e)
-            self.store.set_genres(song_id, "sound-failed", [str(e)[:200] or e.__class__.__name__])
+            return {"song": song, "path": path, "samples": samples, "downloaded": downloaded,
+                    "decoded": time.monotonic() - started - downloaded,
+                    "rate": STYLE_RATE if self.decode_takes_rate else self.decode_rate}
+        except Exception as e:  # Navidrome away, a file ffmpeg can't read
+            return {"song": song, "path": path, "error": e}
+
+    def _drop_fetched(self, got):
+        if got.get("path") and os.path.exists(got["path"]):
+            os.remove(got["path"])
+
+    def _style_pass(self, group):
+        """Hears the fetched songs of ``group`` in one pass (one by one when the pass fails), keeping each one's
+        styles or why it has none; their files are removed after."""
+        self.last_work = time.time()
+        heard = []
+        try:
+            for got in group:
+                if "error" in got:  # marked, so it isn't tried again and again
+                    e, song = got["error"], got["song"]
+                    _log.warning("%s – %s: couldn't get its sound for its style: %s", song.get("artist"), song.get("title"), e)
+                    self.store.set_genres(song["id"], "sound-failed", [str(e)[:200] or e.__class__.__name__])
+                else:
+                    heard.append(got)
+            if not heard:
+                return
+            first = heard[0]["song"]
+            self.styling = {"id": first["id"], "title": first.get("title"), "artist": first.get("artist"), "since": time.time(),
+                            "with": len(heard) - 1}
+            started = time.monotonic()
+            many = getattr(self.style, "many", None)
+            ranked, loads = None, not self.style.loaded
+            if many is not None and len(heard) > 1:
+                try:
+                    ranked = many([(got["samples"], got["rate"]) for got in heard])
+                except Exception as e:  # one of them is odd: each on its own says which
+                    _log.warning("Styles: a pass of %d songs failed (%s); heard one by one", len(heard), e)
+            seconds = time.monotonic() - started
+            for i, got in enumerate(heard):
+                song = got["song"]
+                self._style(song, got["samples"], got["rate"], ranked[i] if ranked is not None else None, first=loads and i == 0)
+                _log.debug("%s – %s: style of a song analysed before: download %.2fs, decode %.2fs, model %.2fs%s",
+                           song.get("artist"), song.get("title"), got["downloaded"], got["decoded"],
+                           seconds / len(heard) if ranked is not None else time.monotonic() - started - seconds,
+                           f" (one of {len(heard)} in a pass)" if ranked is not None else "")
+                started = time.monotonic() if ranked is None else started
         finally:
             self.styling = None
-            if path and os.path.exists(path):
-                os.remove(path)
+            for got in group:
+                self._drop_fetched(got)
 
     def _measure(self, song, path, samples, rate):
         """Measures the song's loudness, fades and key, keeping why when it can't: never stops its analysis."""
