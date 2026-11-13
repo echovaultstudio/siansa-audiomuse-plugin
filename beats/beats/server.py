@@ -263,6 +263,7 @@ class App:
 
         self.listens = Listens(self.store, self.vault)
         self.cleaner = Cleaner(self)  # tidying the database (0.40): looked at first, removed as shown
+        self.style_switch = None  # {"model", "model_name", "phase", "since", "songs", "doubted"} while a switch runs
         # Covers and artists' pictures for the listening page (0.30): the music server's own, kept in the data folder.
         from .art import Art
 
@@ -802,11 +803,25 @@ class App:
         self.worker.style = self.style
         self.worker._style_check_said = False
         self.store.set_setting("style_model", spec.id)
-        doubted = self.store.doubt_styles()
-        self.store.event(f"Style model: {spec.name} from now on; {doubted} songs are heard again with it")
-        _log.info("Style model: %s chosen (%d songs to hear again)", spec.name, doubted)
-        self.worker.wake()
-        return doubted
+        # Marking 46,000 songs takes the database half a minute (the owner, 13 Nov): done in a thread, shown as
+        # ``style_switch`` in the status meanwhile, so the page answers at once and says what's going on.
+        self.style_switch = {"model": spec.id, "model_name": spec.name, "phase": "marking", "since": time.time(),
+                             "songs": self.store.style_counts().get("done", 0)}
+
+        def mark():
+            try:
+                doubted = self.store.doubt_styles()
+                self.store.event(f"Style model: {spec.name} from now on; {doubted} songs are heard again with it")
+                _log.info("Style model: %s chosen (%d songs to hear again)", spec.name, doubted)
+                self.style_switch = {**self.style_switch, "phase": "hearing", "doubted": doubted}
+            except Exception as e:
+                _log.exception("Marking the songs for the new style model went wrong")
+                self.store.event(f"Style model: {spec.name} chosen, but the songs couldn't be marked: {e}", "error")
+                self.style_switch = None
+            self.worker.wake()
+
+        threading.Thread(target=mark, name="beats-style-switch", daemon=True).start()
+        return self.style_switch["songs"]
 
     def styles_status(self, server=None):
         """The style model: whether the image has it, how far the songs (``server``'s) are, and how often it agrees
@@ -827,6 +842,10 @@ class App:
             if styling:
                 styling["for_seconds"] = round(time.time() - styling.pop("since"), 1)
             out["current"] = styling
+            switch = self.style_switch
+            if switch and switch["phase"] == "hearing" and out.get("done", 0) + out.get("failed", 0) >= switch.get("doubted", 0):
+                self.style_switch = switch = None  # every song heard with the new model
+            out["switch"] = {**switch, "for_seconds": round(time.time() - switch["since"])} if switch else None
         return out
 
     def about_names(self):
