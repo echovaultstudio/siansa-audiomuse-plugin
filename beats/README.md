@@ -104,7 +104,7 @@ Each page has its own address (`#songs`, `#loudness`…), so Back and bookmarks 
 | Group | Page | What's on it |
 |---|---|---|
 | Analysis | **Overview** | What's being done now, how far the beats, loudness and genres are, and the latest activity |
-| | **Libraries** | The server's libraries to analyse, Start analysis, Look for new songs, and starting over |
+| | **Libraries** | The server's libraries to analyse, Start analysis (with its checks), and starting over |
 | | **Songs** | The table, and a song's page (its beats, loudness, fades, key and genres) when one is open |
 | For the Siansa app | **Loudness & keys** | How many songs are measured (here or taken from the plugin), how loud they are, how they start and end, their keys, and the ones that couldn't be measured |
 | | **Genres** | The style model's progress, how often it agrees with the tags, the genre descriptions (with **Fetch all now**), and every genre by songs |
@@ -233,8 +233,8 @@ songs by one artist, the same recording never twice), so the two can be compared
 (`beats/mood_centroids.json`) and the method for similar albums and artists come from AudioMuse-AI and its Siansa
 plugin (AGPL-3.0, as this repository).
 
-1. On **Libraries**, tick the libraries to analyse and press **Start analysis**. It reads their songs from Navidrome and works
-   through them a song at a time; the top shows the song
+1. On **Libraries**, tick the libraries to analyse and press **Start analysis**. It checks everything first (below),
+   then reads their songs from Navidrome, queues the new ones and works through them a song at a time; the top shows the song
    and the step (downloading, decoding, loading the model, analysing), and **Activity** what's been done, with the
    time each step took. The first song takes longer while the model loads.
 2. **The table**, a row a song:
@@ -306,10 +306,29 @@ addresses or passwords): what the grid and phrases are worked out from, to tune 
 `:dev-cuda` (GPU): put that tag in the YAML instead of `latest` / `cuda` and restart. It keeps the same data; going
 back to `:cuda` keeps it too.
 
+**Start analysis checks everything first (0.40).** Before a song is read, six checks run and are shown as a list under
+the button, each ✓, ! (analysis goes ahead; something to look at) or ✕ (nothing starts; it says why):
+
+- **Music server**: it answers, and nothing is ever written to it. A plain-`http://` address outside the home (a
+  public IP or domain) gets a !: the login crosses the internet unencrypted.
+- **Libraries**: every ticked one still exists on the server; how many of their songs are known so far.
+- **Database**: SQLite's `quick_check`, and rows left behind by removed songs are tidied away. A damaged database gets a
+  ✕ (stop the container and restore `beats.db` from a backup).
+- **Disk**: free space where the data lives (✕ under 500 MB, ! under 2 GB), and temporary song files from a run that
+  was cut off are removed.
+- **Models**: every file in the models folder is fingerprinted (SHA-256) the first time a version is checked and
+  compared each time after: a changed or missing model file gets a ✕ (pull the image again), since a model that
+  isn't the image's gives wrong answers for every song. Models not in the image get a !.
+- **Safety**: the page has a password (! when not: anyone who reaches the port can change everything), the app has its
+  key, and no secret is left in the container that it no longer reads.
+
+A song's file is never downloaded past 2 GB (enough for a two-hour FLAC mix): a stream that doesn't end, or a server
+sending something else, can't fill the disk. The last report is kept and shown again when the page opens.
+
 **Libraries.** Each ticked library shows how many of its songs are done. Ticks take effect with **Start analysis**.
 Untick one and start to leave it out: its songs not yet analysed leave the queue, the ones done stay, and **Remove
 them** next to it forgets them (their beats and marks; nothing changes on Navidrome). The choice is kept across restarts, and the ticked libraries are
-read again every 6 hours for new songs (**Look for new songs** does it now). The next song is downloaded and decoded
+read again every 6 hours for new songs (**Start analysis** does it now, with its checks). The next song is downloaded and decoded
 while the model works on this one, so the model rarely waits for the network; the top says how long each song takes,
 to judge how long a library will. The table shows the first 200 songs, the search finding the rest, and **Export
 CSV** and **Download data** take the songs it finds (every song when nothing is searched: for a big library the data
@@ -509,7 +528,7 @@ and the rest are downloaded once more and measured here. New songs are measured 
 
 `GET /api/health`, `/api/status`, `/api/libraries`, `/api/songs`, `/api/songs/<id>` (with every beat),
 `/api/beats/<id>`, `/api/audio/<id>`, `/api/grids?ids=`, `/api/export.csv`, `/api/export.json`;
-`/api/bad-blends`, `/api/failed/export`, `/api/listens?user=&year=&month=&tz=`, `/api/art/cover/<song id>?size=` and `/api/art/artist/<song id>?size=` (a song's cover and its artist's picture), `/api/listens/import` (`POST`: the export file as the body, `?user=&name=`), `/api/listens/artist?user=&name=&tz=` (one artist's page), `POST /api/listens/lastfm`, `POST /api/listens/remove`, `/api/genres`, `/api/genre?name=&limit=`, `/api/style/models` (the style models to choose from, 0.39; `POST /api/style/model {"model"}` picks one), `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`; `POST /api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
+`/api/bad-blends`, `/api/failed/export`, `/api/listens?user=&year=&month=&tz=`, `/api/art/cover/<song id>?size=` and `/api/art/artist/<song id>?size=` (a song's cover and its artist's picture), `/api/listens/import` (`POST`: the export file as the body, `?user=&name=`), `/api/listens/artist?user=&name=&tz=` (one artist's page), `POST /api/listens/lastfm`, `POST /api/listens/remove`, `/api/genres`, `/api/genre?name=&limit=`, `/api/style/models` (the style models to choose from, 0.39; `POST /api/style/model {"model"}` picks one), `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`, `/api/analysis/checks` (the last Start analysis report, 0.40); `POST /api/analysis/start {"ids"}` (the checks, then the ticked libraries read for new songs), `/api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
 `beats/server.py`.
 
 Beat This! is by Francesco Foscarin, Jan Schlüter and Gerhard Widmer (ISMIR 2024), under the MIT licence.

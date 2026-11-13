@@ -370,6 +370,14 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 @media (max-width: 600px) { .form { grid-template-columns: minmax(0, 1fr); } }
 #key-text { overflow-wrap: anywhere; user-select: all; }
 /* A library being read: what, how far, and why (0.24.1). */
+.checks { list-style: none; margin: 12px 0 4px; padding: 0; display: grid; gap: 6px; }
+.checks li { display: grid; grid-template-columns: 1.1rem 1fr; gap: 8px; align-items: start; font-size: 0.9rem; }
+.checks li::before { content: "✓"; color: var(--ok); font-weight: 700; line-height: 1.35; }
+.checks li.warn::before { content: "!"; color: var(--warn); }
+.checks li.fail::before { content: "✕"; color: var(--bad); }
+.checks li b { font-weight: 600; }
+.checks li .sub { display: inline; margin: 0; }
+.checks li .sub::before { content: " · "; }
 .reading { display: flex; gap: 12px; align-items: flex-start; margin: 12px 0 4px; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--amber) 12%, transparent); }
 .spinner { flex: none; width: 18px; height: 18px; margin-top: 2px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--amber) 30%, transparent); border-top-color: var(--amber); animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -455,16 +463,17 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 
     <!-- Libraries: what to analyse -->
     <section data-view="libraries">
-      <div class="page-head"><h2>Libraries</h2><p class="sub">Which libraries of <span data-server-name>your music server</span> Siansa Beats analyses. They're read again every 6 hours for new songs; nothing is ever written to the server. A song another of your servers has too is analysed once.</p></div>
+      <div class="page-head"><h2>Libraries</h2><p class="sub">Which libraries of <span data-server-name>your music server</span> Siansa Beats analyses. Start analysis checks everything first, then looks for new songs in the ticked libraries and analyses them; they're read again every 6 hours anyway. Nothing is ever written to the server. A song another of your servers has too is analysed once.</p></div>
       <div class="card">
         <h3>Libraries to analyse</h3>
         <div class="libs" role="group" aria-label="Libraries to analyse"><span id="libs" class="controls"><span class="sub">Asking the server…</span></span></div>
         <div class="sub" id="libs-note" role="status"></div>
         <div class="reading" id="reading" role="status" hidden><span class="spinner" aria-hidden="true"></span><div><b id="reading-what"></b><div class="sub" id="reading-step"></div></div></div>
         <div class="controls row-gap">
-          <button class="primary" id="start" title="Analyse the ticked libraries: their songs are read from the server and queued">Start analysis</button>
-          <button id="read" title="Read the chosen libraries now (it's done every 6 hours anyway)">Look for new songs</button>
+          <button class="primary" id="start" title="Checks the server, the libraries, the database, the disk, the models and the page's safety, then reads the ticked libraries for new songs and analyses them">Start analysis</button>
+          <span class="sub" id="start-note"></span>
         </div>
+        <ul class="checks" id="checks" aria-label="What was checked" hidden></ul>
         <div class="libs" id="left-out" hidden></div>
       </div>
       <div class="card">
@@ -964,7 +973,7 @@ async function refreshStatus() {
   $("export-failed").hidden = !failedCount;
   $("export-failed").textContent = `Download failed songs (${failedCount})`;
   const read = (s.libraries || {}).read_at;
-  $("read").title = "Read the chosen libraries now (it's done every 6 hours anyway)" + (read ? `. Last read ${new Date(read * 1000).toLocaleString()}.` : "");
+  if (!$("start").disabled) $("start-note").textContent = read ? `Last looked for new songs ${new Date(read * 1000).toLocaleString()}.` : "";
   $("device-note").hidden = !s.device_note; $("device-note").textContent = s.device_note || "";
   const w = (n) => total ? (100 * n / total) + "%" : "0";
   $("progress").innerHTML = `<span class="done" style="width:${w(done)}"></span><span class="failed" style="width:${w(failed)}"></span><span class="busy" style="width:${w(busy)}"></span>`;
@@ -1075,7 +1084,7 @@ $("libs").addEventListener("click", (e) => {
 let wasReading = false, readNote = "";
 function drawReading(r) {
   $("reading").hidden = !r;
-  $("start").disabled = $("read").disabled = !!r;
+  $("start").disabled = !!r;
   $("start").textContent = r ? "Reading…" : "Start analysis";
   if (r) {
     wasReading = true; readNote = "";
@@ -1093,17 +1102,34 @@ function drawReading(r) {
     refreshLibraries(); lastCounts = ""; songsAsked = 0;
   }
 }
+// Start analysis (0.40): every check first, shown as a list; when none failed the ticked libraries are read for new
+// songs in the background and those are analysed. A failed check says why nothing started.
+function drawChecks(r) {
+  const list = $("checks");
+  list.hidden = !(r && r.checks && r.checks.length);
+  if (list.hidden) return;
+  list.innerHTML = r.checks.map((c) => `<li class="${esc(c.state)}"><div><b>${esc(c.name)}</b><span class="sub">${esc(c.detail)}</span></div></li>`).join("");
+  const when = r.at ? ` (${new Date(r.at * 1000).toLocaleString()})` : "";
+  $("start-note").textContent = r.ok === false ? `Not started: a check failed${when}.` : r.note || (r.reading ? "" : r.ok ? `Checked in ${r.seconds} s${when}.` : "");
+}
+async function showLastChecks() {
+  try { drawChecks(await api("api/analysis/checks")); } catch (e) { /* an older Siansa Beats: no report */ }
+}
 $("start").addEventListener("click", async () => {
   const ids = picked || savedIds();
   if (!ids.length && !confirm("No library is ticked: stop analysing? Songs already done stay.")) return;
-  $("start").disabled = true; $("start").textContent = "Reading…";
+  $("start").disabled = true; $("start").textContent = "Checking…"; $("start-note").textContent = "Checking the server, the libraries, the database, the disk and the models…";
   try {
-    const r = await api("api/libraries", {method: "POST", body: JSON.stringify({ids, background: true})});
-    picked = null; banner(null);
-    if (r.reading === false) $("libs-note").textContent = "The libraries are already being read: this choice is read next time (or press Look for new songs when it's done).";
+    const r = await api("api/analysis/start", {method: "POST", body: JSON.stringify({ids})});
+    banner(null);
+    drawChecks(r);
+    if (r.ok) picked = null;
+    else { $("start").disabled = false; $("start").textContent = "Start analysis"; }
+    if (r.ok && !r.reading) { $("start").disabled = false; $("start").textContent = "Start analysis"; $("libs-note").textContent = r.note || ""; }
   } catch (err) { banner(err.message); $("start").disabled = false; $("start").textContent = "Start analysis"; }
   finally { await refreshLibraries(); statusLoop(); }
 });
+showLastChecks();
 $("left-out").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-remove]");
   if (!b || !confirm(`Remove the ${b.dataset.songs} songs of ${b.dataset.name} from Siansa Beats, with their beats and marks (a song another server has too stays)? Nothing changes on the server. Siansa Dev then gets their beats from the Siansa Beats (dev) plugin's own reading, or none (its page's choice).`)) return;
@@ -1112,12 +1138,6 @@ $("left-out").addEventListener("click", async (e) => {
   catch (err) { banner(err.message); }
   finally { await refreshLibraries(); lastCounts = ""; songsAsked = 0; refreshStatus(); }
 });
-$("read").addEventListener("click", async () => {
-  $("read").disabled = true;
-  try { await api("api/libraries/read", {method: "POST", body: JSON.stringify({background: true})}); banner(null); } catch (e) { banner(e.message); $("read").disabled = false; }
-  finally { statusLoop(); }
-});
-
 
 // ---- one song ----
 async function openSong(id, newSong, fromHistory) {

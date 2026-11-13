@@ -25,6 +25,7 @@ waited for whatever was being read or written, for seconds on a big library.
 
 import contextlib
 import json
+import os
 import queue
 import sqlite3
 import threading
@@ -617,6 +618,30 @@ class Store:
                     self.db.execute("UPDATE songs SET server=?, folder=? WHERE id=?",
                                     (None if left["server"] == MAIN else left["server"], left["folder"], song_id))
             return len(ids)
+
+    def integrity(self):
+        """The database looked over before an analysis (0.40): SQLite's ``quick_check`` (``"ok"`` or what it found),
+        the rows of songs that no longer exist taken away (``{"orphans": {table: removed}}``) and the file's size."""
+        answer = [str(r["quick_check"]) for r in self._rows("PRAGMA quick_check")]
+        quick = "ok" if answer == ["ok"] else "; ".join(answer)
+        orphans = {}
+        with self._write():
+            for table, key in self.GONE_WITH_A_SONG:
+                if table == "songs":
+                    continue
+                removed = self.db.execute(f"DELETE FROM {table} WHERE {key} NOT IN (SELECT id FROM songs)").rowcount
+                if removed:
+                    orphans[table] = removed
+        if orphans:
+            self.genre_changes += 1
+            self.sound_changes += 1
+        size = 0
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                size += os.path.getsize(self.path + suffix)
+            except OSError:
+                pass
+        return {"quick_check": quick, "orphans": orphans, "size": size}
 
     # ---- the queue ----
 
