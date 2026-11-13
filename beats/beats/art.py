@@ -27,6 +27,7 @@ _log = log.get("art")
 SIZES = (96, 300, 640)  # thumbnails, cards, the big one
 KINDS = ("cover", "artist")
 NONE_FOR = 30 * 60  # seconds "the server has none" is believed: a photo it's still fetching comes soon after
+INDEX_AT_MOST_EVERY = 60  # seconds: the index of songs by artist and album is not made again sooner than this
 MOST_BYTES = 8 * 1024 * 1024  # a still picture is never bigger than this
 MOST_ANIMATED = 256 * 1024 * 1024  # an animated cover may be (the owner's library has one of 130 MB): only its first frame is kept
 
@@ -71,7 +72,10 @@ class Art:
         """``(by artist, by (artist, album))``: a song here for each artist and album, as names are compared."""
         with self._lock:
             mark = self.store.song_changes if hasattr(self.store, "song_changes") else None
-            if self._index is None or self._index[0] != mark or self.now() - self._index[3] > 600:
+            # Made again when the songs changed, but not more often than every minute (0.42.3: during an analysis they
+            # change with every song, and reading 46,000 of them again held each Listening page up for seconds).
+            age = self.now() - self._index[3] if self._index is not None else None
+            if self._index is None or age > 600 or (self._index[0] != mark and age > INDEX_AT_MOST_EVERY):
                 by_artist, by_album = {}, {}
                 for r in self.store._rows("SELECT id, artist, album FROM songs WHERE artist IS NOT NULL"):
                     artist = key(r["artist"])

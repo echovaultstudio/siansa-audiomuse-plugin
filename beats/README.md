@@ -482,7 +482,7 @@ On the server, after setting it up:
 | `BEATS_THREADS` | `0` (all) | The model's CPU threads. |
 | `BEATS_CPUS` | `4` | (docker-compose) The cores the container may use. |
 | `BEATS_SECRET_KEY` | empty | The key the kept secrets are encrypted with, to keep it out of the data folder. Without it, a key file (`secret.key`) is made there. Changing it means entering the servers' passwords and AudioMuse-AI's token again. |
-| `BEATS_RESET_ACCESS` | empty | `yes`: takes the page's password and the app's key away at the start, when the password is forgotten. Take it off again afterwards. |
+| `BEATS_RESET_ACCESS` | empty | `yes`: takes the page's password and the app's key away at the start, when the password is forgotten. Take it off again afterwards. Simpler, and without a restart: `docker exec siansa-beats python -m beats.reset` (below). |
 
 The music servers, AudioMuse-AI, the page's password and the app's key are **not** settings of the container: they're
 set on the page, under Setup.
@@ -511,6 +511,17 @@ again, and the app keeps its key.
 
 A key for the app needs the page to have a password (without one the page is open and the app needs no key), and
 goes when the password is removed.
+
+### A forgotten password
+
+On the server, with the container running:
+
+    docker exec siansa-beats python -m beats.reset
+
+It takes the page's password and the app's key away at once, without a restart, and says what it took. The page is
+then open to your network again: set a new password under Setup and give the Siansa app its new key. Nothing else is
+changed (not the songs, not the listens, not the servers' logins). On TrueNAS, the app's Shell does the same with
+`python -m beats.reset`.
 
 ## The app's API (v1)
 
