@@ -47,6 +47,9 @@ CREATE INDEX IF NOT EXISTS listens_by_artist ON listens (user, akey, at);
 CREATE INDEX IF NOT EXISTS listens_waiting ON listens (relayed, user) WHERE relayed = 0;
 """
 
+A_FEW_LISTENS = 20  # more than this added at once is a history brought in, not the app's listens as they come
+SLOW_SUMMARY = 0.25  # seconds: numbers that took this long are given old at once and worked out again behind
+
 SOURCES = {"siansa": "the Siansa app", "koito": "Koito", "lastfm": "Last.fm", "listenbrainz": "ListenBrainz"}
 MOST_AT_ONCE = 500  # listens in one request from the app
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
@@ -324,6 +327,7 @@ class Listens:
         self.importing = {"running": False}
         self.relay_state = {}  # listener -> {"error", "at"}: the last trouble sending on to Last.fm
         self._kept, self._lock = {}, threading.Lock()
+        self._working = set()  # the summaries being worked out again in the background
         self._relay_lock = threading.Lock()
 
     # ---- keeping ----
@@ -365,6 +369,8 @@ class Listens:
         kept = self.count(user) - before
         if kept:
             self.changes += 1
+            if kept > A_FEW_LISTENS:  # a history brought in: the old numbers would be far off
+                self._forget_kept()
         return {"kept": kept, "known": len(values) - kept, "skipped": skipped}
 
     def _songs(self):
@@ -447,6 +453,7 @@ class Listens:
                 self.store.db.execute("UPDATE listens SET relayed=0 WHERE user=? AND source='siansa' AND relayed IS NULL "
                                       "AND at>=?", (new, since))
         self.changes += 1
+        self._forget_kept()
         self.store.event(f"The listens of {old or 'no name'} are {new or 'no name'}'s now ({moved} moved)")
         return moved
 
@@ -518,6 +525,7 @@ class Listens:
                 gone = self.store.db.execute("DELETE FROM listens WHERE user=?", (user,)).rowcount
         if gone:
             self.changes += 1
+            self._forget_kept()
         return gone
 
     # ---- the numbers ----
@@ -593,32 +601,62 @@ class Listens:
 
     def summary(self, user, year=None, month=None, tz_name=None, most=25):
         """Everything the page shows of ``user``'s listening in a month, a year or all time; kept until a listen is
-        added."""
+        added. Numbers that take long to work out (a long history: :data:`SLOW_SUMMARY`) are given at once even when
+        a new listen has made them old (0.42.3, the owner, 13 Nov: the page took seconds to open with 69,000 listens
+        while songs were analysed), and worked out again in the background for the next time; quick ones are worked
+        out again there and then. What's playing and the latest listens are always the present ones. After a change
+        that isn't a listen or two (a history brought in, listens removed or renamed) nothing old is given."""
         kept_as = (user, year, month, tz_name, most)
         with self._lock:
             kept = self._kept.get(kept_as)
-            if kept and kept[0] == self.changes:
-                return dict(kept[1], now=self.now_playing(user), recent=self.recent(user, 12))
-        answer = self._summary(user, year, month, tz_name, most)
-        with self._lock:
-            if len(self._kept) > 60:
-                self._kept.clear()
-            self._kept[kept_as] = (self.changes, answer)
+            fresh = kept and kept[0] == self.changes
+            old_but_slow = kept and not fresh and kept[2] >= SLOW_SUMMARY
+            again = old_but_slow and kept_as not in self._working
+            if again:
+                self._working.add(kept_as)
+        if fresh or old_but_slow:
+            if again:
+                threading.Thread(target=self._work_out, args=(kept_as,), name="listens-summary", daemon=True).start()
+            return dict(kept[1], now=self.now_playing(user), recent=self.recent(user, 12))
+        answer = self._work_out(kept_as)
         return dict(answer, now=self.now_playing(user), recent=self.recent(user, 12))
+
+    def _work_out(self, kept_as):
+        """Works a summary out and keeps it, with the changes it has seen and how long it took."""
+        try:
+            seen, started = self.changes, time.monotonic()
+            answer = self._summary(*kept_as)
+            with self._lock:
+                if len(self._kept) > 60:
+                    self._kept.clear()
+                self._kept[kept_as] = (seen, answer, time.monotonic() - started)
+            return answer
+        finally:
+            with self._lock:
+                self._working.discard(kept_as)
+
+    def _forget_kept(self):
+        """After a change bigger than a listen or two: no kept summary is given again."""
+        with self._lock:
+            self._kept.clear()
 
     def _summary(self, user, year, month, tz_name, most):
         tz = zone(tz_name)
         start, end, label = self.window(year, month, tz)
         local = lambda at: datetime.datetime.fromtimestamp(at, tz)  # noqa: E731
 
-        # Every listen's second, for the years and months there's something in.
+        # Every listen's second, for the years and months there's something in; a listen's local time is worked out
+        # once (0.42.3), here, and used again below for the ones in the period.
         every = [r["at"] for r in self.store._rows("SELECT at FROM listens WHERE user=? ORDER BY at", (user,))]
         years, months = Counter(), Counter()
+        when = {}
         for at in every:
             d = local(at)
             years[d.year] += 1
             if year and d.year == year:
                 months[d.month] += 1
+            if start <= at < end:
+                when[at] = d
 
         rows = self.store._rows("SELECT at, akey, tkey, album, duration, song_id FROM listens WHERE user=? AND at>=? "
                                 "AND at<? ORDER BY at", (user, start, end))
@@ -636,7 +674,7 @@ class Listens:
             if not length:
                 length, guessed = TYPICAL_SECONDS, guessed + 1
             seconds += length
-            d = local(r["at"])
+            d = when.get(r["at"]) or local(r["at"])
             hours[d.hour] += 1
             weekdays[d.weekday()] += 1
             days[d.date()] += 1

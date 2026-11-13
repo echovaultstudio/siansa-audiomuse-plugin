@@ -881,8 +881,8 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
               <div class="controls"><code id="key-text"></code><button type="button" id="key-copy">Copy</button></div>
             </div>
             <p class="sub">Only a hash of the password and of the key is kept: neither can be read back. Your browser asks for
-              the password (user name <code>siansa</code>). Forgotten it? Start the container once with
-              <code>BEATS_RESET_ACCESS=yes</code>.</p>
+              the password (user name <code>siansa</code>). Forgotten it? On the server, run <code>docker exec siansa-beats python -m beats.reset</code>: it takes the
+              password and the key away at once, and you set new ones here.</p>
           </form>
         </div>
       </div>

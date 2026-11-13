@@ -173,6 +173,33 @@ class History(unittest.TestCase):
         self.listens.add("max", [self.row("2026-03-06T20:00:00", "Moby", "Honey")])
         self.assertEqual(self.listens.summary("max", 2026, 3, "Europe/Helsinki")["totals"]["listens"], 2)
 
+    def test_numbers_that_take_long_are_given_at_once_and_worked_out_again_behind(self):
+        """0.42.3 (the owner, 13 Nov: Listening took seconds to open with 69,000 listens): a long history's numbers
+        are given old, at once, when a listen has been added, and are new the next time; what's just been listened
+        to is always there; a history brought in or removed is never shown with old numbers."""
+        self.listens.add("max", [self.row("2026-03-05T20:00:00", "Moby", "Porcelain")])
+        zone = "Europe/Helsinki"
+        self.assertEqual(self.listens.summary("max", 2026, 3, zone)["totals"]["listens"], 1)
+        key = ("max", 2026, 3, zone, 25)
+        seen, answer, _ = self.listens._kept[key]
+        self.listens._kept[key] = (seen, answer, L.SLOW_SUMMARY + 1)  # as if it had taken long
+        self.listens.add("max", [self.row("2026-03-06T20:00:00", "Moby", "Honey")])
+        at_once = self.listens.summary("max", 2026, 3, zone)
+        self.assertEqual(at_once["totals"]["listens"], 1)  # the old numbers, without waiting
+        self.assertEqual(at_once["recent"][0]["title"], "Honey")  # but the latest listen is there
+        end = time.time() + 5
+        while time.time() < end and self.listens._kept[key][0] != self.listens.changes:
+            time.sleep(0.02)
+        self.assertEqual(self.listens.summary("max", 2026, 3, zone)["totals"]["listens"], 2)
+        # A history brought in (more than a few at once): nothing old is given.
+        seen, answer, _ = self.listens._kept[key]
+        self.listens._kept[key] = (seen, answer, L.SLOW_SUMMARY + 1)
+        self.listens.add("max", [self.row(f"2026-03-{d:02d}T10:00:00", "Moby", f"Song {d}") for d in range(7, 7 + L.A_FEW_LISTENS + 1)])
+        self.assertEqual(self.listens.summary("max", 2026, 3, zone)["totals"]["listens"], 2 + L.A_FEW_LISTENS + 1)
+        self.listens._kept[key] = (*self.listens._kept[key][:2], L.SLOW_SUMMARY + 1)
+        self.listens.remove("max")
+        self.assertEqual(self.listens.summary("max", 2026, 3, zone)["totals"]["listens"], 0)
+
     def test_listens_without_a_name_become_the_apps_listeners(self):
         # The owner's: Koito's export brought in without a name, then the app scrobbling as "max".
         self.listens.add("", [self.row("2026-11-01T10:00:00"), self.row("2026-11-02T10:00:00")], source="koito")
