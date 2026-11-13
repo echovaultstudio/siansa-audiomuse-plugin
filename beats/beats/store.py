@@ -488,7 +488,8 @@ class Store:
         """Marks every song's styles as doubted (the GPU that gave them disagreed with the CPU, 0.37.1): they stay in
         use, and each song is heard again on the CPU, which replaces them. How many songs."""
         with self._write():
-            n = self.db.execute("UPDATE genres SET source='sound-doubted' WHERE source='sound'").rowcount
+            n = self.db.execute("SELECT COUNT(DISTINCT song_id) AS n FROM genres WHERE source='sound'").fetchone()["n"]
+            self.db.execute("UPDATE genres SET source='sound-doubted' WHERE source='sound'")
         if n:
             self.genre_changes += 1
         return n

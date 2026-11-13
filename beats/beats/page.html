@@ -357,6 +357,15 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 .form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
 .form label { display: grid; gap: 4px; font-size: 0.82rem; color: var(--muted); min-width: 0; }
 .form label.wide { grid-column: 1 / -1; }
+/* The style models to choose from (0.39): one card each, the chosen one outlined in amber. */
+.choices { display: grid; gap: 10px; margin: 10px 0 6px; }
+.choice { display: grid; grid-template-columns: auto 1fr; gap: 10px 12px; align-items: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; background: var(--raised-2); }
+.choice[aria-checked="true"] { border-color: var(--amber); box-shadow: inset 0 0 0 1px var(--amber); }
+.choice input { margin-top: 3px; accent-color: var(--amber); }
+.choice b { display: block; font-size: 0.95rem; }
+.choice .sub { margin: 4px 0 0; }
+.choice .cost { color: var(--muted); font-size: 0.78rem; margin-top: 4px; }
+.choice[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
 .form input, .form select { width: 100%; border-radius: 10px; padding: 9px 12px; }
 @media (max-width: 600px) { .form { grid-template-columns: minmax(0, 1fr); } }
 #key-text { overflow-wrap: anywhere; user-select: all; }
@@ -828,6 +837,14 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         </div>
       </div>
       <div class="card" data-fold><h3>The model</h3><dl class="kv" id="setup-model"></dl></div>
+      <div class="card" data-fold id="style-card">
+        <h3>Genres by sound</h3>
+        <p class="sub">Which model hears each song's styles, for the genre pages and the genre radios. Both give the same 400
+          Discogs styles, so changing the model changes nothing in how genres are named or read; every song is heard
+          again with the new one (its old styles stay in use until then).</p>
+        <div class="choices" id="style-choices" role="radiogroup" aria-label="Style model"></div>
+        <p class="sub" id="style-note" role="status"></p>
+      </div>
       <div class="card" data-fold>
         <h3>Connect the Siansa app</h3>
         <ol class="steps">
@@ -2016,12 +2033,38 @@ function drawSetup(s) {
     ["Beat tracker", `Beat This! ${esc(s.model)}`],
     ["Runs on", s.model_loaded ? esc(s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") : esc(s.device) + " (loads with the first song)"],
     ["Half precision", s.float16 ? "on" : "off"],
-    ["Style model", (s.styles || {}).available ? `Discogs-EffNet on the ${esc((s.styles || {}).device || "CPU")}` : "not in this image"],
+    ["Style model", (s.styles || {}).available ? `${esc((s.styles || {}).model_name || "Discogs-EffNet")} on the ${esc((s.styles || {}).device || "CPU")}` : "not in this image"],
     ["Version", esc(s.version)], ["Running for", `${Math.floor((s.uptime_seconds || 0) / 3600)} h ${Math.floor((s.uptime_seconds || 0) % 3600 / 60)} min`],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
   $("setup-address").textContent = location.origin + location.pathname.replace(/\/$/, "");
   $("setup-key").innerHTML = cn.api_key ? "Key: the app's key made under Access (make a new one there if you no longer have it)." : cn.password ? "Key: this page's password (or make the app a key of its own under Access)." : "Key: none needed (no password is set).";
 }
+
+// ---- the style model to hear genres with (0.39) ----
+let styleModels = null;
+async function drawStyleModels() {
+  try { styleModels = await api("api/style/models"); } catch (e) { return; }
+  $("style-choices").innerHTML = styleModels.models.map((m) => {
+    const on = m.id === styleModels.chosen;
+    return `<label class="choice" role="radio" aria-checked="${on}" aria-disabled="${!m.available}">
+      <input type="radio" name="style-model" value="${esc(m.id)}" ${on ? "checked" : ""} ${m.available ? "" : "disabled"}>
+      <span><b>${esc(m.name)}</b><span class="sub">${esc(m.blurb)}</span><span class="cost">${esc(m.cost)}${m.available ? "" : " Not in this image."}</span></span>
+    </label>`;
+  }).join("");
+  $("style-choices").querySelectorAll("input").forEach((input) => input.addEventListener("change", () => chooseStyleModel(input.value)));
+}
+async function chooseStyleModel(id) {
+  const name = (styleModels?.models || []).find((m) => m.id === id)?.name || id;
+  if (!confirm(`Hear every song's styles again with ${name}? The genre pages keep their songs until each is heard again.`)) { drawStyleModels(); return; }
+  $("style-note").textContent = "Switching…";
+  try {
+    const r = await api("api/style/model", {method: "POST", body: JSON.stringify({model: id})});
+    styleModels = r;
+    $("style-note").textContent = r.doubted ? `${name} from now on: ${num(r.doubted)} songs are heard again with it, while the queue is empty.` : `${name} is in use.`;
+    drawStyleModels(); statusLoop();
+  } catch (e) { $("style-note").textContent = e.message; drawStyleModels(); }
+}
+drawStyleModels();
 
 // ---- what AudioMuse-AI has worked out, taken over (0.25) ----
 function drawPull(sound) {

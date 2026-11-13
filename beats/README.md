@@ -318,10 +318,16 @@ is large).
 **Genres from the sound.** Each song's genres come from its sound alone, for Siansa's genre list (Search › Genres),
 genre pages and genre radios:
 
-- Essentia's Discogs-EffNet (the Music Technology Group, UPF) hears the song and scores each of 400 Discogs styles,
-  from Progressive Trance and Deep House to Punk and Boom Bap. It runs on the GPU when there is one (through the
-  PyTorch Beat This! uses; the model is small, so Beat This! hardly notices), else on the CPU (ONNX Runtime,
-  `STYLE_THREADS`, 2 by default); `BEATS_DEVICE=cpu` keeps both on the CPU. The model is at home among electronic
+- One of two models from Essentia (the Music Technology Group, UPF) hears the song and scores each of 400 Discogs
+  styles, from Progressive Trance and Deep House to Punk and Boom Bap. **Discogs-EffNet** (2021) is small and quick,
+  about a second a song on a CPU, and the one in use unless another is chosen. **MAEST** (2023; 0.39) is a larger
+  transformer hearing 30 seconds at a time, markedly more accurate on the same styles and surer of what it hears,
+  the better choice beyond electronic music; slow on a CPU (about 4 seconds per 30 seconds heard, a few windows a
+  song), quick on a GPU. The page's Setup › Genres by sound picks one, with a line on each; changing it keeps the
+  choice, and every song is heard again with the new model (its old styles stay in use until then). Both give the
+  same 400 styles, so the genre pages read the same. The model runs on the GPU when there is one (through the
+  PyTorch Beat This! uses), else on the CPU (ONNX Runtime, `STYLE_THREADS`, 2 by default); `BEATS_DEVICE=cpu`
+  keeps both on the CPU. EffNet is at home among electronic
   releases and can misread a clean, sparse production (a country ballad as Dance-pop, the owner, 13 Nov); `GET
   /api/v1/songs/families?ids=` (0.38) shows, for up to ten songs, how CLAP hears their genre family from the vector
   kept for the search by words, and what their styles would be weighed by that — a look, nothing kept, until it has
@@ -503,9 +509,10 @@ and the rest are downloaded once more and measured here. New songs are measured 
 
 `GET /api/health`, `/api/status`, `/api/libraries`, `/api/songs`, `/api/songs/<id>` (with every beat),
 `/api/beats/<id>`, `/api/audio/<id>`, `/api/grids?ids=`, `/api/export.csv`, `/api/export.json`;
-`/api/bad-blends`, `/api/failed/export`, `/api/listens?user=&year=&month=&tz=`, `/api/art/cover/<song id>?size=` and `/api/art/artist/<song id>?size=` (a song's cover and its artist's picture), `/api/listens/import` (`POST`: the export file as the body, `?user=&name=`), `/api/listens/artist?user=&name=&tz=` (one artist's page), `POST /api/listens/lastfm`, `POST /api/listens/remove`, `/api/genres`, `/api/genre?name=&limit=`, `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`; `POST /api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
+`/api/bad-blends`, `/api/failed/export`, `/api/listens?user=&year=&month=&tz=`, `/api/art/cover/<song id>?size=` and `/api/art/artist/<song id>?size=` (a song's cover and its artist's picture), `/api/listens/import` (`POST`: the export file as the body, `?user=&name=`), `/api/listens/artist?user=&name=&tz=` (one artist's page), `POST /api/listens/lastfm`, `POST /api/listens/remove`, `/api/genres`, `/api/genre?name=&limit=`, `/api/style/models` (the style models to choose from, 0.39; `POST /api/style/model {"model"}` picks one), `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`; `POST /api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
 `beats/server.py`.
 
 Beat This! is by Francesco Foscarin, Jan Schlüter and Gerhard Widmer (ISMIR 2024), under the MIT licence.
 Discogs-EffNet is by Pablo Alonso-Jiménez, Xavier Serra and Dmitry Bogdanov (MTG, Universitat Pompeu Fabra), from
-[Essentia's models](https://essentia.upf.edu/models.html), under CC BY-NC-ND 4.0.
+[Essentia's models](https://essentia.upf.edu/models.html), under CC BY-NC-ND 4.0. MAEST is by Pablo Alonso-Jiménez,
+Xavier Serra and Dmitry Bogdanov too (ISMIR 2023), from the same place, under CC BY-NC-SA 4.0.

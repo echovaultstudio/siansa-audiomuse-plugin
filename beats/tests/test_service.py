@@ -42,13 +42,19 @@ class FakeStyle:
              "t122": [("Electronic---Deep House", 0.66), ("Electronic---House", 0.5)],
              "t96w": [("Electronic---Trance", 0.55), ("Pop---Ballad", 0.1)]}
 
-    def __init__(self, models_dir, on=True):
+    def __init__(self, models_dir, on=True, spec=None):
+        from beats import style as style_module
+
         self.models_dir = models_dir
+        self.spec = spec or style_module.MODELS["effnet"]
         os.makedirs(models_dir, exist_ok=True)
         labels = sorted({l for heard in self.HEARD.values() for l, _ in heard} | {"Rock---Punk", "Pop---Pop Rock"})
         with open(os.path.join(models_dir, "discogs-effnet-bs64-1.json"), "w") as f:
             json.dump({"classes": labels}, f)
         self.on, self.loaded, self.load_seconds, self.calls = on, False, 0.01, []
+
+    def unload(self):
+        self.loaded = False
 
     @property
     def available(self):
@@ -291,14 +297,15 @@ class Service(Base):
     """A running service with the stand-ins, and how to ask it; the tests are :class:`ServiceTest`'s (and
     test_servers.py's)."""
 
-    def start(self, password="", style=None, api_key=""):
+    def start(self, password="", style=None, api_key="", style_factory=None):
         env = {"NAVIDROME_URL": self.fake.url, "NAVIDROME_USER": USER, "NAVIDROME_PASSWORD": PASSWORD,
                "AUDIOMUSE_URL": self.fake.url, "AUDIOMUSE_TOKEN": TOKEN, "DATA_DIR": os.path.join(self.tmp, "data"),
+               "MODELS_DIR": os.path.join(self.tmp, "models"),
                "BEATS_PASSWORD": password, "BEATS_API_KEY": api_key, "PORT": "0"}
         self.tracker = FakeTracker()
         self.app = App(Config(env), tracker=self.tracker, decode=fake_decode, style=style or FakeStyle(
             os.path.join(self.tmp, "models"), on=False), sound=fake_sound, words=getattr(self, "words", None),
-                       hearer=getattr(self, "hearer", None))
+                       hearer=getattr(self, "hearer", None), style_factory=style_factory)
         self.server = make_server(self.app, host="127.0.0.1", port=0)
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
         import threading
@@ -835,6 +842,47 @@ class ServiceTest(Service):
         self.assertEqual(again["songs"]["t140"]["song"]["title"], "Control")
         self.assertEqual(again["songs"]["t140"]["from"][0][1], "t140")
         self.assertGreater(again["songs"]["t140"]["file"]["seconds"], 0)
+
+    def test_the_style_model_can_be_changed_in_setup_and_every_song_is_heard_again(self):
+        """0.39 (the owner, 13 Nov): Discogs-EffNet or MAEST, chosen on the page; the choice is kept, the songs'
+        styles are doubted (still used) and heard again with the new model; one not in the image can't be chosen."""
+        from beats import style as style_module
+
+        models = os.path.join(self.tmp, "models")
+        made = []
+        def factory(spec):
+            made.append(spec.id)
+            return FakeStyle(models, spec=spec)
+        self.start(style=FakeStyle(models), style_factory=factory)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        listed = self.call("/api/style/models")
+        self.assertEqual(listed["chosen"], "effnet")
+        self.assertEqual([m["id"] for m in listed["models"]], ["effnet", "maest"])
+        self.assertEqual([m["available"] for m in listed["models"]], [False, False])  # no files in a test
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/style/model", "POST", {"model": "maest"})
+        self.assertEqual(e.exception.code, 400)
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/style/model", "POST", {"model": "nope"})
+        self.assertEqual(e.exception.code, 400)
+        # With MAEST in the image: the switch doubts every song's styles and hears them again.
+        for name in ("discogs-maest-30s-pw-1.onnx", "discogs-maest-30s-pw-1.json"):
+            with open(os.path.join(self.app.config.models_dir, name), "w") as f:
+                f.write("{}")
+        before = self.call("/api/status")["styles"]["done"]
+        self.assertEqual(before, 3)
+        r = self.call("/api/style/model", "POST", {"model": "maest"})
+        self.assertEqual((r["doubted"], r["chosen"], made), (3, "maest", ["maest"]))
+        self.assertEqual(set(self.call("/api/genre?name=Trance")["ids"]), {"t140", "t96w"})  # still there meanwhile
+        end = time.time() + 20
+        while time.time() < end and self.call("/api/status")["styles"].get("done", 0) < 3:
+            time.sleep(0.2)
+        self.assertEqual(self.call("/api/status")["styles"]["done"], 3)
+        self.assertEqual(self.call("/api/status")["styles"]["model"], "maest")
+        self.assertEqual(self.app.store.setting("style_model"), "maest")
+        # The same model again changes nothing.
+        self.assertEqual(self.call("/api/style/model", "POST", {"model": "maest"})["doubted"], 0)
 
     def test_without_the_style_model_the_app_falls_back_to_tags(self):
         self.start()
