@@ -124,3 +124,55 @@ class MelTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PrecisionAndPassesTest(unittest.TestCase):
+    """Half precision and several songs in one pass (0.41, the owner, 13 Nov): what's chosen, and that a pass gives
+    each song what hearing it alone would, with the CPU fallbacks still in place. No GPU on the runner: the model's
+    scoring is stood in for."""
+
+    def model(self, precision="auto"):
+        return style.StyleModel("/nowhere", precision=precision)
+
+    def test_precision_asked_for_wins_and_auto_needs_tensor_cores(self):
+        self.assertFalse(self.model("fp32")._wants_half("cuda"))
+        self.assertTrue(self.model("fp16")._wants_half("cuda:1"))
+        self.assertFalse(self.model("auto")._wants_half("cuda"))  # no torch or no card here: full precision, no error
+        self.assertFalse(self.model()._wants_half("cuda"))
+        self.assertEqual(self.model().precision, None)  # not loaded yet
+        self.assertEqual(self.model().songs_at_once, 1)  # the CPU, one at a time
+        self.assertGreaterEqual(style.TENSOR_CORES_FROM, 7)  # Volta and on: Turing (7.5), Ampere (8.x)
+        self.assertLessEqual(style.SONGS_AT_ONCE_GPU * style.MODELS["maest"].most * style.MODELS["maest"].patch * style.BANDS * 2,
+                             50_000_000)  # 16 MAEST windows in half precision: well under a 6 GB card
+
+    def test_a_pass_of_two_songs_scores_each_as_alone(self):
+        import numpy as np
+
+        m = self.model()
+        m._labels = LABELS
+        m.device, m._session = "cpu", object()  # "loaded" on the CPU; its scoring stood in for below
+        heard = []
+
+        def scores(session, batch):  # a score per style from the patch's loudness, so each song's differ
+            heard.append(len(batch))
+            level = batch.reshape(len(batch), -1).mean(axis=1, keepdims=True)
+            return np.clip(level * (1 + np.arange(len(LABELS)))[None, :] / 20, 0, 1)
+
+        m._cpu_scores = scores
+        m.load = lambda: m._session
+        t = np.arange(style.RATE * 4) / style.RATE
+        quiet, loud = 0.1 * np.sin(2 * np.pi * 220 * t), 0.9 * np.sin(2 * np.pi * 220 * t)
+        together = m.many([(quiet, style.RATE), (loud, style.RATE)])
+        alone = [m(quiet), m(loud)]
+        self.assertEqual(heard[0], heard[1] + heard[2])  # one run for the pass, then one each
+        for a, b in zip(together, alone):
+            self.assertEqual([l for l, _ in a[:5]], [l for l, _ in b[:5]])
+            np.testing.assert_allclose([v for _, v in a], [v for _, v in b], atol=1e-9)
+        self.assertNotEqual(together[0][0][1], together[1][0][1])  # the two songs got their own scores
+
+    def test_half_precision_that_fails_goes_back_to_full(self):
+        m = self.model("fp16")
+        m.half = True
+        m._full_precision("a test")
+        self.assertFalse(m.half)
+        self.assertIn("full precision", m.problem)

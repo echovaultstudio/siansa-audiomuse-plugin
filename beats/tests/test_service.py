@@ -811,6 +811,39 @@ class ServiceTest(Service):
         self.assertEqual(self.call("/api/status")["styles"]["done"], 3)
         self.assertEqual(set(self.call("/api/genre?name=Trance")["ids"]), {"t140", "t96w"})
 
+    def test_on_a_gpu_songs_analysed_before_are_heard_two_at_a_time(self):
+        """0.41 (the owner, 13 Nov): a GPU hears the waiting songs in passes of two, the next ones fetched meanwhile;
+        each song still gets its own styles, and a pass that fails is heard one by one."""
+        class Gpu(FakeStyle):
+            songs_at_once = 2
+
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                self.passes, self.fail_once = [], True
+
+            def many(self, songs):
+                self.loaded = True
+                ids = [samples.song_id for samples, _ in songs]
+                self.passes.append(ids)
+                if self.fail_once:
+                    self.fail_once = False
+                    raise RuntimeError("CUDA out of memory (a test)")
+                return [self.HEARD.get(i, []) for i in ids]
+
+        style = Gpu(os.path.join(self.tmp, "models"), on=False)
+        self.start(style=style)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        style.on = True
+        end = time.time() + 20
+        while time.time() < end and self.call("/api/status")["styles"].get("done", 0) < 3:
+            time.sleep(0.2)
+        self.assertEqual(self.call("/api/status")["styles"]["done"], 3)
+        self.assertEqual([len(p) for p in style.passes], [2])  # two in a pass; the one left over goes alone
+        self.assertEqual(len(style.calls), 3)  # the failed pass of two heard one by one, then the lone one
+        self.assertEqual(set(self.call("/api/genre?name=Trance")["ids"]), {"t140", "t96w"})
+        self.assertEqual(self.call("/api/genre?name=" + urllib.parse.quote("Deep House"))["ids"], ["t122"])
+
     def test_a_gpu_that_disagrees_is_let_go_and_every_song_is_heard_again(self):
         """0.37.1 (the owner, 12 Nov: a country album scored 0.7 as electro house): the model checks the GPU's scores
         against the CPU's on the first real song; when they differ, the songs' styles are doubted, kept in use, and

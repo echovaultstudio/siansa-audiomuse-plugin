@@ -369,7 +369,11 @@ genre pages and genre radios:
   choice, and every song is heard again with the new model (its old styles stay in use until then). Both give the
   same 400 styles, so the genre pages read the same. The model runs on the GPU when there is one (through the
   PyTorch Beat This! uses), else on the CPU (ONNX Runtime, `STYLE_THREADS`, 2 by default); `BEATS_DEVICE=cpu`
-  keeps both on the CPU. EffNet is at home among electronic
+  keeps both on the CPU. On a GPU with tensor cores (an RTX, any card of compute capability 7 or more) it hears in
+  half precision (0.41, the owner, 13 Nov: an RTX 3050 took 1.7 s a song in full precision), two songs in one pass,
+  while the next songs download and decode in the background; older cards and the CPU hear in full precision, one
+  at a time (`STYLE_PRECISION`). Half precision that strays from the CPU's scores on the first song goes back to
+  full precision by itself. EffNet is at home among electronic
   releases and can misread a clean, sparse production (a country ballad as Dance-pop, the owner, 13 Nov); `GET
   /api/v1/songs/families?ids=` (0.38) shows, for up to ten songs, how CLAP hears their genre family from the vector
   kept for the search by words, and what their styles would be weighed by that — a look, nothing kept, until it has
@@ -467,6 +471,7 @@ On the server, after setting it up:
 | Variable | Default | |
 |---|---|---|
 | `STYLE_THREADS` | `2` | The style model's CPU threads. |
+| `STYLE_PRECISION` | `auto` | The style model on a GPU: `auto` hears in half precision on a card with tensor cores (an RTX, or any card of compute capability 7 or more; about twice as quick) and in full precision on older cards; `fp16` or `fp32` insist. The first real song is checked against the CPU either way, and half precision that strays goes back to full precision by itself, then to the CPU. |
 | `LOG_LEVEL` | `info` | `debug`: every step of every song in the log, from the start. The page's **Debug details** switch changes it while running and wins over this. |
 | `BEATS_MODEL` | `final0` | `small0` is smaller and faster, a little less exact. Both are in the image. |
 | `BEATS_DEVICE` | `auto` | `auto` (the GPU when the container has one), `cpu`, `cuda`, `cuda:N`. Needs the `cuda` image for a GPU. |

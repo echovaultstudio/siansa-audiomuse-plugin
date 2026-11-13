@@ -2096,7 +2096,7 @@ function drawGenres(answer, old) {
   $("genre-progress").textContent = `${st.done || 0} of ${st.total || 0} songs heard` +
     (st.failed ? ` · ${st.failed} couldn't be` : "") +
     (st.current ? ` · now ${st.current.artist} – ${st.current.title}` : left > 0 ? " · the rest while the queue is empty" : "") +
-    (st.device ? ` · on the ${st.device}` : "") + (old ? " · updating…" : "");
+    (st.device ? ` · on the ${st.device}${st.precision === "fp16" ? ", half precision" : ""}` : "") + (old ? " · updating…" : "");
   const a = st.agreement;
   $("genre-agree").innerHTML = a && a.songs ? `<p>Over ${a.songs} songs with tags: the sound's genre matches the tags' on
     <strong>${Math.round((a.family || 0) * 100)} %</strong>; the tagged style is in the sound's top 3 on
@@ -2195,7 +2195,7 @@ function drawSetup(s) {
     ["Beat tracker", `Beat This! ${esc(s.model)}`],
     ["Runs on", s.model_loaded ? esc(s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") : esc(s.device) + " (loads with the first song)"],
     ["Half precision", s.float16 ? "on" : "off"],
-    ["Style model", (s.styles || {}).available ? `${esc((s.styles || {}).model_name || "Discogs-EffNet")} on the ${esc((s.styles || {}).device || "CPU")}` : "not in this image"],
+    ["Style model", (s.styles || {}).available ? `${esc((s.styles || {}).model_name || "Discogs-EffNet")} on the ${esc((s.styles || {}).device || "CPU")}${(s.styles || {}).precision === "fp16" ? ", half precision" : ""}` : "not in this image"],
     ["Version", esc(s.version)], ["Running for", `${Math.floor((s.uptime_seconds || 0) / 3600)} h ${Math.floor((s.uptime_seconds || 0) % 3600 / 60)} min`],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
   $("setup-address").textContent = location.origin + location.pathname.replace(/\/$/, "");
