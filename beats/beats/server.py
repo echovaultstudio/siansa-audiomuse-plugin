@@ -82,6 +82,8 @@ import hmac
 import io
 import json
 import os
+
+import numpy as np
 import re
 import threading
 import time
@@ -223,6 +225,7 @@ class App:
         from .words import Words
 
         self.words = words if words is not None else Words(config.models_dir)
+        self._families = None  # beats.families.Families, made when first asked
         # How a song sounds, heard here with AudioMuse-AI's models (0.27): new songs need no AudioMuse-AI.
         self.hearer = hearer if hearer is not None else Hearer(config.models_dir, self.words, config.threads)
         # How energetic each song is (0.35, beats.drive): from the sound kept for it; nothing without the model.
@@ -706,6 +709,37 @@ class App:
             "uptime_seconds": round(time.time() - self.started),
             "events": events,
         }
+
+    def families_of(self, ids, server=None):
+        """CLAP's view of each song's genre families (0.38, a look only): ``{asked id: {"song", "families":
+        {"cosine", "share"}, "styles": [(style, score)], "gated": [(style, score)]}}``; a song without a CLAP vector
+        says so."""
+        from . import families as fam
+
+        if self._families is None:
+            self._families = fam.Families(self.words)
+        here = self.store.resolve(ids, server)
+        rows = self.store.clap_of(list(here.values()))
+        styles = self.store.genre_rows(list(here.values()), sources=("sound", "sound-doubted"))
+        out = {}
+        for asked in ids:
+            song_id = here.get(asked)
+            if song_id is None:
+                out[asked] = {"error": "not a song here"}
+                continue
+            song = self.store.song(song_id) or {}
+            entry = {"song": {k: song.get(k) for k in ("title", "artist", "album")}}
+            clap = rows.get(song_id)
+            if clap is None:
+                entry["error"] = "no CLAP vector yet: not heard here or by AudioMuse-AI"
+            else:
+                scores = self._families.scores(np.frombuffer(clap, dtype=np.float32))
+                had = [(l, w) for src in ("sound", "sound-doubted") for l, w in styles.get(song_id, {}).get(src, [])]
+                entry["families"] = scores
+                entry["styles"] = [(l.partition("---")[2] or l, w) for l, w in had[:8]]
+                entry["gated"] = [(l.partition("---")[2] or l, w) for l, w in fam.gated(had, scores["share"])[:8]]
+            out[asked] = entry
+        return out
 
     def styles_status(self, server=None):
         """The style model: whether the image has it, how far the songs (``server``'s) are, and how often it agrees

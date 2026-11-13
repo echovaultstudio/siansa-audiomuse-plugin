@@ -250,6 +250,15 @@ class Store:
         return self._rows(f"SELECT o.song_id, o.{column} AS vector, s.title, s.artist, s.album, o.album_artist, o.other "
                           f"FROM sound o JOIN songs s ON s.id=o.song_id WHERE o.{column} IS NOT NULL ORDER BY o.song_id")
 
+    def clap_of(self, song_ids):
+        """``{song id: its CLAP vector (bytes)}`` of the songs among ``song_ids`` that have one."""
+        out, ids = {}, list(dict.fromkeys(song_ids))
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            for r in self._rows(f"SELECT song_id, clap FROM sound WHERE clap IS NOT NULL AND song_id IN ({', '.join('?' for _ in chunk)})", chunk):
+                out[r["song_id"]] = r["clap"]
+        return out
+
     def sound_rows(self, song_ids):
         """``{song id: its sound without the vectors}`` of the songs among ``song_ids`` that have one."""
         out, ids = {}, list(dict.fromkeys(song_ids))

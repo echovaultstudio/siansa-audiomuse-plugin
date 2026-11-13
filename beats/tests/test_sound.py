@@ -372,6 +372,22 @@ class PullTest(Service):
             self.call(f"{am}/api/similar_tracks?item_id=who")
         self.assertEqual(e.exception.code, 404)
 
+    def test_claps_view_of_a_songs_families_is_a_look_only(self):
+        """0.38: the families' shares and what the styles would be, from the stored CLAP vector; nothing kept."""
+        self.words = FakeWords()
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.fake.sync = {s["id"]: track(s) for s in CATALOG if s["id"] != "bad"}
+        self.pulled()
+        got = self.call("/api/v1/songs/families?ids=t140,nope")["songs"]
+        self.assertEqual(got["nope"]["error"], "not a song here")
+        fam = got["t140"]["families"]
+        self.assertEqual(len(fam["share"]), 15)
+        self.assertAlmostEqual(sum(fam["share"].values()), 1.0, places=2)
+        self.assertEqual(got["t140"]["song"]["title"], "Control")
+        self.assertIn("gated", got["t140"])
+
     def test_music_is_found_by_describing_it(self):
         """The search by words (0.26), as AudioMuse-AI answers it: the songs nearest the words, steered by concepts."""
         self.words = FakeWords()
