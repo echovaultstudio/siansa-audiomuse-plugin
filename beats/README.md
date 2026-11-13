@@ -323,9 +323,11 @@ genre pages and genre radios:
   PyTorch Beat This! uses; the model is small, so Beat This! hardly notices), else on the CPU (ONNX Runtime,
   `STYLE_THREADS`, 2 by default); `BEATS_DEVICE=cpu` keeps both on the CPU. The model is at home among electronic
   releases and can misread a clean, sparse production (a country ballad as Dance-pop, the owner, 13 Nov); `GET
-  /api/v1/songs/families?ids=` (0.38) shows, for up to ten songs, how CLAP hears their genre family from the vector
-  kept for the search by words, and what their styles would be weighed by that — a look, nothing kept, until it has
-  proved itself. On the first real song the GPU's scores
+  /api/v1/songs/families?ids=` (0.38) shows, for up to twenty songs, how CLAP hears their genre family from the vector
+  kept for the search by words, and what their styles would be with CLAP's veto (a family it doesn't hear, below a
+  cosine of 0.15, takes its styles with it; one it hears, above 0.35, keeps them whole; `&words=a|b` tries any
+  wordings too), and `GET /api/v1/genre/preview?name=` what that veto would do to a whole genre — a look, nothing
+  kept, until it has proved itself. On the first real song the GPU's scores
   are checked against ONNX Runtime's (0.37.1): a GPU that disagrees by more than 0.05 is let go for the CPU, the
   page says so, and every song is heard again (its old styles stay in use until then). `GET
   /api/v1/songs/styles/again?ids=` hears up to ten songs again both ways, to see the two side by side. New songs are

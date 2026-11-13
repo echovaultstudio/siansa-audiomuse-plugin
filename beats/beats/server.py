@@ -710,10 +710,10 @@ class App:
             "events": events,
         }
 
-    def families_of(self, ids, server=None):
+    def families_of(self, ids, server=None, words=()):
         """CLAP's view of each song's genre families (0.38, a look only): ``{asked id: {"song", "families":
-        {"cosine", "share"}, "styles": [(style, score)], "gated": [(style, score)]}}``; a song without a CLAP vector
-        says so."""
+        {"cosine", "share", "heard"}, "styles": [(style, score)], "gated": [(style, score)], "words": {word: cosine}}}``
+        (``words``: any wordings to try, 0.38.1); a song without a CLAP vector says so."""
         from . import families as fam
 
         if self._families is None:
@@ -733,13 +733,59 @@ class App:
             if clap is None:
                 entry["error"] = "no CLAP vector yet: not heard here or by AudioMuse-AI"
             else:
-                scores = self._families.scores(np.frombuffer(clap, dtype=np.float32))
+                vector = np.frombuffer(clap, dtype=np.float32)
+                scores = self._families.scores(vector)
+                scores["heard"] = {n: round(fam.heard(c), 3) for n, c in scores["cosine"].items()}
                 had = [(l, w) for src in ("sound", "sound-doubted") for l, w in styles.get(song_id, {}).get(src, [])]
                 entry["families"] = scores
                 entry["styles"] = [(l.partition("---")[2] or l, w) for l, w in had[:8]]
-                entry["gated"] = [(l.partition("---")[2] or l, w) for l, w in fam.gated(had, scores["share"])[:8]]
+                entry["gated"] = [(l.partition("---")[2] or l, w) for l, w in fam.gated(had, scores["cosine"])[:8]]
+                if words:
+                    entry["words"] = self._families.ask(vector, words)
             out[asked] = entry
         return out
+
+    def genre_preview(self, name, server=None, limit=10):
+        """What CLAP's veto would do to a genre (0.38.1, a look only): over every song in it by its sound that has a
+        CLAP vector, how many stay (their style still at or above :data:`beats.genres.HEARD_MIN` after the veto) and
+        how many go, with the strongest of each at the edges: ``{"name", "songs", "kept", "dropped", "no_clap",
+        "keeps": [...], "drops": [...]}`` (each a few of ``{"title", "artist", "score", "after", "family_cosine"}``)."""
+        from . import families as fam
+        from . import genres
+
+        if self._families is None:
+            self._families = fam.Families(self.words)
+        taxonomy = self.worker.taxonomy()
+        if taxonomy is None:
+            return {"name": name, "error": "no style model"}
+        styles, families_asked = genres.target(taxonomy, name)
+        labels = set(styles)
+        for f in families_asked:
+            labels |= set(taxonomy.by_genre.get(genres.key(f), []))
+        label = next(iter(styles), None) or next(iter(labels), None)
+        family = fam.family_of(label) if label else None
+        rank = genres.HEARD_RANK if styles else 1
+        rows = self.store.songs_heard(labels, genres.HEARD_MIN, rank)  # [(song_id, weight)], here ids
+        claps = self.store.clap_of([r[0] for r in rows])
+        vector_of = self._families.vectors().get(family) if family else None
+        kept, dropped, missing = [], [], 0
+        for song_id, score in rows:
+            clap = claps.get(song_id)
+            if clap is None or vector_of is None:
+                missing += 1
+                continue
+            v = np.frombuffer(clap, dtype=np.float32)
+            cos = float(np.dot(v / max(float(np.linalg.norm(v)), 1e-8), vector_of))
+            after = round(score * fam.heard(cos), 4)
+            (kept if after >= genres.HEARD_MIN else dropped).append((song_id, score, after, round(cos, 3)))
+        def few(items, key):
+            out = []
+            for song_id, score, after, cos in sorted(items, key=key)[:limit]:
+                song = self.store.song(song_id) or {}
+                out.append({"title": song.get("title"), "artist": song.get("artist"), "score": score, "after": after, "family_cosine": cos})
+            return out
+        return {"name": name, "family": family, "songs": len(rows), "kept": len(kept), "dropped": len(dropped), "no_clap": missing,
+                "keeps": few(kept, lambda r: -r[2]), "drops": few(dropped, lambda r: -r[1])}
 
     def styles_status(self, server=None):
         """The style model: whether the image has it, how far the songs (``server``'s) are, and how often it agrees

@@ -387,6 +387,15 @@ class PullTest(Service):
         self.assertAlmostEqual(sum(fam["share"].values()), 1.0, places=2)
         self.assertEqual(got["t140"]["song"]["title"], "Control")
         self.assertIn("gated", got["t140"])
+        self.assertEqual(len(fam["heard"]), 15)
+        tried = self.call("/api/v1/songs/families?ids=t140&words=something%20deep|a%20waltz")["songs"]["t140"]["words"]
+        self.assertEqual(set(tried), {"something deep", "a waltz"})
+        preview = self.call("/api/v1/genre/preview?name=Trance")
+        self.assertEqual(preview["name"], "Trance")
+        if "songs" in preview:  # with a style model; without, it says so
+            self.assertEqual(preview["songs"], preview["kept"] + preview["dropped"] + preview["no_clap"])
+        else:
+            self.assertEqual(preview["error"], "no style model")
 
     def test_music_is_found_by_describing_it(self):
         """The search by words (0.26), as AudioMuse-AI answers it: the songs nearest the words, steered by concepts."""
