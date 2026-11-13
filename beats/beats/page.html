@@ -252,6 +252,15 @@ a.tile:hover { border-color: var(--amber); }
 .progress span, .meter span { display: block; height: 100%; }
 .progress .done, .meter .done { background: var(--amber); } .progress .failed, .meter .failed { background: var(--bad); }
 .progress .busy, .meter .busy { background: var(--frost); } .meter .plugin { background: var(--ok); }
+.work { display: grid; gap: 10px; margin-top: 14px; }
+.work .job { display: grid; gap: 5px; }
+.work .job .head { display: flex; align-items: baseline; gap: 8px; font-size: 0.9rem; }
+.work .job .head b { font-weight: 600; }
+.work .job .head .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.work .job .what { color: var(--muted); font-size: 0.82rem; }
+.work .job .what .spinner { display: inline-block; width: 12px; height: 12px; border-width: 2px; vertical-align: -2px; margin: 0 6px 0 0; }
+.work .meter { height: 6px; border-radius: 99px; background: var(--raised-2); overflow: hidden; display: flex; }
+.work .meter .wait { background: var(--amber); opacity: 0.35; }
 .counts { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 0.88rem; }
 .counts b { color: var(--text); font-variant-numeric: tabular-nums; }
 .libs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
@@ -494,8 +503,8 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       </div>
       <div class="card">
         <h3>Progress</h3>
-        <div class="progress" id="progress" aria-hidden="true"></div>
-        <div class="counts" id="counts"></div>
+        <div class="work" id="work" aria-live="polite"></div>
+        <div class="counts top-gap" id="counts"></div>
       </div>
       <div class="card">
         <h3>Tidy the database</h3>
@@ -998,14 +1007,13 @@ async function refreshStatus() {
   const read = (s.libraries || {}).read_at;
   if (!$("start").disabled) $("start-note").textContent = read ? `Last looked for new songs ${new Date(read * 1000).toLocaleString()}.` : "";
   $("device-note").hidden = !s.device_note; $("device-note").textContent = s.device_note || "";
-  const w = (n) => total - skipped ? (100 * n / (total - skipped)) + "%" : "0";
-  $("progress").innerHTML = `<span class="done" style="width:${w(done)}"></span><span class="failed" style="width:${w(failed)}"></span><span class="busy" style="width:${w(busy)}"></span>`;
   const times = songs.filter((x) => x.result).map((x) => x.result.model_seconds).filter((x) => x);
   const avg = times.length ? times.reduce((a, b) => a + b, 0) / times.length : null;
   $("counts").innerHTML = `<span><b>${total}</b> songs</span><span><b>${done}</b> done</span><span><b>${queued + busy}</b> to go</span><span><b>${failed}</b> failed</span>` + (skipped ? `<span><b>${skipped}</b> without beats, by their library's choice</span>` : "") +
     (avg ? `<span>about <b>${fmt(avg)}</b> s a song in the model</span>` : "") +
     (s.regridding ? `<span>working out again: <b>${s.regridding.done}</b> of ${s.regridding.total}</span>` : "") +
     (s.last_error ? `<span>last error: ${esc(s.last_error)}</span>` : "");
+  drawWork(s);
   const event = (e) => `<li class="${esc(e.level)}"><time>${new Date(e.at * 1000).toLocaleTimeString()}</time>${esc(e.message)}</li>`;
   $("events").innerHTML = s.events.map(event).join("") || `<li>Nothing yet.</li>`;
   $("events-recent").innerHTML = s.events.slice(0, 8).map(event).join("") || `<li>Nothing yet.</li>`;
@@ -1469,6 +1477,48 @@ $("clean-remove").addEventListener("click", async () => {
     banner(null); refreshLibraries(); statusLoop();
   } catch (e) { banner(e.message); drawCleanButton(); }
 });
+
+// ---- what's being worked on (0.40.1): a bar for each kind of work, under Libraries, so nothing runs unseen ----
+// The rate of each job is taken from the last few minutes of its count, for a rough time left.
+const rates = {};
+function timeLeft(key, done, left) {
+  const now = Date.now() / 1000;
+  const r = rates[key] = rates[key] || {samples: []};
+  r.samples.push([now, done]);
+  while (r.samples.length > 2 && now - r.samples[0][0] > 300) r.samples.shift();
+  const [t0, d0] = r.samples[0];
+  const perSec = now - t0 > 20 ? (done - d0) / (now - t0) : 0;
+  if (perSec <= 0 || !left) return "";
+  const secs = left / perSec;
+  return secs < 90 ? "about a minute left" : secs < 5400 ? `about ${Math.round(secs / 60)} min left` : secs < 172800 ? `about ${(secs / 3600).toFixed(secs < 36000 ? 1 : 0)} h left` : `about ${Math.round(secs / 86400)} days left`;
+}
+function job(key, title, done, total, what, failed = 0, busy = 0) {
+  const w = (n) => total ? `${Math.max(0, Math.min(100, 100 * n / total))}%` : "0";
+  const left = Math.max(0, total - done - failed);
+  const eta = timeLeft(key, done, left);
+  return `<div class="job"><div class="head"><b>${esc(title)}</b><span class="n">${num(done)} of ${num(total)}${failed ? ` · ${num(failed)} failed` : ""}${eta ? ` · ${eta}` : ""}</span></div>
+    <div class="meter" aria-hidden="true"><span class="done" style="width:${w(done)}"></span><span class="failed" style="width:${w(failed)}"></span><span class="busy" style="width:${w(busy)}"></span></div>
+    ${what ? `<div class="what"><span class="spinner" aria-hidden="true"></span>${what}</div>` : ""}</div>`;
+}
+function drawWork(s) {
+  const jobs = [];
+  const c = s.counts || {}, st = s.styles || {}, l = s.loudness || {}, so = s.sound || {};
+  const who = (x) => x ? `${esc(x.artist || "")} – ${esc(x.title || "")}` : "";
+  if (s.reading) jobs.push(`<div class="job"><div class="head"><b>Reading the libraries</b></div><div class="what"><span class="spinner" aria-hidden="true"></span>${esc(s.reading.library || s.reading.server_name || "")}${s.reading.songs != null ? `: matching ${num(s.reading.songs)} songs` : ": asking for its songs"}…</div></div>`);
+  const toGo = (c.queued || 0) + BUSY.reduce((n, k) => n + (c[k] || 0), 0);
+  jobs.push(job("beats", "Beats", c.done || 0, (c.songs || 0) - (c.skipped || 0), s.current ? `${who(s.current)} · ${esc(s.current.step)}` : "", c.failed || 0, toGo));
+  if (st.switch) {
+    if (st.switch.phase === "marking") jobs.push(`<div class="job"><div class="head"><b>Genres by sound</b><span class="n">${st.switch.for_seconds} s</span></div><div class="what"><span class="spinner" aria-hidden="true"></span>Switching to ${esc(st.switch.model_name)}: marking ${num(st.switch.songs)} songs to be heard again…</div></div>`);
+    else jobs.push(job("styles", `Genres by sound · hearing every song again with ${st.switch.model_name}`, st.done || 0, st.switch.doubted || st.total || 0, st.current ? who(st.current) : "waiting for the queue to be empty", st.failed || 0));
+  } else if (st.available && (st.current || (st.total || 0) > (st.done || 0) + (st.failed || 0))) {
+    jobs.push(job("styles", "Genres by sound", st.done || 0, st.total || 0, st.current ? who(st.current) : "", st.failed || 0));
+  }
+  if (l.measuring || l.waiting) jobs.push(job("loudness", "Loudness & key", l.measured || 0, (l.measured || 0) + (l.waiting || 0) + (l.failed || 0), l.measuring ? who(l.measuring) : "", l.failed || 0));
+  if (so.hearing || (so.hears && so.songs > (so.sound || 0) + ((so.sources || {}).failed || 0))) jobs.push(job("sound", "Sound", so.sound || 0, so.songs || 0, so.hearing ? who(so.hearing) : "", (so.sources || {}).failed || 0));
+  if (s.regridding) jobs.push(job("regrid", "Working out beats again", s.regridding.done, s.regridding.total, ""));
+  if (st.switch && $("style-note").textContent.indexOf("…") < 0) $("style-note").innerHTML = st.switch.phase === "marking" ? `Switching to ${esc(st.switch.model_name)}: marking ${num(st.switch.songs)} songs to be heard again (${st.switch.for_seconds} s)…` : `${esc(st.switch.model_name)}: ${num(st.done || 0)} of ${num(st.switch.doubted || 0)} songs heard again so far. <a href="#libraries">Progress is under Libraries.</a>`;
+  $("work").innerHTML = jobs.join("") + (jobs.length === 1 && !toGo && !s.current ? `<div class="sub">Nothing else is running. Start analysis looks for new songs; what's new is analysed as it comes.</div>` : "");
+}
 
 // ---- controls ----
 $("pause").addEventListener("click", async () => { await api(status?.paused ? "api/resume" : "api/pause", {method: "POST"}); refreshStatus(); });
@@ -2172,7 +2222,7 @@ async function chooseStyleModel(id) {
   try {
     const r = await api("api/style/model", {method: "POST", body: JSON.stringify({model: id})});
     styleModels = r;
-    $("style-note").textContent = r.doubted ? `${name} from now on: ${num(r.doubted)} songs are heard again with it, while the queue is empty.` : `${name} is in use.`;
+    $("style-note").innerHTML = r.doubted ? `${esc(name)} from now on: ${num(r.doubted)} songs are marked to be heard again with it, then heard while the queue is empty. <a href="#libraries">Progress is under Libraries.</a>` : `${esc(name)} is in use.`;
     drawStyleModels(); statusLoop();
   } catch (e) { $("style-note").textContent = e.message; drawStyleModels(); }
 }

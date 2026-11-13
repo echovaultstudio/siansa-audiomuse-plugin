@@ -875,9 +875,19 @@ class ServiceTest(Service):
         r = self.call("/api/style/model", "POST", {"model": "maest"})
         self.assertEqual((r["doubted"], r["chosen"], made), (3, "maest", ["maest"]))
         self.assertEqual(set(self.call("/api/genre?name=Trance")["ids"]), {"t140", "t96w"})  # still there meanwhile
+        # The switch is shown while it runs (0.40.1): marking, then hearing, then gone when every song is heard.
         end = time.time() + 20
-        while time.time() < end and self.call("/api/status")["styles"].get("done", 0) < 3:
-            time.sleep(0.2)
+        seen = set()
+        while time.time() < end:
+            styles = self.call("/api/status")["styles"]
+            if styles.get("switch"):
+                seen.add(styles["switch"]["phase"])
+                self.assertEqual(styles["switch"]["model_name"], "MAEST (2023)")
+            elif styles.get("done", 0) >= 3 and "hearing" in seen:
+                break
+            time.sleep(0.1)
+        self.assertIn("hearing", seen)
+        self.assertIsNone(self.call("/api/status")["styles"]["switch"])
         self.assertEqual(self.call("/api/status")["styles"]["done"], 3)
         self.assertEqual(self.call("/api/status")["styles"]["model"], "maest")
         self.assertEqual(self.app.store.setting("style_model"), "maest")

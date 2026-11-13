@@ -343,6 +343,11 @@ stale page, or a request that never saw the look, removes nothing. A library the
 it had gets a warning (the server may still be scanning) and isn't ticked by default. Reading the libraries removes a
 few gone songs by itself (up to 25, or a tenth); more than that is left to this, where you see what goes.
 
+**Progress (0.40.1).** Under Libraries, a bar for each kind of work going on: the beats (with the song and its step),
+genres by sound (and, after a change of model, how many songs are heard again with the new one, with a rough time
+left), loudness and key, the sound, and the libraries being read. Changing the style model answers at once; marking
+the songs to be heard again is shown here and under Setup while it runs.
+
 **Libraries.** Each ticked library shows how many of its songs are done. Ticks take effect with **Start analysis**.
 Untick one and start to leave it out: its songs not yet analysed leave the queue, the ones done stay, and **Remove
 them** next to it forgets them (their beats and marks; nothing changes on Navidrome). The choice is kept across restarts, and the ticked libraries are

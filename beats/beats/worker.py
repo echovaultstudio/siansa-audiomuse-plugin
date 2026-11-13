@@ -421,7 +421,8 @@ class Worker:
             seconds = time.monotonic() - started
             if first:
                 where = getattr(self.style, "backend", None) or "?"
-                self.store.event(f"Style model (Discogs-EffNet) loaded on the {where} in {self.style.load_seconds or 0:.1f}s")
+                name = getattr(getattr(self.style, "spec", None), "name", "Discogs-EffNet")
+                self.store.event(f"Style model ({name}) loaded on the {where} in {self.style.load_seconds or 0:.1f}s")
                 if getattr(self.style, "problem", None):
                     self.store.event(self.style.problem, "warn")
             top = ranked[:STYLE_KEEP]
