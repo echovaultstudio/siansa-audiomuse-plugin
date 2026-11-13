@@ -81,6 +81,9 @@ CREATE TABLE IF NOT EXISTS sound (
     song_id TEXT PRIMARY KEY, musicnn BLOB, clap BLOB, key TEXT, scale TEXT, moods TEXT, other TEXT,
     energy REAL, album_artist TEXT, year INTEGER, fp TEXT, source TEXT, at REAL
 );
+-- What a library is left out of (0.40, the owner, 13 Nov): a library of two-hour mixes needs its loudness, not its
+-- beats. A song is left out of a task only when every library it's in leaves it out.
+CREATE TABLE IF NOT EXISTS library_skips (server TEXT, folder TEXT, task TEXT, PRIMARY KEY (server, folder, task));
 CREATE INDEX IF NOT EXISTS links_by_song ON links (song_id, server);
 CREATE INDEX IF NOT EXISTS links_by_server ON links (server, song_id);
 CREATE INDEX IF NOT EXISTS links_by_item ON links (item_id);
@@ -97,6 +100,18 @@ RESULT_FIELDS = ("bpm", "bpm_fit", "main_share", "grid_bpm", "on_grid", "grid_dr
                  "outro_steady", "beats_per_bar", "bar_share", "first_downbeat_ms", "beat_count", "downbeat_count",
                  "download_seconds", "decode_seconds", "model_seconds")
 BUSY = ("downloading", "decoding", "ready", "analysing")  # ready: downloaded and decoded, waiting for the model
+TASKS = ("beats", "loudness", "sound", "styles")  # what a library can be left out of (library_skips)
+HAS_BEATS = "('done', 'skipped')"  # a song's beats are settled: found, or left out by its library's choice
+
+
+def skipped(task, song):
+    """SQL: whether the song (the column ``song``, qualified with its table: ``links`` has a ``song_id`` too) is left
+    out of ``task``, that is in some library and in none that wants it. ``task`` is one of :data:`TASKS`, never
+    anything else."""
+    assert task in TASKS, task
+    return (f"(EXISTS (SELECT 1 FROM links lk WHERE lk.song_id={song}) AND NOT EXISTS (SELECT 1 FROM links lk "
+            f"WHERE lk.song_id={song} AND NOT EXISTS (SELECT 1 FROM library_skips k WHERE k.server=lk.server AND "
+            f"k.folder=lk.folder AND k.task='{task}')))")
 
 
 def _column(name, value):
@@ -227,8 +242,8 @@ class Store:
     def without_sound(self, limit=20):
         """Songs analysed for their beats whose sound isn't known (and that didn't fail to be heard), newest first."""
         return [r["song_id"] for r in self._rows(
-            "SELECT j.song_id FROM jobs j LEFT JOIN sound o ON o.song_id = j.song_id WHERE j.state = 'done' AND "
-            "o.song_id IS NULL ORDER BY j.finished_at DESC LIMIT ?", (limit,))]
+            f"SELECT j.song_id FROM jobs j LEFT JOIN sound o ON o.song_id = j.song_id WHERE j.state IN {HAS_BEATS} AND "
+            f"o.song_id IS NULL AND NOT {skipped('sound', 'j.song_id')} ORDER BY j.finished_at DESC, j.song_id LIMIT ?", (limit,))]
 
     def sound_sources(self, server=None):
         """``{"audiomuse": n, "beats": n, "failed": n}``: where each of ``server``'s songs' sound came from."""
@@ -317,6 +332,9 @@ class Store:
                 song_id, how = self._link(server, folder, song, source, twins, queued)
                 if how:
                     matched[how] = matched.get(how, 0) + 1
+            if queued and self._apply_skips():
+                still = {r["song_id"] for r in self.db.execute("SELECT song_id FROM jobs WHERE state='queued'")}
+                queued = [i for i in queued if i in still]
         return {"songs": len(songs), "queued": queued, "matched": matched}
 
     def _link(self, server, folder, song, source, twins, queued):
@@ -445,7 +463,7 @@ class Store:
         return [r["id"] for r in self._rows(
             "SELECT s.id FROM songs s LEFT JOIN jobs j ON j.song_id=s.id WHERE NOT EXISTS (SELECT 1 FROM genres g "
             "WHERE g.song_id=s.id AND g.source IN ('sound', 'sound-failed')) AND COALESCE(j.state, '') != 'failed' "
-            "ORDER BY CASE j.state WHEN 'done' THEN 0 ELSE 1 END, s.id LIMIT ?", (limit,))]
+            f"AND NOT {skipped('styles', 's.id')} ORDER BY CASE j.state WHEN 'done' THEN 0 ELSE 1 END, s.id LIMIT ?", (limit,))]
 
     def style_counts(self, server=None):
         """``{"done", "failed", "total"}``: songs with styles from their sound, songs whose sound couldn't be, of all
@@ -456,7 +474,8 @@ class Store:
         by = {r["source"]: r["n"] for r in rows}
         of, value = self._of(server)
         total = self._rows("SELECT COUNT(*) AS n FROM songs s LEFT JOIN jobs j ON j.song_id=s.id "
-                           f"WHERE COALESCE(j.state, '') != 'failed'{of}", value)[0]["n"]  # a failed song has no sound to hear
+                           f"WHERE COALESCE(j.state, '') != 'failed' AND NOT {skipped('styles', 's.id')}{of}",
+                           value)[0]["n"]  # a failed song has no sound to hear; one left out isn't asked
         return {"done": by.get("sound", 0), "failed": by.get("sound-failed", 0), "total": total}
 
     def tag_genres(self, limit=300):
@@ -653,6 +672,8 @@ class Store:
                 return False
             if row and not force:
                 return False
+            if self.db.execute(f"SELECT 1 FROM songs WHERE id=? AND {skipped('beats', 'id')}", (song_id,)).fetchone():
+                return False  # its library leaves the beats out
             self.db.execute("INSERT OR REPLACE INTO jobs (song_id, state, step, queued_at, started_at, finished_at, error)"
                             " VALUES (?, 'queued', NULL, ?, NULL, NULL, NULL)", (song_id, time.time()))
             return True
@@ -687,9 +708,42 @@ class Store:
 
     def folder_counts(self, server=MAIN):
         """``{folder: {"songs", "done"}}``: each of ``server``'s libraries' songs here, and how many are analysed."""
-        rows = self._rows("SELECT l.folder, COUNT(*) AS songs, SUM(j.state='done') AS done FROM links l "
+        rows = self._rows(f"SELECT l.folder, COUNT(*) AS songs, SUM(j.state IN {HAS_BEATS}) AS done FROM links l "
                           "LEFT JOIN jobs j ON j.song_id=l.song_id WHERE l.server=? GROUP BY l.folder", (server,))
         return {r["folder"]: {"songs": r["songs"], "done": r["done"] or 0} for r in rows if r["folder"] is not None}
+
+    # ---- what a library is left out of (0.40) ----
+
+    def skips(self, server=MAIN):
+        """``{folder: [tasks]}``: what each of ``server``'s libraries is left out of (libraries in nothing aren't listed)."""
+        out = {}
+        for r in self._rows("SELECT folder, task FROM library_skips WHERE server=? ORDER BY folder, task", (server,)):
+            out.setdefault(r["folder"], []).append(r["task"])
+        return out
+
+    def wanted(self, song_id):
+        """The tasks some library of the song wants: a set from :data:`TASKS` (all of them for a song in no library)."""
+        rows = self._rows("SELECT " + ", ".join(f"NOT {skipped(t, ':id')} AS {t}" for t in TASKS), {"id": song_id})
+        return {t for t in TASKS if rows and rows[0][t]}
+
+    def set_skips(self, server, folder, tasks):
+        """Leaves ``server``'s library ``folder`` out of ``tasks`` (and in everything else): songs whose beats are no
+        longer wanted leave the queue, those wanted again join it. ``{"skipped", "queued"}``: how many moved."""
+        tasks = [t for t in dict.fromkeys(tasks) if t in TASKS]
+        with self._write():
+            self.db.execute("DELETE FROM library_skips WHERE server=? AND folder=?", (server, str(folder)))
+            self.db.executemany("INSERT INTO library_skips VALUES (?,?,?)", [(server, str(folder), t) for t in tasks])
+            return self._apply_skips()
+
+    def _apply_skips(self):
+        """Inside a change: queued songs whose every library leaves the beats out are marked ``skipped``; skipped
+        songs some library wants again are queued. ``{"skipped", "queued"}``, or None when nothing moved."""
+        now = time.time()
+        out = self.db.execute(f"UPDATE jobs SET state='skipped', step=NULL, finished_at=? WHERE state='queued' AND "
+                              f"{skipped('beats', 'jobs.song_id')}", (now,)).rowcount
+        back = self.db.execute(f"UPDATE jobs SET state='queued', queued_at=?, finished_at=NULL WHERE state='skipped' AND "
+                               f"NOT {skipped('beats', 'jobs.song_id')}", (now,)).rowcount
+        return {"skipped": out, "queued": back} if out or back else None
 
     # ---- settings ----
 
@@ -744,6 +798,10 @@ class Store:
             row["beats"], row["downbeats"] = json.loads(beats or "[]"), json.loads(downbeats or "[]")
             row["levels"] = json.loads(levels) if levels else None
         return row
+
+    def unlinked_songs(self):
+        """Songs no server's library links to (from before 0.23, or whose links went): never read again."""
+        return [r["id"] for r in self._rows("SELECT id FROM songs s WHERE NOT EXISTS (SELECT 1 FROM links l WHERE l.song_id=s.id)")]
 
     def failed(self):
         """``[{"id", "error"}]`` of the songs that couldn't be analysed."""
@@ -837,9 +895,9 @@ class Store:
         """Songs analysed for their beats but not yet measured by this ``version`` (failed ones aren't asked for again,
         unless measured by an older version)."""
         return [r["song_id"] for r in self._rows(
-            "SELECT j.song_id FROM jobs j LEFT JOIN measures m ON m.song_id = j.song_id WHERE j.state = 'done' AND "
-            "(m.song_id IS NULL OR (m.version < ? AND m.error IS NULL)) ORDER BY j.finished_at DESC LIMIT ?",
-            (version, limit))]
+            f"SELECT j.song_id FROM jobs j LEFT JOIN measures m ON m.song_id = j.song_id WHERE j.state IN {HAS_BEATS} AND "
+            f"(m.song_id IS NULL OR (m.version < ? AND m.error IS NULL)) AND NOT {skipped('loudness', 'j.song_id')} "
+            "ORDER BY j.finished_at DESC, j.song_id LIMIT ?", (version, limit))]
 
     def measure_counts(self, version, server=None):
         """``{"measured", "failed", "waiting"}`` for the page and the capabilities (``server``'s songs, when given)."""
@@ -848,8 +906,8 @@ class Store:
             "SELECT SUM(CASE WHEN m.error IS NULL AND m.version >= ? THEN 1 ELSE 0 END) AS measured, "
             "SUM(CASE WHEN m.error IS NOT NULL THEN 1 ELSE 0 END) AS failed, "
             "SUM(CASE WHEN m.song_id IS NULL OR (m.version < ? AND m.error IS NULL) THEN 1 ELSE 0 END) AS waiting "
-            f"FROM jobs j LEFT JOIN measures m ON m.song_id = j.song_id WHERE j.state = 'done'{of}",
-            (version, version, *value))[0]
+            f"FROM jobs j LEFT JOIN measures m ON m.song_id = j.song_id WHERE j.state IN {HAS_BEATS} AND "
+            f"NOT {skipped('loudness', 'j.song_id')}{of}", (version, version, *value))[0]
         return {k: row[k] or 0 for k in ("measured", "failed", "waiting")}
 
     def overview(self, model, find=None, state=None, limit=None, song_id=None, server=None):

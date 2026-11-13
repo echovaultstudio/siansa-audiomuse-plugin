@@ -3,6 +3,7 @@ the page's safety; a song's download has a size cap on every server."""
 
 import io
 import os
+import urllib.error
 import shutil
 import sys
 import tempfile
@@ -179,6 +180,131 @@ class StartAnalysisTest(Service):
         self.assertIn("doesn't answer", by["server"]["detail"])
         self.assertEqual(by["libraries"]["state"], "fail")
         self.fake = type(self.fake)(self.music).start()  # for tearDown
+
+
+class LibraryTasksTest(Service):
+    """What a library gets (0.40): a library of two-hour mixes wants its loudness, not its beats."""
+
+    def test_a_library_left_out_of_the_beats_still_gets_its_loudness(self):
+        for song in self.fake.songs:
+            song["library"] = "2" if song["id"] in ("t96w", "t122") else "1"  # 2: the mixes
+        self.start(style=FakeStyle(os.path.join(self.tmp, "models")))
+        r = self.call("/api/analysis/start", "POST", {"ids": ["1", "2"], "skips": {"2": ["beats", "sound", "styles"]}})
+        self.assertTrue(r["ok"])
+        end = time.time() + 20
+        while time.time() < end:
+            counts = self.call("/api/status")["counts"]
+            if counts.get("done", 0) + counts.get("failed", 0) == 2 and counts.get("skipped") == 2:
+                break
+            time.sleep(0.1)
+        counts = self.call("/api/status")["counts"]
+        self.assertEqual((counts.get("done"), counts.get("failed"), counts.get("skipped")), (1, 1, 2))
+        libraries = {l["id"]: l for l in self.call("/api/libraries")}
+        self.assertEqual(libraries["2"]["skip"], ["beats", "sound", "styles"])
+        self.assertEqual(libraries["1"]["skip"], [])
+        self.assertEqual((libraries["2"]["songs"], libraries["2"]["done"]), (2, 2))  # settled, by choice
+        self.assertEqual({s["id"]: s["state"] for s in self.call("/api/songs")}["t122"], "skipped")
+        self.assertIn("left out of beats, sound, genres by sound", " ".join(e["message"] for e in self.call("/api/status")["events"]))
+        # The loudness is measured all the same, by the measure loop, beats or no beats.
+        end = time.time() + 20
+        while time.time() < end and self.call("/api/status")["loudness"]["waiting"]:
+            time.sleep(0.2)
+        measured = self.call("/api/status")["loudness"]
+        self.assertEqual(measured["waiting"], 0)
+        self.assertGreaterEqual(measured["measured"] + measured["failed"], 3)  # t140, t122, t96w
+        self.assertIsNotNone(self.call("/api/songs/t122")["measure"])
+        # Analyse again doesn't force the beats on a library that doesn't want them.
+        self.assertEqual(self.call("/api/analyse-all", "POST")["queued"], 2)  # t140 and the failed one; not the mixes
+        self.wait_done()
+        # Put the beats back: the two join the queue and are analysed.
+        r = self.call("/api/analysis/start", "POST", {"ids": ["1", "2"], "skips": {}})
+        self.assertTrue(r["ok"])
+        self.wait_done()
+        counts = self.call("/api/status")["counts"]
+        self.assertEqual((counts.get("done"), counts.get("skipped", 0)), (3, 0))
+        self.assertIn("in everything again (2 songs joined the queue)", " ".join(e["message"] for e in self.call("/api/status")["events"]))
+
+    def test_a_song_in_two_libraries_is_left_out_only_when_both_leave_it_out(self):
+        from beats.store import Store
+
+        db = Store(os.path.join(self.tmp, "two.db"))
+        self.addCleanup(db.close)
+        song = {"id": "x", "title": "T", "artist": "A", "album": "B", "duration": 60.0, "suffix": "flac", "tag_bpm": None, "genres": []}
+        db.link_songs("main", "1", [song])
+        db.link_songs("emby", "2", [song])  # the same song on a second server (a song is in one library of a server)
+        self.assertEqual(db.set_skips("main", "1", ["beats"]), None)  # the other library still wants them
+        self.assertEqual(db.wanted("x"), {"beats", "loudness", "sound", "styles"})
+        self.assertEqual(db.set_skips("emby", "2", ["beats", "sound"]), {"skipped": 1, "queued": 0})
+        self.assertEqual(db.wanted("x"), {"loudness", "sound", "styles"})  # sound: the first library still wants it
+        self.assertEqual(db.set_skips("main", "1", []), {"skipped": 0, "queued": 1})
+        self.assertEqual(db.skips("emby"), {"2": ["beats", "sound"]})
+        self.assertFalse(db.set_skips("emby", "2", ["nonsense"]))  # unknown tasks are ignored
+        self.assertEqual(db.skips("emby"), {})
+
+
+class TidyTest(Service):
+    """Tidying the database (0.40): looked at first, removed as shown, a copy kept."""
+
+    def test_what_the_server_no_longer_has_is_shown_then_removed_with_the_looks_token(self):
+        for song in self.fake.songs:
+            song["library"] = "2" if song["id"] in ("t96w",) else "1"
+        self.start(style=FakeStyle(os.path.join(self.tmp, "models")))
+        self.call("/api/libraries", "POST", {"ids": ["1", "2"]})
+        self.wait_done()
+        self.call("/api/songs/t122/marks", "POST", {"seconds": 12.0})
+        look = self.call("/api/clean/preview")
+        self.assertEqual(look["total"], 1)  # the failed song alone
+        by = {g["id"]: g for g in look["groups"]}
+        self.assertEqual(by["failed"]["names"], ["Nobody – Broken"])
+        self.assertEqual(by["gone:1"]["count"], 0)
+        # Now library 2 is unticked, and a song goes from the server (a read would tidy one song by itself; the
+        # look doesn't read, so it shows what's gone).
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.fake.songs[:] = [s for s in self.fake.songs if s["id"] != "t122"]
+        look = self.call("/api/clean/preview")
+        by = {g["id"]: g for g in look["groups"]}
+        self.assertEqual([g["id"] for g in look["groups"]], ["gone:1", "left-out:2", "failed"])
+        self.assertEqual((by["gone:1"]["count"], by["gone:1"]["names"]), (1, ["House Test – Deep"]))
+        self.assertEqual((by["left-out:2"]["count"], by["left-out:2"]["names"]), (1, ["Three – Waltz"]))
+        self.assertIsNone(by["gone:1"]["warning"])
+        self.assertEqual(sorted(s["id"] for s in self.call("/api/songs")), ["bad", "t122", "t140", "t96w"])  # looking removed nothing
+        # A wrong token, a group the look didn't show, then the real thing.
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/clean", "POST", {"token": "nope", "groups": ["gone:1"]})
+        self.assertEqual(e.exception.code, 409)
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/clean", "POST", {"token": look["token"], "groups": ["gone:9"]})
+        self.assertEqual(e.exception.code, 409)
+        self.assertEqual(sorted(s["id"] for s in self.call("/api/songs")), ["bad", "t122", "t140", "t96w"])
+        look = self.call("/api/clean/preview")  # a failed try spends the token: look again
+        r = self.call("/api/clean", "POST", {"token": look["token"], "groups": ["gone:1", "left-out:2"]})
+        self.assertEqual((r["removed"], r["groups"]), (2, {"gone:1": 1, "left-out:2": 1}))
+        self.assertEqual(r["backup"], "beats-before-clean.db")
+        self.assertEqual(r["integrity"]["quick_check"], "ok")
+        self.assertEqual(sorted(s["id"] for s in self.call("/api/songs")), ["bad", "t140"])
+        self.assertEqual(self.call("/api/grids?ids=t122")["missing"], ["t122"])
+        # The copy is the database from before, whole.
+        import sqlite3
+
+        copy = sqlite3.connect(os.path.join(self.app.config.data_dir, "beats-before-clean.db"))
+        self.assertEqual(copy.execute("SELECT COUNT(*) FROM songs").fetchone()[0], 4)
+        self.assertEqual(copy.execute("SELECT COUNT(*) FROM marks WHERE song_id='t122'").fetchone()[0], 1)
+        copy.close()
+        # The same token twice removes nothing more.
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/clean", "POST", {"token": look["token"], "groups": ["gone:1"]})
+        self.assertEqual(e.exception.code, 409)
+        self.assertIn("Tidied the database: 2 songs removed", " ".join(e["message"] for e in self.call("/api/status")["events"]))
+
+    def test_a_library_the_server_suddenly_lists_half_empty_is_warned_about(self):
+        self.start(style=FakeStyle(os.path.join(self.tmp, "models")))
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.fake.songs[:] = self.fake.songs[:1]
+        look = self.call("/api/clean/preview")
+        gone = {g["id"]: g for g in look["groups"]}["gone:1"]
+        self.assertEqual(gone["count"], 3)
+        self.assertIn("may still be scanning", gone["warning"])
 
 
 if __name__ == "__main__":

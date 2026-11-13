@@ -339,7 +339,7 @@ class Service(Base):
         end = time.time() + timeout
         while time.time() < end:
             counts = self.call("/api/status")["counts"]
-            if counts.get("songs") and counts.get("songs") == counts.get("done", 0) + counts.get("failed", 0):
+            if counts.get("songs") and counts.get("songs") == counts.get("done", 0) + counts.get("failed", 0) + counts.get("skipped", 0):
                 return counts
             time.sleep(0.1)
         self.fail(f"not done: {self.call('/api/status')}")

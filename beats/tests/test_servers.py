@@ -133,7 +133,7 @@ class ServersTest(Service):
         self.assertEqual(added, {"id": "emby", "kind": "emby", "name": "Living room Emby", "url": emby.url, "user": USER,
                                  "default": False, "signed_in": True})
         self.assertEqual(self.call("/api/libraries?server=emby"),
-                         [{"id": "lib1", "name": "Music", "on": False, "songs": 0, "done": 0}])
+                         [{"id": "lib1", "name": "Music", "on": False, "songs": 0, "done": 0, "skip": []}])
         self.assertEqual(self.call("/api/libraries?server=emby", "POST", {"ids": ["lib1"]}), {"songs": 4, "queued": 0})
         self.assertIn("Library Music on Living room Emby: 4 songs, 0 new in the queue, 4 already analysed from another "
                       "server (4 by their file)", self.events())

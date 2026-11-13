@@ -370,6 +370,21 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 @media (max-width: 600px) { .form { grid-template-columns: minmax(0, 1fr); } }
 #key-text { overflow-wrap: anywhere; user-select: all; }
 /* A library being read: what, how far, and why (0.24.1). */
+.tasks { display: grid; gap: 6px; margin: 2px 0 10px; }
+.tasks .lib { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.85rem; }
+.tasks .lib > b { min-width: 7rem; font-weight: 600; }
+.tasks .lib button { font-size: 0.78rem; padding: 3px 9px; border-radius: 999px; }
+.tasks .lib button[aria-pressed=false] { opacity: 0.55; text-decoration: line-through; }
+.tasks .lib button[aria-pressed=true] { border-color: var(--amber); }
+.clean-group { padding: 10px 0; border-top: 1px solid var(--line); }
+.clean-group label { display: flex; gap: 10px; align-items: baseline; cursor: pointer; }
+.clean-group label input { accent-color: var(--amber); }
+.clean-group .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+.clean-group .sub { margin: 4px 0 0 26px; }
+.clean-group .warn-line { color: var(--warn); margin: 4px 0 0 26px; font-size: 0.82rem; }
+.clean-group details { margin: 6px 0 0 26px; font-size: 0.82rem; }
+.clean-group details ul { margin: 6px 0 0; padding-left: 18px; columns: 2; column-gap: 24px; color: var(--muted); }
+.clean-group details ul li { break-inside: avoid; }
 .checks { list-style: none; margin: 12px 0 4px; padding: 0; display: grid; gap: 6px; }
 .checks li { display: grid; grid-template-columns: 1.1rem 1fr; gap: 8px; align-items: start; font-size: 0.9rem; }
 .checks li::before { content: "✓"; color: var(--ok); font-weight: 700; line-height: 1.35; }
@@ -467,6 +482,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
       <div class="card">
         <h3>Libraries to analyse</h3>
         <div class="libs" role="group" aria-label="Libraries to analyse"><span id="libs" class="controls"><span class="sub">Asking the server…</span></span></div>
+        <div class="tasks" id="lib-tasks" role="group" aria-label="What each library gets" hidden></div>
         <div class="sub" id="libs-note" role="status"></div>
         <div class="reading" id="reading" role="status" hidden><span class="spinner" aria-hidden="true"></span><div><b id="reading-what"></b><div class="sub" id="reading-step"></div></div></div>
         <div class="controls row-gap">
@@ -480,6 +496,13 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
         <h3>Progress</h3>
         <div class="progress" id="progress" aria-hidden="true"></div>
         <div class="counts" id="counts"></div>
+      </div>
+      <div class="card">
+        <h3>Tidy the database</h3>
+        <p class="sub">Songs the server no longer has, songs of libraries left out, songs linked to no server and songs that couldn't be analysed. Looking removes nothing: what's found is shown, and goes only when you say so, after a copy of the database is kept beside it (<code>beats-before-clean.db</code>). Nothing changes on the server.</p>
+        <div class="controls row-gap"><button id="clean-look">Look for what's gone</button><span class="sub" id="clean-note"></span></div>
+        <div id="clean-groups" hidden></div>
+        <div class="controls row-gap" id="clean-do" hidden><button class="primary" id="clean-remove">Remove</button></div>
       </div>
       <div class="card">
         <h3>Start over</h3>
@@ -946,7 +969,7 @@ async function refreshStatus() {
   drawServers(s);
   drawReading(s.reading);
   if (s.bad_blends !== badCount) { badCount = s.bad_blends; refreshBad(); }
-  const done = c.done || 0, failed = c.failed || 0, queued = c.queued || 0;
+  const done = c.done || 0, failed = c.failed || 0, queued = c.queued || 0, skipped = c.skipped || 0;
   const busy = BUSY.reduce((n, k) => n + (c[k] || 0), 0);
   drawStatus(s);
   if (s.current) {
@@ -975,11 +998,11 @@ async function refreshStatus() {
   const read = (s.libraries || {}).read_at;
   if (!$("start").disabled) $("start-note").textContent = read ? `Last looked for new songs ${new Date(read * 1000).toLocaleString()}.` : "";
   $("device-note").hidden = !s.device_note; $("device-note").textContent = s.device_note || "";
-  const w = (n) => total ? (100 * n / total) + "%" : "0";
+  const w = (n) => total - skipped ? (100 * n / (total - skipped)) + "%" : "0";
   $("progress").innerHTML = `<span class="done" style="width:${w(done)}"></span><span class="failed" style="width:${w(failed)}"></span><span class="busy" style="width:${w(busy)}"></span>`;
   const times = songs.filter((x) => x.result).map((x) => x.result.model_seconds).filter((x) => x);
   const avg = times.length ? times.reduce((a, b) => a + b, 0) / times.length : null;
-  $("counts").innerHTML = `<span><b>${total}</b> songs</span><span><b>${done}</b> done</span><span><b>${queued + busy}</b> to go</span><span><b>${failed}</b> failed</span>` +
+  $("counts").innerHTML = `<span><b>${total}</b> songs</span><span><b>${done}</b> done</span><span><b>${queued + busy}</b> to go</span><span><b>${failed}</b> failed</span>` + (skipped ? `<span><b>${skipped}</b> without beats, by their library's choice</span>` : "") +
     (avg ? `<span>about <b>${fmt(avg)}</b> s a song in the model</span>` : "") +
     (s.regridding ? `<span>working out again: <b>${s.regridding.done}</b> of ${s.regridding.total}</span>` : "") +
     (s.last_error ? `<span>last error: ${esc(s.last_error)}</span>` : "");
@@ -1030,7 +1053,7 @@ function drawRows() {
       <td class="num">${pct(r.steady)}<div class="sub">grid ${pct(r.grid_share)}</div></td>
       <td class="num">${soundCell(s.sound)}</td>
       <td>${(s.verdict || []).map(([level, text]) => `<span class="note ${level}">${esc(text)}</span>`).join("") || (s.error ? `<span class="note warn">${esc(s.error)}</span>` : "")}</td>
-      <td><span class="state ${esc(state)}">${esc(s.state || "–")}</span>${r.model_seconds ? `<div class="sub">${fmt(r.model_seconds)} s</div>` : ""}</td>
+      <td><span class="state ${esc(state)}">${s.state === "skipped" ? "no beats (left out)" : esc(s.state || "–")}</span>${r.model_seconds ? `<div class="sub">${fmt(r.model_seconds)} s</div>` : ""}</td>
     </tr>`;
   }).join("");
 }
@@ -1062,10 +1085,36 @@ async function refreshLibraries() {
   drawLibraries();
 }
 const savedIds = () => libraries.filter((l) => l.on).map((l) => l.id);
+// What each ticked library gets (0.40): a library of two-hour mixes wants its loudness, not its beats. Each chip is
+// a task; a crossed-out one is left out. Kept in skips (library id → the tasks left out) until Start analysis.
+const TASKS = [["beats", "Beats", "Tempo, beats and phrases (Beat This!): what the DJ blends need. Slow on very long songs."], ["loudness", "Loudness & key", "LUFS, fades and the key: what the app levels the volume and mixes in key by."], ["sound", "Sound", "Moods, energy and what sounds alike (MusiCNN, CLAP): similar music and the search by words."], ["styles", "Genres", "The 400 Discogs styles by sound: the genre radios."]];
+let skips = null;
+const savedSkips = () => Object.fromEntries(libraries.filter((l) => l.skip && l.skip.length).map((l) => [l.id, [...l.skip]]));
+function drawTasks(ticked) {
+  const box = $("lib-tasks");
+  const current = skips || savedSkips();
+  const shown = libraries.filter((l) => ticked.has(l.id));
+  box.hidden = !shown.length;
+  box.innerHTML = shown.map((l) => `<div class="lib"><b>${esc(l.name)}</b>` + TASKS.map(([id, name, hint]) => {
+    const out = (current[l.id] || []).includes(id);
+    return `<button type="button" data-task="${id}" data-lib="${esc(l.id)}" aria-pressed="${!out}" title="${esc(hint)}${out ? " — left out: tap to put it back" : " — tap to leave it out"}">${name}</button>`;
+  }).join("") + "</div>").join("");
+}
+$("lib-tasks").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-task]");
+  if (!b) return;
+  skips = skips || savedSkips();
+  const set = new Set(skips[b.dataset.lib] || []);
+  if (set.has(b.dataset.task)) set.delete(b.dataset.task); else set.add(b.dataset.task);
+  if (set.size) skips[b.dataset.lib] = [...set]; else delete skips[b.dataset.lib];
+  drawLibraries();
+});
+const skipsChanged = () => skips && JSON.stringify(skips, Object.keys(skips).sort()) !== JSON.stringify(savedSkips(), Object.keys(savedSkips()).sort());
 function drawLibraries() {
   const ticked = new Set(picked || savedIds());
+  drawTasks(ticked);
   $("libs").innerHTML = libraries.map((l) => `<button data-lib="${esc(l.id)}" aria-pressed="${ticked.has(l.id)}" title="${ticked.has(l.id) ? "Ticked: tap to leave it out" : "Left out: tap to tick it"}">${esc(l.name)}<span class="n">${l.songs ? `${l.done} of ${l.songs}` : ""}</span></button>`).join("") || `<span class="sub">${esc(serverName())} has no music libraries.</span>`;
-  const changed = picked && [...ticked].sort().join() !== savedIds().sort().join();
+  const changed = (picked && [...ticked].sort().join() !== savedIds().sort().join()) || skipsChanged();
   $("libs-note").textContent = changed ? "Not started yet: press Start analysis" : readNote;
   const left = libraries.filter((l) => !l.on && l.songs);
   $("left-out").hidden = !left.length;
@@ -1120,10 +1169,10 @@ $("start").addEventListener("click", async () => {
   if (!ids.length && !confirm("No library is ticked: stop analysing? Songs already done stay.")) return;
   $("start").disabled = true; $("start").textContent = "Checking…"; $("start-note").textContent = "Checking the server, the libraries, the database, the disk and the models…";
   try {
-    const r = await api("api/analysis/start", {method: "POST", body: JSON.stringify({ids})});
+    const r = await api("api/analysis/start", {method: "POST", body: JSON.stringify({ids, skips: skips || savedSkips()})});
     banner(null);
     drawChecks(r);
-    if (r.ok) picked = null;
+    if (r.ok) { picked = null; skips = null; }
     else { $("start").disabled = false; $("start").textContent = "Start analysis"; }
     if (r.ok && !r.reading) { $("start").disabled = false; $("start").textContent = "Start analysis"; $("libs-note").textContent = r.note || ""; }
   } catch (err) { banner(err.message); $("start").disabled = false; $("start").textContent = "Start analysis"; }
@@ -1377,6 +1426,49 @@ $("player").addEventListener("seeked", resetClicks);
 $("click-volume").addEventListener("input", (e) => { if (clickGain) clickGain.gain.value = Number(e.target.value); });
 setInterval(scheduleClicks, 60);
 (function frame() { drawBeatView(); if (detail && !$("player").paused) drawCurve(); requestAnimationFrame(frame); })();
+
+// ---- tidy the database (0.40) ----
+// Looking shows groups with every song named; removing sends the look's token back, so only what was shown goes.
+let cleanOffer = null;
+$("clean-look").addEventListener("click", async () => {
+  $("clean-look").disabled = true; $("clean-note").textContent = "Asking the server for every ticked library…";
+  $("clean-groups").hidden = $("clean-do").hidden = true;
+  try {
+    cleanOffer = await api("api/clean/preview");
+    const g = cleanOffer.groups;
+    $("clean-note").textContent = g.length ? (cleanOffer.total ? `${num(cleanOffer.total)} songs could go. Tick what should, then Remove.` : "Nothing to tidy: every song here is on the server, in a ticked library, and analysed.") : "No library is ticked.";
+    $("clean-groups").hidden = !cleanOffer.total;
+    $("clean-groups").innerHTML = g.filter((x) => x.count).map((x) => `<div class="clean-group">
+      <label><input type="checkbox" data-group="${esc(x.id)}" ${x.warning || x.id === "failed" || x.id === "unlinked" ? "" : "checked"}><b>${esc(x.title)}</b><span class="n">${num(x.count)} songs</span></label>
+      ${x.detail ? `<p class="sub">${esc(x.detail)}</p>` : ""}
+      ${x.warning ? `<p class="warn-line">${esc(x.warning)}</p>` : ""}
+      <details><summary>${x.count > x.names.length ? `The first ${num(x.names.length)} by name` : "By name"}</summary><ul>${x.names.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></details>
+    </div>`).join("");
+    drawCleanButton();
+  } catch (e) { $("clean-note").textContent = e.message; }
+  finally { $("clean-look").disabled = false; }
+});
+function cleanChosen() { return [...document.querySelectorAll("#clean-groups input[data-group]:checked")].map((i) => i.dataset.group); }
+function drawCleanButton() {
+  const chosen = new Set(cleanChosen());
+  const n = (cleanOffer?.groups || []).filter((x) => chosen.has(x.id)).reduce((a, x) => a + x.count, 0);
+  $("clean-do").hidden = !cleanOffer || !cleanOffer.total;
+  $("clean-remove").disabled = !n;
+  $("clean-remove").textContent = n ? `Remove ${num(n)} songs` : "Remove";
+}
+$("clean-groups").addEventListener("change", drawCleanButton);
+$("clean-remove").addEventListener("click", async () => {
+  const groups = cleanChosen();
+  const n = $("clean-remove").textContent;
+  if (!groups.length || !confirm(`${n} from Siansa Beats, with their beats, loudness, sound, styles and marks? A copy of the database from before is kept beside it. Nothing changes on the server.`)) return;
+  $("clean-remove").disabled = true;
+  try {
+    const r = await api("api/clean", {method: "POST", body: JSON.stringify({token: cleanOffer.token, groups})});
+    cleanOffer = null; $("clean-groups").hidden = $("clean-do").hidden = true;
+    $("clean-note").textContent = `${num(r.removed)} songs removed.` + (r.backup ? ` The database from before is ${r.backup} in the data folder.` : " (No copy could be kept: see the activity.)") + ` Checked over afterwards: ${r.integrity.quick_check === "ok" ? "sound" : r.integrity.quick_check}.`;
+    banner(null); refreshLibraries(); statusLoop();
+  } catch (e) { banner(e.message); drawCleanButton(); }
+});
 
 // ---- controls ----
 $("pause").addEventListener("click", async () => { await api(status?.paused ? "api/resume" : "api/pause", {method: "POST"}); refreshStatus(); });
@@ -2019,11 +2111,11 @@ function tile(href, k, v, of, s, meter) {
   return `<a class="tile" href="${href}"><div class="k">${esc(k)}</div><div class="v">${v}${of != null ? ` <small>of ${num(of)}</small>` : ""}</div><div class="s">${s}</div>${bar}</a>`;
 }
 function drawTiles(s) {
-  const c = s.counts || {}, total = c.songs || 0, done = c.done || 0, failed = c.failed || 0;
+  const c = s.counts || {}, total = (c.songs || 0) - (c.skipped || 0), done = c.done || 0, failed = c.failed || 0;
   const waiting = (c.queued || 0) + BUSY.reduce((n, k) => n + (c[k] || 0), 0);
   const l = s.loudness || {}, st = s.styles || {};
   $("tiles").innerHTML = [
-    tile("#songs", "Beats", num(done), total, `${waiting ? num(waiting) + " to go" : "all done"}${failed ? ` · ${num(failed)} failed` : ""}`, [["done", done], ["failed", failed], ["busy", waiting]]),
+    tile("#songs", "Beats", num(done), total, `${waiting ? num(waiting) + " to go" : "all done"}${failed ? ` · ${num(failed)} failed` : ""}${c.skipped ? ` · ${num(c.skipped)} left out` : ""}`, [["done", done], ["failed", failed], ["busy", waiting]]),
     tile("#loudness", "Loudness, fades & key", num(l.measured), done, l.waiting ? `${num(l.waiting)} to go${l.measuring ? " · measuring now" : ""}` : `all measured${l.failed ? ` · ${num(l.failed)} couldn't be` : ""}`, [["done", l.measured || 0], ["failed", l.failed || 0]]),
     tile("#genres", "Genres", st.available ? num(st.done) : "–", st.available ? st.total : null, st.available ? (st.current ? "hearing a song now" : "songs heard by the style model") : "no style model in this image", st.available ? [["done", st.done || 0], ["failed", st.failed || 0]] : null),
     tile("#blends", "Bad blends", num(s.bad_blends), null, "marked in Siansa Dev", null),

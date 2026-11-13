@@ -325,6 +325,24 @@ the button, each ✓, ! (analysis goes ahead; something to look at) or ✕ (noth
 A song's file is never downloaded past 2 GB (enough for a two-hour FLAC mix): a stream that doesn't end, or a server
 sending something else, can't fill the disk. The last report is kept and shown again when the page opens.
 
+**What each library gets (0.40).** Under the ticked libraries, a row of chips a library: **Beats** (tempo, beats and
+phrases, what the DJ blends need), **Loudness & key** (LUFS, fades, the key), **Sound** (moods, energy, similar music
+and the search by words) and **Genres** (the 400 styles by sound). Tap one to leave the library out of it, crossed
+out, and press Start analysis: a library of two-hour mixes can keep its loudness and skip the beats, which take Beat
+This! a long time on such songs. Songs left out of the beats show as *no beats (left out)* and count as settled;
+their loudness is still measured on its own. A song two servers have is left out of a task only when every library
+it's in leaves it out. Putting a task back queues the songs for it.
+
+**Tidy the database (0.40).** Under Libraries, **Look for what's gone** asks the server for every ticked library right
+now and shows, by name, songs the server no longer has, songs of libraries left out, songs linked to no server and songs
+that couldn't be analysed (which are found and tried again on the next read). Looking removes nothing. Tick the groups
+and press **Remove**: a copy of the database from before is kept beside it first (`beats-before-clean.db`, replacing
+the previous copy; skipped when the disk hasn't room, and said), then exactly the songs shown go, and SQLite looks the
+database over afterwards. Each look comes with a token good for 15 minutes that the removal must send back, so a
+stale page, or a request that never saw the look, removes nothing. A library the server lists at under half the songs
+it had gets a warning (the server may still be scanning) and isn't ticked by default. Reading the libraries removes a
+few gone songs by itself (up to 25, or a tenth); more than that is left to this, where you see what goes.
+
 **Libraries.** Each ticked library shows how many of its songs are done. Ticks take effect with **Start analysis**.
 Untick one and start to leave it out: its songs not yet analysed leave the queue, the ones done stay, and **Remove
 them** next to it forgets them (their beats and marks; nothing changes on Navidrome). The choice is kept across restarts, and the ticked libraries are
@@ -528,7 +546,7 @@ and the rest are downloaded once more and measured here. New songs are measured 
 
 `GET /api/health`, `/api/status`, `/api/libraries`, `/api/songs`, `/api/songs/<id>` (with every beat),
 `/api/beats/<id>`, `/api/audio/<id>`, `/api/grids?ids=`, `/api/export.csv`, `/api/export.json`;
-`/api/bad-blends`, `/api/failed/export`, `/api/listens?user=&year=&month=&tz=`, `/api/art/cover/<song id>?size=` and `/api/art/artist/<song id>?size=` (a song's cover and its artist's picture), `/api/listens/import` (`POST`: the export file as the body, `?user=&name=`), `/api/listens/artist?user=&name=&tz=` (one artist's page), `POST /api/listens/lastfm`, `POST /api/listens/remove`, `/api/genres`, `/api/genre?name=&limit=`, `/api/style/models` (the style models to choose from, 0.39; `POST /api/style/model {"model"}` picks one), `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`, `/api/analysis/checks` (the last Start analysis report, 0.40); `POST /api/analysis/start {"ids"}` (the checks, then the ticked libraries read for new songs), `/api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
+`/api/bad-blends`, `/api/failed/export`, `/api/listens?user=&year=&month=&tz=`, `/api/art/cover/<song id>?size=` and `/api/art/artist/<song id>?size=` (a song's cover and its artist's picture), `/api/listens/import` (`POST`: the export file as the body, `?user=&name=`), `/api/listens/artist?user=&name=&tz=` (one artist's page), `POST /api/listens/lastfm`, `POST /api/listens/remove`, `/api/genres`, `/api/genre?name=&limit=`, `/api/style/models` (the style models to choose from, 0.39; `POST /api/style/model {"model"}` picks one), `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`, `/api/analysis/checks` (the last Start analysis report, 0.40), `/api/clean/preview` (what could be tidied away, with a token); `POST /api/analysis/start {"ids", "skips": {library: [tasks]}}` (the checks, then the ticked libraries read for new songs; tasks: `beats`, `loudness`, `sound`, `styles`), `/api/clean {"token", "groups"}`, `/api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
 `beats/server.py`.
 
 Beat This! is by Francesco Foscarin, Jan Schlüter and Gerhard Widmer (ISMIR 2024), under the MIT licence.
