@@ -57,6 +57,7 @@ def capabilities(app, server=None):
     measured = app.store.measure_counts(loudness.VERSION, only)
     shown = app.servers.get(server) or {}
     sound = app.store.sound_counts(only)
+    answered = (list(SOUND_ANSWERS) if sound["sound"] else []) + (list(WORD_ANSWERS) if sound["words"] and app.words.available else [])
     return {
         "service": "siansa-beats",
         "version": __version__,
@@ -80,11 +81,11 @@ def capabilities(app, server=None):
             "bad_blends": {"available": True},
             # Similar albums and artists: from the songs' sound here (0.25).
             "similar": {"available": bool(sound["sound"]), "source": "beats"},
-            # What songs sound like, under /api/v1/audiomuse/… (0.25): the paths and answers the app already knows.
+            # What songs sound like (0.25). "paths" (0.44): where each answer is asked for now, by the name an app from
+            # before 0.44 knows it by ("answers", asked under "prefix"); an app that reads "paths" asks there.
             "sound": {"available": bool(sound["sound"]), "songs": sound["sound"], "of": sound["songs"],
-                      "answers": (list(SOUND_ANSWERS) if sound["sound"] else [])
-                      + (list(WORD_ANSWERS) if sound["words"] and app.words.available else []),
-                      "prefix": AUDIOMUSE},
+                      "answers": answered, "prefix": AUDIOMUSE,
+                      "paths": {old: SOUND + new for new, old in SOUND_PATHS.items() if old in answered}},
             # The search by words (0.26): the songs that have the vector it needs, and whether the text model is here.
             "words": {"available": bool(sound["words"]) and app.words.available, "songs": sound["words"],
                       "steering": app.words.steers},
@@ -147,7 +148,9 @@ def get(handler, path, query, server=None):
         if len(ids) > MAX_IDS:
             return handler._error(HTTPStatus.BAD_REQUEST, f"at most {MAX_IDS} ids at a time") or True
         return handler._json(profiles(app, ids, server)) or True
-    if path.startswith(AUDIOMUSE + "/"):
+    if path.startswith(SOUND + "/") and path[len(SOUND):] in SOUND_PATHS:
+        return sound_get(handler, SOUND_PATHS[path[len(SOUND):]], arg, server)
+    if path.startswith(AUDIOMUSE + "/"):  # as apps from before 0.44 ask
         return sound_get(handler, path[len(AUDIOMUSE):], arg, server)
     if path in ("/api/v1/similar/albums", "/api/v1/similar/artists"):
         asked = {k: arg(k) for k in SIMILAR_ASKED if arg(k)}
@@ -231,7 +234,9 @@ def get(handler, path, query, server=None):
 
 def post(handler, path, body, server=None):
     """Answers a POST of ``/api/v1/…``; False when it isn't one of its paths."""
-    if path.startswith(AUDIOMUSE + "/"):
+    if path.startswith(SOUND + "/") and path[len(SOUND):] in SOUND_PATHS:
+        return sound_post(handler, SOUND_PATHS[path[len(SOUND):]], body, server)
+    if path.startswith(AUDIOMUSE + "/"):  # as apps from before 0.44 ask
         return sound_post(handler, path[len(AUDIOMUSE):], body, server)
     if path == "/api/v1/listens":  # finished listens, from the app ("Scrobble to Siansa Beats")
         rows = body.get("listens")
@@ -259,10 +264,23 @@ def post(handler, path, body, server=None):
     return False
 
 
-# ---- what songs sound like, answered as AudioMuse-AI answers it (0.25) ----
+# ---- what songs sound like (0.25) ----
 
+# Siansa Beats' own paths for what songs sound like (0.44, the owner, 13 Nov), under SOUND. Each takes the same
+# parameters and gives the same answer as the older path beside it, which apps from before 0.44 still ask under
+# AUDIOMUSE (kept until no released app asks there).
+SOUND = "/api/v1/sound"
+SOUND_PATHS = {
+    "/similar": "/api/similar_tracks",                 # songs that sound like a song, or like a mood
+    "/path": "/api/find_path",                         # a path of songs from one song to another
+    "/blend": "/api/alchemy",                          # songs near some songs, away from others
+    "/moods": "/api/mood_centroids",                   # the mood centres
+    "/yours": "/api/sonic_fingerprint/generate",       # songs near what this listener plays most
+    "/songs": "/api/sync",                             # songs' tempo, key, moods, genres and energy
+    "/search": "/api/clap/search",                     # songs that sound like a description in words
+    "/concepts": "/api/clap/concepts",                 # what a search can be steered by
+}
 AUDIOMUSE = "/api/v1/audiomuse"
-# AudioMuse-AI's paths answered here, under AUDIOMUSE: the app asks them of Siansa Beats as it asks AudioMuse-AI.
 SOUND_ANSWERS = ("/api/similar_tracks", "/api/mood_centroids", "/api/find_path", "/api/alchemy",
                  "/api/sonic_fingerprint/generate", "/api/sync")
 # The search by words (0.26), answered when the text model is in the image and songs have the vector it needs.

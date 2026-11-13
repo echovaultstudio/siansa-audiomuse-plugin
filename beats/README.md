@@ -27,7 +27,7 @@ memory free while it works.
 sound gets its **arousal**: about 1 (calm) to 9, from Essentia's emoMusic model (MTG, UPF; CC BY-NC-SA 4.0), which
 reads the vector already kept for the song. So the whole library is scored once in seconds, with no song read again,
 and new songs as they come. In a trial on the owner's library (164 songs, five measures, judged by ear) it matched
-what he heard far better than loudness, which once on one scale barely tells songs apart. `/api/v1/audiomuse/api/sync`
+what he heard far better than loudness, which once on one scale barely tells songs apart. `/api/v1/sound/songs`
 gives it as `arousal`. Energies kept from before 0.35 on an older scale (about 0.05 to 0.4) are given on today's
 (`energy_source`: `converted`).
 
@@ -518,14 +518,14 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 | `GET /api/v1/genre/about?name=` | A short description of a genre, from Wikipedia. Every genre's (the sound's and the songs' tags) is fetched in the background every 6 hours and kept; one not fetched yet waits up to 3 s and then answers `"pending": true`, to ask again shortly. |
 | `GET /api/v1/similar/albums?track_id=` | Albums that sound like that song's album (`source`: `beats`). An empty list, with a `note`, while that song's sound isn't known here yet. |
 | `GET /api/v1/similar/artists?track_id=` or `?artist=` | Artists that sound like that one, the same way. |
-| `GET /api/v1/audiomuse/api/similar_tracks?item_id=&n=` | Songs that sound like a song (`mood_similarity=true`: only in its mood; `mood=&centroid_index=`: around a mood centre). |
-| `GET /api/v1/audiomuse/api/find_path?start_song_id=&end_song_id=&max_steps=` | A path of exactly `max_steps` songs from one song to the other (an end can be `start_mood` / `end_mood`). |
-| `POST /api/v1/audiomuse/api/alchemy` | `{"items": [{"id", "op": "ADD" or "SUBTRACT", "type": "song"}], "n"}`: songs near the ones to blend, away from the ones to avoid. |
-| `GET /api/v1/audiomuse/api/mood_centroids` | The mood centres, each with its tags. |
-| `POST /api/v1/audiomuse/api/sonic_fingerprint/generate` | `{"n"}`: songs near what this server's user has played most (or near `ids`, when given). |
-| `POST /api/v1/audiomuse/api/clap/search` | `{"query", "limit", "steering": [{"term", "direction": "more" or "less", "weight"}]}`: the songs that sound like the description (0.26), each with its `similarity`; `steering_warnings` names terms that aren't concepts. |
-| `GET /api/v1/audiomuse/api/clap/concepts` | The concepts a search can be steered by, in their groups. |
-| `GET /api/v1/audiomuse/api/sync?ids=` | Up to 500 songs' tempo (Beat This!'s, `tempo_source`: `beat_this`), key, moods, genres and energy, without the vectors. `energy_source` says where the energy is from (`beats`, `converted`: the same scale; `audiomuse`: kept from before 0.43, as it was). `arousal` (0.35) is how energetic the song is to a listener, the one to order songs by. |
+| `GET /api/v1/sound/similar?item_id=&n=` | Songs that sound like a song (`mood_similarity=true`: only in its mood; `mood=&centroid_index=`: around a mood centre). |
+| `GET /api/v1/sound/path?start_song_id=&end_song_id=&max_steps=` | A path of exactly `max_steps` songs from one song to the other (an end can be `start_mood` / `end_mood`). |
+| `POST /api/v1/sound/blend` | `{"items": [{"id", "op": "ADD" or "SUBTRACT", "type": "song"}], "n"}`: songs near the ones to blend, away from the ones to avoid. |
+| `GET /api/v1/sound/moods` | The mood centres, each with its tags. |
+| `POST /api/v1/sound/yours` | `{"n"}`: songs near what this server's user has played most (or near `ids`, when given). |
+| `POST /api/v1/sound/search` | `{"query", "limit", "steering": [{"term", "direction": "more" or "less", "weight"}]}`: the songs that sound like the description (0.26), each with its `similarity`; `steering_warnings` names terms that aren't concepts. |
+| `GET /api/v1/sound/concepts` | The concepts a search can be steered by, in their groups. |
+| `GET /api/v1/sound/songs?ids=` | Up to 500 songs' tempo (Beat This!'s, `tempo_source`: `beat_this`), key, moods, genres and energy, without the vectors. `energy_source` says where the energy is from (`beats`, `converted`: the same scale; `audiomuse`: kept from before 0.43, as it was). `arousal` (0.35) is how energetic the song is to a listener, the one to order songs by. |
 | `POST /api/v1/bad-blends` | A song change marked as bad in the app. |
 
 With several music servers, every one of these takes `?server=`: the id (or name) of the server the app plays from,
@@ -533,9 +533,10 @@ from the capabilities' `servers` (each with its `kind`, `url` and `user`, to tel
 (`profiles`, `bad-blends`) are understood from any server; ids answered (`genre`) are that server's own, and the counts
 (`capabilities`, `genres`) are of its songs. Without `server` the default one is meant.
 
-The paths under `/api/v1/audiomuse/` keep the names, parameters and layout of AudioMuse-AI's API, which the Siansa
-app spoke before Siansa Beats answered these itself (see [Credits](#credits)); they are answered here alone. The
-capabilities' `sound` says which of them are answered (`answers`) and for how many songs.
+What songs sound like is asked under `/api/v1/sound/` (0.44). The capabilities' `sound` says what's answered and for
+how many songs, and its `paths` where each answer is. Apps from before 0.44 ask the same things under
+`/api/v1/audiomuse/` (the names of AudioMuse-AI's API, which the Siansa app spoke before Siansa Beats answered these
+itself); those paths are answered the same and stay until no released app asks there.
 
 Songs analysed before 0.20 get their loudness, fades and key while the queue is empty: each is downloaded once more
 and measured here. New songs are measured on the way.
@@ -560,6 +561,6 @@ Siansa Beats is built on other people's work, each under its own licence:
   (`beats/mood_centroids.json`), the concept catalogue (`beats/sound_concepts.json`) and the method are those of
   [AudioMuse-AI](https://github.com/NeptuneHub/AudioMuse-AI) by NeptuneHub (AGPL-3.0, as this repository). The image
   downloads the models from that project's releases. Siansa Beats runs them itself and needs no AudioMuse-AI
-  installed; it's a separate project, not affiliated with it. The app's paths under `/api/v1/audiomuse/` keep that
-  API's shape for the same reason.
+  installed; it's a separate project, not affiliated with it. The answers under `/api/v1/sound/` keep the layout of
+  that project's API, which the Siansa app already read.
 - **Genre descriptions:** Wikipedia (CC BY-SA), named and linked wherever one is shown.
