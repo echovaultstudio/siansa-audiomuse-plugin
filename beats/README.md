@@ -96,9 +96,11 @@ On another Docker server with an NVIDIA GPU and NVIDIA's container toolkit:
 
 ## Use it
 
-The page shows one page at a time, picked from the menu on the left (on a phone, behind the ☰ button), in three groups.
+The page shows one page at a time, picked from the menu on the left (on a phone, behind the ☰ button; on a wide
+screen the ☰ folds the menu away and back, and the choice is remembered), in three groups.
 The button at the top right says whether everything works (a green dot, "All working"); tap it for each connection
-(your music servers, AudioMuse-AI), the models and how the app connects.
+(your music servers, AudioMuse-AI), the models and how the app connects. A grey dot there is something not in use
+(no AudioMuse-AI, a model not loaded yet): nothing to look at, and it doesn't count against "All working".
 Each page has its own address (`#songs`, `#loudness`…), so Back and bookmarks work:
 
 | Group | Page | What's on it |
