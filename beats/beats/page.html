@@ -30,7 +30,8 @@ header { position: sticky; top: 0; z-index: 6; background: color-mix(in srgb, va
   backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: var(--header-h); padding: 0 16px; }
 h1 { font-size: 1.15rem; margin: 0; letter-spacing: -0.01em; }
-h1 b { color: var(--amber); }
+h1 b { color: var(--amber); font-weight: 800; }  /* the wordmark (0.42, the owner, 13 Nov): only the S in amber */
+h1 { font-weight: 700; }
 h1 a { color: inherit; text-decoration: none; }
 h1 .version { font-size: 0.72rem; font-weight: 500; color: var(--faint); margin-left: 6px; letter-spacing: 0; }
 h2 { font-size: 1.35rem; margin: 0 0 4px; letter-spacing: -0.01em; }
@@ -48,6 +49,7 @@ h4 .sub { text-transform: none; letter-spacing: 0; }
 .status-button[aria-expanded=true] .caret { transform: rotate(180deg); }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: var(--faint); }
 .dot.ok { background: var(--ok); } .dot.wait { background: var(--warn); } .dot.bad { background: var(--bad); }
+.dot.off { background: var(--faint); }  /* not in use: nothing to look at */
 .status-panel { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; width: min(380px, calc(100vw - 24px));
   background: var(--raised); border: 1px solid var(--line-strong); border-radius: 14px; padding: 8px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); }
 .status-panel[hidden] { display: none; }
@@ -73,12 +75,19 @@ main { padding: 20px 24px 64px; min-width: 0; outline: none; }
 main > section { display: none; }
 main > section.on { display: grid; gap: 16px; }
 .page-head { margin-bottom: 4px; } .page-head .sub { max-width: 72ch; }
-.menu-button, .page-name, .scrim, .nav-close { display: none; }
+.page-name, .scrim, .nav-close { display: none; }
+/* On a wide screen the menu folds away behind the same ☰ (0.42, the owner, 13 Nov), remembered; the page takes the room. */
+.menu-button { display: inline-flex; border: 0; padding: 8px 10px; font-size: 1.25rem; line-height: 1; border-radius: 12px; background: transparent; color: var(--muted); }
+.menu-button:hover { background: var(--raised-2); color: var(--text); }
+@media (min-width: 901px) {
+  body.nav-folded .shell { grid-template-columns: minmax(0, 1fr); }
+  body.nav-folded .nav { display: none; }
+}
 @media (max-width: 900px) {
   /* On a phone the menu is a drawer behind a menu button (the owner, 10 Nov: the row of tabs was hard to use). */
   .shell { grid-template-columns: minmax(0, 1fr); }
   .bar { flex-wrap: nowrap; gap: 10px; padding: 0 8px 0 4px; }
-  .menu-button { display: inline-flex; border: 0; padding: 10px; font-size: 1.35rem; line-height: 1; border-radius: 12px; }
+  .menu-button { padding: 10px; font-size: 1.35rem; }
   .page-name { display: block; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .page-name::before { content: "·"; margin-right: 8px; color: var(--faint); }
   h1 { white-space: nowrap; }
@@ -415,8 +424,8 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 <a class="skip" href="#content">Skip to the page</a>
 <header>
   <div class="bar">
-    <button class="menu-button" id="menu" aria-label="Menu" aria-controls="nav" aria-expanded="false">☰</button>
-    <h1><a href="#overview" id="home" title="Overview"><b>Siansa</b> Beats</a><span class="version" id="header-version" title="This Siansa Beats' version"></span></h1>
+    <button class="menu-button" id="menu" aria-label="Menu" title="Hide or show the menu" aria-controls="nav" aria-expanded="false">☰</button>
+    <h1><a href="#overview" id="home" title="Overview"><b>S</b>iansa Beats</a><span class="version" id="header-version" title="This Siansa Beats' version"></span></h1>
     <span class="page-name" id="page-name"></span>
     <div class="status">
       <button class="status-button" id="status-button" aria-haspopup="true" aria-expanded="false" aria-controls="status-panel">
@@ -432,7 +441,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--raised-2);
 <div class="shell">
   <div class="scrim" id="scrim"></div>
   <nav class="nav" id="nav" aria-label="Pages">
-    <div class="nav-close"><h1><b>Siansa</b> Beats</h1><button id="menu-close" aria-label="Close the menu">✕</button></div>
+    <div class="nav-close"><h1><b>S</b>iansa Beats</h1><button id="menu-close" aria-label="Close the menu">✕</button></div>
     <div class="server-switch" id="server-switch" hidden>
       <label for="server">Music server</label>
       <select id="server" title="The pages show this server's songs"></select>
@@ -1630,24 +1639,25 @@ $("server-form").addEventListener("submit", async (e) => {
 });
 
 // ---- the connections, in one button and its menu ----
-// [state, name, detail]: "ok", "wait" (works, but worth a look) or "bad" (doesn't work).
+// [state, name, detail]: "ok", "off" (not in use, nothing to do: the owner, 13 Nov), "wait" (works, but worth a look)
+// or "bad" (doesn't work).
 function statusRows(s) {
   const cn = s.connections || {};
   const where = s.model_loaded ? (s.device_name && s.device_name !== "CPU" ? "GPU " + s.device_name : "CPU") + (s.float16 && s.device !== "cpu" ? ", half precision" : "") : (s.device === "cpu" ? "CPU" : "the GPU if there is one");
   const servers = (s.servers || []).map((x) => ["ok", x.name, `${x.url} · ${num(x.songs)} songs${x.default && s.servers.length > 1 ? " · default" : ""}`]);
   return [
     ...(servers.length ? servers : [["bad", "Music server", "None yet: add one under Setup"]]),
-    [cn.audiomuse ? "ok" : "wait", "AudioMuse-AI", cn.audiomuse ? "What it worked out about each song is taken over" : "Not connected (Setup): nothing new is taken over"],
-    [s.model_loaded ? (s.device_note ? "wait" : "ok") : "wait", `Beat This! ${s.model}`, s.model_loaded ? `On the ${where}` + (s.model_load_seconds ? `, loaded in ${fmt(s.model_load_seconds)} s` : "") + (s.device_note ? `. ${s.device_note}` : "") : `Loads with the first song, on ${where}`],
+    [cn.audiomuse ? "ok" : "off", "AudioMuse-AI", cn.audiomuse ? "What it worked out about each song is taken over" : "Not connected: Siansa Beats does its work itself (Setup connects one)"],
+    [s.model_loaded ? (s.device_note ? "wait" : "ok") : "off", `Beat This! ${s.model}`, s.model_loaded ? `On the ${where}` + (s.model_load_seconds ? `, loaded in ${fmt(s.model_load_seconds)} s` : "") + (s.device_note ? `. ${s.device_note}` : "") : `Not loaded: loads with the first song, on ${where}`],
     [(s.styles || {}).available ? "ok" : "wait", "Style model", (s.styles || {}).available ? "Gives each song its genres from its sound" : "Not in this image: genres are the songs' tags"],
     ["ok", "The Siansa app", cn.api_key ? "Connects with BEATS_API_KEY" : cn.password ? "Connects with this page's password" : "Connects without a key"],
-    s.log_level === "debug" ? ["wait", "Debug details on", "The log says every step: turn it off under Log when you're done"] : null,
+    s.log_level === "debug" ? ["off", "Debug details on", "The log says every step: turn it off under Log when you're done"] : null,
   ].filter(Boolean);
 }
 function drawStatus(s) {
-  const rows = statusRows(s), rank = {ok: 0, wait: 1, bad: 2};
+  const rows = statusRows(s), rank = {off: 0, ok: 0, wait: 1, bad: 2};
   const worst = rows.reduce((w, r) => rank[r[0]] > rank[w] ? r[0] : w, "ok");
-  const off = rows.filter((r) => r[0] !== "ok");
+  const off = rows.filter((r) => r[0] === "wait" || r[0] === "bad");
   $("status-dot").className = "dot " + worst;
   $("status-label").textContent = worst === "bad" ? `${off.filter((r) => r[0] === "bad")[0][1]} isn't working` : off.length ? `${off.length} to look at` : "All working";
   $("status-button").title = rows.map((r) => `${r[1]}: ${r[2]}`).join("\n");
@@ -1664,13 +1674,24 @@ $("status-panel").addEventListener("click", (e) => { if (e.target.closest("a")) 
 document.addEventListener("click", () => statusMenu(false));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("status-panel").hidden) { statusMenu(false); $("status-button").focus(); } });
 
-// ---- the menu on a phone ----
+// ---- the menu: a drawer on a phone; folded away or not on a wide screen (0.42), remembered ----
+const WIDE = window.matchMedia("(min-width: 901px)");
 function menu(open) {
   document.body.classList.toggle("menu-open", open);
   $("menu").setAttribute("aria-expanded", String(open));
   if (open) $("nav").querySelector('[aria-current="page"]')?.focus();
 }
-$("menu").addEventListener("click", () => menu(true));
+function foldMenu(folded) {
+  document.body.classList.toggle("nav-folded", folded);
+  $("menu").setAttribute("aria-expanded", String(!folded));
+  $("menu").title = folded ? "Show the menu" : "Hide the menu";
+  try { localStorage.setItem("beats-nav-folded", folded ? "1" : ""); } catch (e) { /* no storage: not remembered */ }
+}
+try { if (localStorage.getItem("beats-nav-folded") === "1") foldMenu(true); } catch (e) { /* no storage */ }
+$("menu").addEventListener("click", () => {
+  if (WIDE.matches) foldMenu(!document.body.classList.contains("nav-folded"));
+  else menu(true);
+});
 $("menu-close").addEventListener("click", () => menu(false));
 $("scrim").addEventListener("click", () => menu(false));
 $("nav").addEventListener("click", (e) => { if (e.target.closest("a")) menu(false); });
