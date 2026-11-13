@@ -98,6 +98,7 @@ jobs:
           echo "FFMPEG=$(python3 -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" >> "$GITHUB_ENV"
       - name: Start Navidrome, Emby and Jellyfin with the test library
         env:
+          GITHUB_TOKEN: ${{ github.token }}  # for the lookup of Navidrome's newest release (the anonymous rate limit)
           ND_VERSION: ${{ matrix.navidrome }}
           EMBY_VERSION: ${{ matrix.emby }}
           JELLYFIN_VERSION: ${{ matrix.jellyfin }}
