@@ -403,7 +403,7 @@
         }
       }
     },
-    "/api/v1/audiomuse/api/similar_tracks": {
+    "/api/v1/sound/similar": {
       "get": {
         "summary": "Songs that sound like a song (0.25).",
         "parameters": [
@@ -498,7 +498,103 @@
         }
       }
     },
-    "/api/v1/audiomuse/api/find_path": {
+    "/api/v1/audiomuse/api/similar_tracks": {
+      "get": {
+        "summary": "Songs that sound like a song (0.25). Asked at /api/v1/sound/similar since 0.44; this path is kept for apps from before.",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The song, by the server's id."
+          },
+          {
+            "name": "n",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "How many (50)."
+          },
+          {
+            "name": "mood_similarity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "true: only songs in the song's mood."
+          },
+          {
+            "name": "mood",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "With centroid_index: songs around that mood centre."
+          },
+          {
+            "name": "centroid_index",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "The mood centre's index."
+          },
+          {
+            "name": "server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The music server the app plays from (its id or name, from the capabilities); the default one without it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The songs, nearest first, with the server's own ids.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "item_id": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "author": {
+                        "type": "string"
+                      },
+                      "album": {
+                        "type": "string"
+                      },
+                      "distance": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The song isn't known here, or its sound isn't yet."
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/api/v1/sound/path": {
       "get": {
         "summary": "A path of songs from one song to another.",
         "parameters": [
@@ -598,7 +694,108 @@
         }
       }
     },
-    "/api/v1/audiomuse/api/mood_centroids": {
+    "/api/v1/audiomuse/api/find_path": {
+      "get": {
+        "summary": "A path of songs from one song to another. Asked at /api/v1/sound/path since 0.44; this path is kept for apps from before.",
+        "parameters": [
+          {
+            "name": "start_song_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Where it starts."
+          },
+          {
+            "name": "end_song_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Where it ends."
+          },
+          {
+            "name": "start_mood",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "A mood to start from, in place of a song."
+          },
+          {
+            "name": "end_mood",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "A mood to end in, in place of a song."
+          },
+          {
+            "name": "max_steps",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "How many songs, both ends counted (25)."
+          },
+          {
+            "name": "server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The music server the app plays from (its id or name, from the capabilities); the default one without it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The path, in order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "item_id": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "author": {
+                            "type": "string"
+                          },
+                          "album": {
+                            "type": "string"
+                          },
+                          "distance": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The song isn't known here, or its sound isn't yet."
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/api/v1/sound/moods": {
       "get": {
         "summary": "The mood centres, each with its tags.",
         "responses": {
@@ -608,7 +805,18 @@
         }
       }
     },
-    "/api/v1/audiomuse/api/sync": {
+    "/api/v1/audiomuse/api/mood_centroids": {
+      "get": {
+        "summary": "The mood centres, each with its tags. Asked at /api/v1/sound/moods since 0.44; this path is kept for apps from before.",
+        "responses": {
+          "200": {
+            "description": "Mood name to its centres."
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/api/v1/sound/songs": {
       "get": {
         "summary": "Songs' tempo, key, moods, genres and energy, without the vectors.",
         "parameters": [
@@ -637,7 +845,37 @@
         }
       }
     },
-    "/api/v1/audiomuse/api/alchemy": {
+    "/api/v1/audiomuse/api/sync": {
+      "get": {
+        "summary": "Songs' tempo, key, moods, genres and energy, without the vectors. Asked at /api/v1/sound/songs since 0.44; this path is kept for apps from before.",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Up to 500 song ids, comma separated."
+          },
+          {
+            "name": "server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The music server the app plays from (its id or name, from the capabilities); the default one without it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{tracks: [{id, title, artist, album, tempo, key, scale, mood_vector, other_features, energy}]}"
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/api/v1/sound/blend": {
       "post": {
         "summary": "Songs near the ones to blend, away from the ones to avoid.",
         "parameters": [
@@ -728,7 +966,99 @@
         }
       }
     },
-    "/api/v1/audiomuse/api/sonic_fingerprint/generate": {
+    "/api/v1/audiomuse/api/alchemy": {
+      "post": {
+        "summary": "Songs near the ones to blend, away from the ones to avoid. Asked at /api/v1/sound/blend since 0.44; this path is kept for apps from before.",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The music server the app plays from (its id or name, from the capabilities); the default one without it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "op": {
+                          "type": "string",
+                          "enum": [
+                            "ADD",
+                            "SUBTRACT"
+                          ]
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "n": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The songs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "item_id": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "author": {
+                            "type": "string"
+                          },
+                          "album": {
+                            "type": "string"
+                          },
+                          "distance": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The song isn't known here, or its sound isn't yet."
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/api/v1/sound/yours": {
       "post": {
         "summary": "Songs near what this server's user has played most (or near ids).",
         "parameters": [
@@ -799,7 +1129,79 @@
         }
       }
     },
-    "/api/v1/audiomuse/api/clap/search": {
+    "/api/v1/audiomuse/api/sonic_fingerprint/generate": {
+      "post": {
+        "summary": "Songs near what this server's user has played most (or near ids). Asked at /api/v1/sound/yours since 0.44; this path is kept for apps from before.",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The music server the app plays from (its id or name, from the capabilities); the default one without it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "n": {
+                    "type": "integer"
+                  },
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The songs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "item_id": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "author": {
+                        "type": "string"
+                      },
+                      "album": {
+                        "type": "string"
+                      },
+                      "distance": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The song isn't known here, or its sound isn't yet."
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/api/v1/sound/search": {
       "post": {
         "summary": "Songs that sound like a description in words (0.26).",
         "parameters": [
@@ -867,7 +1269,76 @@
         }
       }
     },
-    "/api/v1/audiomuse/api/clap/concepts": {
+    "/api/v1/audiomuse/api/clap/search": {
+      "post": {
+        "summary": "Songs that sound like a description in words (0.26). Asked at /api/v1/sound/search since 0.44; this path is kept for apps from before.",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The music server the app plays from (its id or name, from the capabilities); the default one without it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "query"
+                ],
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  },
+                  "limit": {
+                    "type": "integer"
+                  },
+                  "steering": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "term": {
+                          "type": "string"
+                        },
+                        "direction": {
+                          "type": "string",
+                          "enum": [
+                            "more",
+                            "less"
+                          ]
+                        },
+                        "weight": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{query, count, results: [{item_id, title, author, album, similarity}], steering, steering_warnings}"
+          },
+          "400": {
+            "description": "No query, or nothing usable to steer by."
+          },
+          "503": {
+            "description": "No text model in this image, or no song has the vector for it yet."
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/api/v1/sound/concepts": {
       "get": {
         "summary": "The concepts a search by words can be steered by, in their groups.",
         "responses": {
@@ -875,6 +1346,17 @@
             "description": "{available, categories: [{category, label, terms: [{term, grounding}]}], max_terms, alpha_steps, default_alpha}"
           }
         }
+      }
+    },
+    "/api/v1/audiomuse/api/clap/concepts": {
+      "get": {
+        "summary": "The concepts a search by words can be steered by, in their groups. Asked at /api/v1/sound/concepts since 0.44; this path is kept for apps from before.",
+        "responses": {
+          "200": {
+            "description": "{available, categories: [{category, label, terms: [{term, grounding}]}], max_terms, alpha_steps, default_alpha}"
+          }
+        },
+        "deprecated": true
       }
     },
     "/api/v1/listens": {

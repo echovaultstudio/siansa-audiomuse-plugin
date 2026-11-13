@@ -324,6 +324,21 @@ class AnswersTest(Service):
         self.assertEqual([s["item_id"] for s in yours][0], "t96w")
         self.assertEqual(self.call(f"{am}/api/sonic_fingerprint/generate", "POST", {"n": 2, "ids": ["t140"]})[0]["item_id"], "t140")
 
+        # Siansa Beats' own paths (0.44) answer exactly as the older ones, and the capabilities say where each is.
+        own = "/api/v1/sound"
+        self.assertEqual(self.call(f"{own}/similar?item_id=t140&n=5"), like)
+        self.assertEqual(self.call(f"{own}/songs?ids=t122,t140,bad&include_embeddings=false")["tracks"], feats)
+        self.assertEqual(self.call(f"{own}/path?start_song_id=t140&end_song_id=t96w&max_steps=3&path_fix_size=true")["path"], path)
+        self.assertEqual(self.call(f"{own}/blend", "POST", {"items": [{"id": "t140", "op": "ADD", "type": "song"}], "n": 5}), blend)
+        self.assertEqual(self.call(f"{own}/moods"), self.call(f"{am}/api/mood_centroids"))
+        self.assertEqual(self.call(f"{own}/yours", "POST", {"n": 2, "ids": ["t140"]})[0]["item_id"], "t140")
+        paths = self.call("/api/v1/capabilities")["features"]["sound"]["paths"]
+        self.assertEqual(paths["/api/similar_tracks"], "/api/v1/sound/similar")
+        self.assertEqual(set(paths), set(caps["sound"]["answers"]))  # one for every answer, by the name older apps know
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call(f"{own}/nothing")
+        self.assertEqual(e.exception.code, 404)
+
         # Similar albums and artists come from here.
         artists = self.call("/api/v1/similar/artists?track_id=t140")
         self.assertEqual((artists["source"], {a["artist"] for a in artists["similar"]}), ("beats", {"House Test", "Three"}))
@@ -371,6 +386,9 @@ class AnswersTest(Service):
         self.assertIn("/api/clap/concepts", caps["sound"]["answers"])
 
         found = self.call(f"{am}/api/clap/search", "POST", {"query": "something deep", "limit": 2})
+        self.assertEqual(self.call("/api/v1/sound/search", "POST", {"query": "something deep", "limit": 2}), found)  # 0.44's own path
+        self.assertEqual(self.call("/api/v1/sound/concepts"), self.call(f"{am}/api/clap/concepts"))
+        self.assertEqual(caps["sound"]["paths"]["/api/clap/search"], "/api/v1/sound/search")
         self.assertEqual((found["query"], found["count"]), ("something deep", 2))
         self.assertEqual(found["results"][0]["item_id"], "t122")
         self.assertEqual(set(found["results"][0]), {"item_id", "title", "author", "album", "similarity"})
