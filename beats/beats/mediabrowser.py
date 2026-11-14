@@ -184,8 +184,9 @@ class MediaBrowser:
         return [{"id": str(v["Id"]), "name": v.get("Name") or "Music"} for v in self._as_user(views)
                 if v.get("Id") and v.get("CollectionType") == "music"]
 
-    def all_songs(self, library=None, page=500):
-        """Every song in ``library`` (an id from :meth:`libraries`; ``None``: every music library), ``page`` at a time."""
+    def all_songs(self, library=None, page=500, paths=True):
+        """Every song in ``library`` (an id from :meth:`libraries`; ``None``: every music library), ``page`` at a time.
+        ``paths`` is Navidrome's (:meth:`beats.subsonic.Subsonic.all_songs`): here the listing has each file's path."""
         if library is None:
             return [s for f in self.libraries() for s in self.all_songs(f["id"], page)]
         songs, start = [], 0

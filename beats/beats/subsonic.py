@@ -109,10 +109,19 @@ class Subsonic:
         folders = (self._get("getMusicFolders").get("musicFolders") or {}).get("musicFolder") or []
         return [{"id": str(f["id"]), "name": f.get("name") or str(f["id"])} for f in folders if f.get("id") is not None]
 
-    def all_songs(self, library=None, page=500):
+    # Up to this many songs' real paths are asked for one by one; more, and the whole library's are listed.
+    PATHS_ONE_BY_ONE = 100
+
+    def all_songs(self, library=None, page=500, paths=True):
         """Every song in ``library`` (an id from :meth:`libraries`; ``None``: every library), ``page`` at a time:
         ``search3`` with an empty query (as clients that sync the whole library ask Navidrome), or album by album
-        when the server finds nothing for an empty query."""
+        when the server finds nothing for an empty query.
+
+        ``paths`` says which songs get their file's real path from Navidrome's own API, whose list of a big library
+        takes minutes (0.46: it was asked for every song at every read, most of a read's time): ``True`` every song,
+        ``False`` none (the listing alone), or a function that is given the ids and returns those that need theirs;
+        the others then come with no path, so the one kept for them stays."""
+        started = time.monotonic()
         songs, offset = [], 0
         while True:
             found = (self._get("search3", query="", songCount=page, songOffset=offset, artistCount=0,
@@ -122,15 +131,60 @@ class Subsonic:
                 break
             offset += page
         songs = songs or self._songs_by_album(library)
+        listed = time.monotonic()
+        if paths is False:
+            return songs
+        need = None if paths is True else set(paths([s["id"] for s in songs if s.get("id")]))
+        how = "every song's"
         try:  # where each file really is, for finding it on another server
-            real = self.real_paths(library)
+            if need is None:
+                real = self.real_paths(library)
+            elif not need:
+                real, how = {}, "none needed"
+            elif len(need) <= self.PATHS_ONE_BY_ONE:
+                real, how = self._real_paths_of(sorted(need), library), f"{len(need)} songs'"
+            else:
+                real = self.real_paths(library)
         except ServerError as e:
             real = {}
             _log.debug("Navidrome's own API didn't give the files' paths (Subsonic's are used): %s", e)
         for song in songs:
             if real.get(song["id"]):
                 song["path"] = real[song["id"]]
+            elif need is not None and song.get("id") not in need:
+                song["path"] = None  # its path is kept already: left as it is
+        _log.debug("Library %s: %d songs listed in %.1fs; real paths (%s) in %.1fs", library, len(songs),
+                   listed - started, how, time.monotonic() - listed)
         return songs
+
+    def _native_login(self):
+        if not self.configured:
+            raise ServerError("Navidrome isn't set up")
+        if not self._native_token:
+            answer = self._native("/auth/login", body={"username": self.user, "password": self.password})
+            self._native_token = (answer or {}).get("token")
+            if not self._native_token:
+                raise ServerError("/auth/login: no token")
+
+    @staticmethod
+    def _real_path(row):
+        root, path = str(row.get("libraryPath") or ""), str(row["path"])
+        return path if path.startswith("/") or not root else root.rstrip("/") + "/" + path
+
+    def _real_paths_of(self, ids, library=None):
+        """``{song id: path}`` of a few songs, each asked for by itself; the whole library's when the server doesn't
+        answer for one song (an older Navidrome)."""
+        self._native_login()
+        out = {}
+        for song_id in ids:
+            try:
+                row = self._native("/api/song/" + urllib.parse.quote(str(song_id), safe=""), self._native_token)
+            except ServerError:
+                self._native_token = None
+                return self.real_paths(library)
+            if isinstance(row, dict) and row.get("id") and row.get("path"):
+                out[row["id"]] = self._real_path(row)
+        return out
 
     def _native(self, path, token=None, body=None):
         """One call of Navidrome's own API (the one its web page uses), as JSON."""
@@ -170,8 +224,7 @@ class Subsonic:
                 raise ServerError("/api/song: not a list")
             for row in rows:
                 if row.get("id") and row.get("path"):
-                    root, path = str(row.get("libraryPath") or ""), str(row["path"])
-                    out[row["id"]] = path if path.startswith("/") or not root else root.rstrip("/") + "/" + path
+                    out[row["id"]] = self._real_path(row)
             if len(rows) < page:
                 return out
             start += page

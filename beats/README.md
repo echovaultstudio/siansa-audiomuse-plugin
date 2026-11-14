@@ -107,8 +107,8 @@ Each page has its own address (`#songs`, `#loudness`…), so Back and bookmarks 
 
 | Group | Page | What's on it |
 |---|---|---|
-| Analysis | **Overview** | What's being done now, and a card for each thing analysed (beats, loudness and key, genres, sound): how far it is, what measures it, and **Analyse again** to do only that again for every song |
-| | **Libraries** | A row for each library: a switch to analyse it and what it gets (beats, loudness, sound, genres); Start analysis (with its checks), a progress bar for each thing measured, tidying up, and starting over |
+| Analysis | **Overview** | What's being done now, and a card for each thing analysed (beats, loudness and key, genres, sound): how far it is and what measures it; **Check what's new** reads the libraries for songs added since (nothing already analysed is touched) |
+| | **Libraries** | A row for each library: a switch to analyse it and what it gets (beats, loudness, sound, genres); Start analysis (with its checks), a progress bar for each thing measured, tidying up, and **Start over**: one kind of analysis again for every song, or all of it, each asked about first |
 | | **Songs** | Every song (cards on a phone), and a song's page (its beats, loudness, fades, key and genres) when one is open |
 | Your listening | **Listening** | Your history: by year and month, your top artists, albums and songs, and when you listen |
 | Used by the Siansa app | **Loudness** | How loud the songs are and how they start and end: for levelling the volume and timing fades |
@@ -143,7 +143,9 @@ background, and the page shows which library is being read and how far.
   found and by what ("4,012 already analysed from another server (4,012 by their file)"). So pointing Emby or Jellyfin
   at the folder Navidrome has costs a read of the library, not days of analysis.
 - **Navidrome's real paths** come from its own API (the one its web page uses), with the same user and password: the
-  path in the Subsonic API is made up from the tags unless the player is set to report real paths.
+  path in the Subsonic API is made up from the tags unless the player is set to report real paths. A read asks for the
+  paths of the songs that have none kept, and for every song's once a week (0.46; asking for all of them at every
+  read took most of a read on a big library).
 - **Another user of the same server** is added the same way (same kind and address, another user name): it sees the
   libraries that user may, and its songs are the first user's by their ids.
 - **The menu's Music server switch** (shown once there are two) picks whose songs the pages show: the overview's
@@ -551,9 +553,9 @@ and measured here. New songs are measured on the way.
 ## The page's API
 
 `POST /api/analyse-again` with `{"what": "beats" | "loudness" | "sound" | "genres"}` does one kind of analysis again
-for every song (0.45, the Overview's **Analyse again**): beats are queued; loudness, key and genres are worked out
-again while what's known stays in use; the sound is forgotten first, so similar music has less to go by until songs
-are heard again. A paused service starts again.
+for every song (0.45; on the page under Libraries › **Start over** since 0.46): beats are queued; loudness, key,
+genres and the sound are worked out again while what's known stays in use (0.46: the sound was forgotten first
+before). A paused service starts again.
 
 `GET /api/health`, `/api/status`, `/api/libraries`, `/api/songs`, `/api/songs/<id>` (with every beat),
 `/api/beats/<id>`, `/api/audio/<id>`, `/api/grids?ids=`, `/api/export.csv`, `/api/export.json`;

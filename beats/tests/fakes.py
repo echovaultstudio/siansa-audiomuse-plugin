@@ -57,6 +57,7 @@ class FakeServer:
         self.requests = []
         self.search_all = True  # whether search3 finds every song for an empty query (else: album by album)
         self.native = True  # whether Navidrome's own API answers (else only Subsonic's made-up paths)
+        self.native_one = True  # whether it answers for one song by its id (else only its list)
         self.played = {}  # song id -> plays, for Navidrome's own API's play counts
         # Pictures (0.30): the cover ids ("mf-<song>") and artist ids ("ar-artist-of-<song>") that have one; any other
         # is answered with the stand-in, as Navidrome does: an ordinary picture marked "don't keep", with no version.
@@ -102,6 +103,14 @@ class FakeServer:
                     return self.reply(200, [{"id": s["id"], "libraryId": int(s.get("library", "1")),
                                              "libraryPath": "/music", "path": file_path(s),
                                              "playCount": fake.played.get(s["id"], 0)} for s in rows])
+                if url.path.startswith("/api/song/") and fake.native:  # one song, by its id
+                    if self.headers.get("X-ND-Authorization") not in [f"Bearer nd-{u}" for u in USERS]:
+                        return self.reply(401, {"error": "login needed"})
+                    found = [s for s in fake.songs if s["id"] == urllib.parse.unquote(url.path[len("/api/song/"):])]
+                    if not found or not fake.native_one:
+                        return self.reply(404, {"error": "not found"})
+                    return self.reply(200, {"id": found[0]["id"], "libraryId": int(found[0].get("library", "1")),
+                                            "libraryPath": "/music", "path": file_path(found[0])})
                 if url.path == "/agents/photo.view":  # a photo an agent found, at its own address
                     return self.reply(200, PICTURE + b"photo-" + q.get("of", "").encode(), "image/jpeg")
                 if not url.path.startswith("/rest/"):
