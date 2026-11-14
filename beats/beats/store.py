@@ -239,6 +239,17 @@ class Store:
             self.db.execute("INSERT OR REPLACE INTO sound (song_id, source, at, error) VALUES (?, 'beats', ?, ?)",
                             (song_id, time.time(), str(error)[:300]))
 
+    def sound_again(self):
+        """Forgets the sound of every song heard here, so each is heard again (what was taken over from elsewhere is
+        kept: it can't be heard again the same way). How many songs. Similar music and the search by words have less
+        to go by until they're heard."""
+        with self._write():
+            n = self.db.execute("SELECT COUNT(*) AS n FROM sound WHERE source = 'beats'").fetchone()["n"]
+            self.db.execute("DELETE FROM sound WHERE source = 'beats'")
+        if n:
+            self.sound_changes += 1
+        return n
+
     def without_sound(self, limit=20):
         """Songs analysed for their beats whose sound isn't known (and that didn't fail to be heard), newest first."""
         return [r["song_id"] for r in self._rows(
@@ -503,6 +514,15 @@ class Store:
     HEARD = ("g.source IN ('sound', 'sound-doubted') AND ((g.weight >= ? AND (SELECT COUNT(*) FROM genres b WHERE "
              "b.song_id = g.song_id AND b.source = g.source AND b.weight > g.weight) < ?) OR NOT EXISTS (SELECT 1 FROM "
              "genres b WHERE b.song_id = g.song_id AND b.source = g.source AND b.weight > g.weight))")
+
+    def styles_again(self):
+        """Every song's styles are heard again: they stay in use until then (:meth:`doubt_styles`), and songs that
+        couldn't be heard are tried once more. How many songs."""
+        n = self.doubt_styles()
+        with self._write():
+            n += self.db.execute("SELECT COUNT(DISTINCT song_id) AS n FROM genres WHERE source='sound-failed'").fetchone()["n"]
+            self.db.execute("DELETE FROM genres WHERE source='sound-failed'")
+        return n
 
     def doubt_styles(self):
         """Marks every song's styles as doubted (the GPU that gave them disagreed with the CPU, 0.37.1): they stay in
@@ -890,6 +910,16 @@ class Store:
                                 f"WHERE error IS NULL AND song_id IN ({', '.join('?' for _ in chunk)})", chunk):
                 out[r.pop("song_id")] = r
         return out
+
+    def measure_again(self):
+        """Every song's loudness, fades and key are measured again: what's known stays in use until then, and songs
+        that couldn't be measured are tried once more. How many songs."""
+        with self._write():
+            n = self.db.execute("SELECT COUNT(*) AS n FROM measures").fetchone()["n"]
+            self.db.execute("UPDATE measures SET version = 0, error = NULL")
+        if n:
+            self.measure_changes += 1
+        return n
 
     def without_measure(self, version, limit=20):
         """Songs analysed for their beats but not yet measured by this ``version`` (failed ones aren't asked for again,

@@ -104,8 +104,8 @@ Each page has its own address (`#songs`, `#loudness`…), so Back and bookmarks 
 
 | Group | Page | What's on it |
 |---|---|---|
-| Analysis | **Overview** | What's being done now, and how far the beats, loudness, genres and sound are |
-| | **Libraries** | The libraries to analyse and what to work out for each, Start analysis (with its checks), tidying up, and starting over |
+| Analysis | **Overview** | What's being done now, and a card for each thing analysed (beats, loudness and key, genres, sound): how far it is, what measures it, and **Analyse again** to do only that again for every song |
+| | **Libraries** | A row for each library: a switch to analyse it and what it gets (beats, loudness, sound, genres); Start analysis (with its checks), a progress bar for each thing measured, tidying up, and starting over |
 | | **Songs** | Every song (cards on a phone), and a song's page (its beats, loudness, fades, key and genres) when one is open |
 | Your listening | **Listening** | Your history: by year and month, your top artists, albums and songs, and when you listen |
 | Used by the Siansa app | **Loudness** | How loud the songs are and how they start and end: for levelling the volume and timing fades |
