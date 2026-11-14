@@ -1108,6 +1108,9 @@ class Handler(BaseHTTPRequestHandler):
         if squeezed:  # the songs' table is a megabyte of JSON: a tenth of it over a phone's Wi-Fi
             body = gzip.compress(body, 5)
         self.send_response(status)
+        # A header's value never carries a line break, whoever it came from (a music server's picture type, say):
+        # one would start a header of its own.
+        kind = str(kind).replace("\r", " ").replace("\n", " ")
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(body)))
         if "Cache-Control" not in (headers or {}):  # a picture says how long it may be kept; nothing else is
@@ -1116,7 +1119,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Encoding", "gzip")
             self.send_header("Vary", "Accept-Encoding")
         for k, v in (headers or {}).items():
-            self.send_header(k, v)
+            self.send_header(k, str(v).replace("\r", " ").replace("\n", " "))
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
