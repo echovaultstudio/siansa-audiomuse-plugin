@@ -1,0 +1,41 @@
+# Keeps a copy of the Beat This! checkpoints with this repository's releases (the owner, 14 Nov): the image build
+# downloaded them from the university's host each time, and stopped whenever that host didn't answer. They're taken
+# out of the image already published (the same files), and the Dockerfile asks here first.
+#
+# Runs when this branch is pushed, or by hand.
+name: Model files
+
+on:
+  push:
+    branches: [models-mirror]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  mirror:
+    name: Copy the checkpoints to a release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      IMAGE: ghcr.io/echovaultstudio/siansa-beats:dev
+      TAG: models-1
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Take the checkpoints out of the published image
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker pull -q "$IMAGE"
+          id=$(docker create "$IMAGE")
+          mkdir out
+          for name in final0 small0; do docker cp "$id:/models/$name.ckpt" "out/$name.ckpt"; done
+          docker rm "$id" >/dev/null
+          (cd out && sha256sum *.ckpt | tee SHA256SUMS && ls -la)
+      - name: Publish them as a release
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "Model files (Beat This! checkpoints)" --latest=false \
+            --notes "The Beat This! checkpoints the Siansa Beats image is built with (final0 and small0), copied from the published image so a build doesn't depend on another host being up. They are the work of the Beat This! authors (CPJKU, https://github.com/CPJKU/beat_this) and come under their licence. Not a version of Siansa Beats."
+          gh release upload "$TAG" out/final0.ckpt out/small0.ckpt out/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
