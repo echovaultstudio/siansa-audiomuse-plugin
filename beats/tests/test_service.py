@@ -387,6 +387,23 @@ class ServiceTest(Service):
         self.assertEqual(self.call("/api/analyse-all", "POST")["queued"], 4)
         self.wait_done()
 
+        # One thing again by itself (0.45, the owner, 14 Nov): beats queue every song; loudness and key are measured
+        # again while what's known stays in use; a paused service starts again, as it was just asked to work.
+        self.assertEqual(self.call("/api/analyse-again", "POST", {"what": "beats"}), {"what": "beats", "songs": 4})
+        self.wait_done()
+        self.app.store.save_measure("t140", {"ref_lufs": -9.0, "key": "A", "scale": "minor"}, 99)
+        self.call("/api/pause", "POST")
+        self.assertEqual(self.call("/api/analyse-again", "POST", {"what": "loudness"})["what"], "loudness")
+        self.assertFalse(self.call("/api/status")["paused"])
+        self.assertIn("t140", self.app.store.without_measure(99))
+        self.assertEqual(self.app.store.measure("t140")["ref_lufs"], -9.0)  # still in use until it's measured again
+        for what in ("genres", "sound"):
+            self.assertEqual(self.call("/api/analyse-again", "POST", {"what": what})["what"], what)
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.call("/api/analyse-again", "POST", {"what": "everything"})
+        self.assertEqual(caught.exception.code, 400)
+        self.wait_done()
+
         status = self.call("/api/status")
         self.assertNotIn("plugin", status)
         # Nothing but the music server is asked anything (0.43).

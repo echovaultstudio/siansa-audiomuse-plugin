@@ -249,6 +249,19 @@ main > section.on { display: grid; gap: 16px; }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .tile { padding: 12px; } .tile .v { font-size: 1.375rem; }
 }
+.kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.kind { background: var(--raised); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: grid; gap: 8px; align-content: start; }
+.kind .top { display: flex; align-items: baseline; gap: 8px; }
+.kind .top a { font-weight: 700; font-size: 1rem; color: inherit; text-decoration: none; }
+.kind .top a:hover { color: var(--amber); }
+.kind .top .n { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+.kind .top .n small { font-weight: 500; color: var(--muted); }
+.kind .for, .kind .by { font-size: 0.8125rem; color: var(--muted); }
+.kind .by b { color: var(--text); font-weight: 600; }
+.kind .meter { height: 6px; border-radius: 999px; background: var(--raised-2); overflow: hidden; display: flex; }
+.kind .foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.8125rem; color: var(--muted); }
+.kind .foot .ok { color: var(--ok); }
+.kind .foot button { margin-left: auto; font-size: 0.75rem; padding: 4px 12px; border-radius: 999px; }
 .tile { background: var(--raised); border: 1px solid var(--line); border-radius: 16px; padding: 16px 16px; text-decoration: none; color: inherit; display: block; }
 a.tile:hover { border-color: var(--amber); }
 .tile .k { font-size: 0.75rem; color: var(--faint); }
@@ -269,6 +282,7 @@ a.tile:hover { border-color: var(--amber); }
 .work .job .head b { font-weight: 600; }
 .work .job .head .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .work .job .what { color: var(--muted); font-size: 0.8125rem; }
+.work .job .head .ok { color: var(--ok); }
 .work .job .what .spinner { display: inline-block; width: 12px; height: 12px; border-width: 2px; vertical-align: -2px; margin: 0 8px 0 0; }
 .work .meter { height: 6px; border-radius: 999px; background: var(--raised-2); overflow: hidden; display: flex; }
 .work .meter .wait { background: var(--amber); opacity: 0.35; }
@@ -390,6 +404,23 @@ code { font-family: var(--mono); font-size: 0.8125rem; background: var(--raised-
 @media (max-width: 600px) { .form { grid-template-columns: minmax(0, 1fr); } }
 #key-text { overflow-wrap: anywhere; user-select: all; }
 /* A library being read: what, how far, and why (0.24.1). */
+.lib-rows { display: grid; gap: 8px; margin: 8px 0 12px; }
+.lib-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; }
+.lib-row[data-on=false] { opacity: 0.7; }
+.lib-row .name { display: flex; align-items: center; gap: 12px; background: none; border: 0; padding: 0; color: inherit; text-align: left; font: inherit; cursor: pointer; min-height: 32px; }
+.lib-row .name b { font-weight: 600; }
+.lib-row .name .n { margin-left: auto; color: var(--muted); font-size: 0.8125rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lib-row .switch { flex: none; width: 36px; height: 20px; border-radius: 999px; background: var(--raised-2); border: 1px solid var(--line); position: relative; }
+.lib-row .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: left 0.15s; }
+.lib-row[data-on=true] .switch { background: var(--amber); border-color: var(--amber); }
+.lib-row[data-on=true] .switch::after { left: 18px; background: var(--on-amber); }
+.lib-row .gets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.lib-row .gets button { font-size: 0.75rem; padding: 6px 4px; text-align: center; justify-content: center; border-radius: 999px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-row .gets button[aria-pressed=false] { opacity: 0.55; text-decoration: line-through; }
+.lib-row .gets button[aria-pressed=true] { border-color: var(--amber); }
+@media (min-width: 760px) {
+  .lib-row { grid-template-columns: minmax(12rem, 1fr) minmax(0, 28rem); align-items: center; }
+}
 .tasks { display: grid; gap: 8px; margin: 2px 0 12px; }
 .tasks .lib { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 0.875rem; }
 .tasks .lib > b { min-width: 7rem; font-weight: 600; }
@@ -530,7 +561,7 @@ details.how { margin-top: 12px; } details.how summary { font-size: 0.8125rem; co
         </div>
         <div class="controls"><button id="pause">Pause</button></div>
       </div>
-      <div class="tiles" id="tiles"></div>
+      <div class="kinds" id="tiles"></div>
       <div class="card">
         <div class="card-head"><h3>Recent activity</h3><a href="#activity" class="more">All activity ›</a></div>
         <ul class="events" id="events-recent" data-cap="5"></ul>
@@ -542,9 +573,8 @@ details.how { margin-top: 12px; } details.how summary { font-size: 0.8125rem; co
       <div class="page-head"><h2>Libraries</h2><p class="sub">Choose which libraries of <span data-server-name>your music server</span> to analyse, and what to work out for each. Nothing is ever changed on the server.</p></div>
       <div class="card">
         <h3>Libraries</h3>
-        <p class="sub">Tick a library to analyse it. Start analysis checks everything first, then analyses what's new; it also runs by itself every 6 hours.</p>
-        <div class="libs" role="group" aria-label="Libraries to analyse"><span id="libs" class="controls"><span class="sub">Asking the server…</span></span></div>
-        <div class="tasks" id="lib-tasks" role="group" aria-label="What each library gets" hidden></div>
+        <p class="sub">Switch a library on to analyse it, and tap what it should get: a crossed-out one is left out. Start analysis checks everything first, then analyses what's new; it also runs by itself every 6 hours.</p>
+        <div class="lib-rows" id="libs" role="group" aria-label="Libraries to analyse, and what each gets"><span class="sub">Asking the server…</span></div>
         <div class="sub" id="libs-note" role="status"></div>
         <div class="reading" id="reading" role="status" hidden><span class="spinner" aria-hidden="true"></span><div><b id="reading-what"></b><div class="sub" id="reading-step"></div></div></div>
         <div class="controls row-gap">
@@ -1121,17 +1151,15 @@ const savedIds = () => libraries.filter((l) => l.on).map((l) => l.id);
 const TASKS = [["beats", "Beats", "Tempo, beats and phrases (Beat This!): what the DJ blends need. Slow on very long songs."], ["loudness", "Loudness & key", "LUFS, fades and the key: what the app levels the volume and mixes in key by."], ["sound", "Sound", "Moods, energy and what sounds alike (MusiCNN, CLAP): similar music and the search by words."], ["styles", "Genres", "The 400 Discogs styles by sound: the genre radios."]];
 let skips = null;
 const savedSkips = () => Object.fromEntries(libraries.filter((l) => l.skip && l.skip.length).map((l) => [l.id, [...l.skip]]));
-function drawTasks(ticked) {
-  const box = $("lib-tasks");
-  const current = skips || savedSkips();
-  const shown = libraries.filter((l) => ticked.has(l.id));
-  box.hidden = !shown.length;
-  box.innerHTML = shown.map((l) => `<div class="lib"><b>${esc(l.name)}</b>` + TASKS.map(([id, name, hint]) => {
+// The four things a library can get, as chips in line under (or beside) its name; short names so four fit a phone.
+const TASK_SHORT = {beats: "Beats", loudness: "Loudness", sound: "Sound", styles: "Genres"};
+function taskChips(l, current) {
+  return `<div class="gets" role="group" aria-label="What ${esc(l.name)} gets">` + TASKS.map(([id, name, hint]) => {
     const out = (current[l.id] || []).includes(id);
-    return `<button type="button" data-task="${id}" data-lib="${esc(l.id)}" aria-pressed="${!out}" title="${esc(hint)}${out ? " — left out: tap to put it back" : " — tap to leave it out"}">${name}</button>`;
-  }).join("") + "</div>").join("");
+    return `<button type="button" data-task="${id}" data-lib="${esc(l.id)}" aria-pressed="${!out}" aria-label="${esc(name)}" title="${esc(hint)}${out ? " — left out: tap to put it back" : " — tap to leave it out"}">${TASK_SHORT[id] || name}</button>`;
+  }).join("") + "</div>";
 }
-$("lib-tasks").addEventListener("click", (e) => {
+$("libs").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-task]");
   if (!b) return;
   skips = skips || savedSkips();
@@ -1142,9 +1170,11 @@ $("lib-tasks").addEventListener("click", (e) => {
 });
 const skipsChanged = () => skips && JSON.stringify(skips, Object.keys(skips).sort()) !== JSON.stringify(savedSkips(), Object.keys(savedSkips()).sort());
 function drawLibraries() {
-  const ticked = new Set(picked || savedIds());
-  drawTasks(ticked);
-  $("libs").innerHTML = libraries.map((l) => `<button data-lib="${esc(l.id)}" aria-pressed="${ticked.has(l.id)}" title="${ticked.has(l.id) ? "Ticked: tap to leave it out" : "Left out: tap to tick it"}">${esc(l.name)}<span class="n">${l.songs ? `${l.done} of ${l.songs}` : ""}</span></button>`).join("") || `<span class="sub">${esc(serverName())} has no music libraries.</span>`;
+  const ticked = new Set(picked || savedIds()), current = skips || savedSkips();
+  $("libs").innerHTML = libraries.map((l) => {
+    const on = ticked.has(l.id);
+    return `<div class="lib-row" data-on="${on}"><button type="button" class="name" data-lib="${esc(l.id)}" role="switch" aria-checked="${on}" title="${on ? "On: tap to leave this library out" : "Off: tap to analyse this library"}"><span class="switch" aria-hidden="true"></span><b>${esc(l.name)}</b><span class="n">${l.songs ? `${num(l.done)} of ${num(l.songs)} songs` : on ? "not read yet" : "off"}</span></button>${on ? taskChips(l, current) : ""}</div>`;
+  }).join("") || `<span class="sub">${esc(serverName())} has no music libraries.</span>`;
   const changed = (picked && [...ticked].sort().join() !== savedIds().sort().join()) || skipsChanged();
   $("libs-note").textContent = changed ? "Not started yet: press Start analysis" : readNote;
   const left = libraries.filter((l) => !l.on && l.songs);
@@ -1152,7 +1182,7 @@ function drawLibraries() {
   $("left-out").innerHTML = left.map((l) => `<span class="sub">${esc(l.name)} is left out, but ${l.songs} of its songs are still here.</span><button data-remove="${esc(l.id)}" data-name="${esc(l.name)}" data-songs="${l.songs}">Remove them</button>`).join("");
 }
 $("libs").addEventListener("click", (e) => {
-  const b = e.target.closest("button[data-lib]");
+  const b = e.target.closest("button.name[data-lib]");
   if (!b) return;
   const ticked = new Set(picked || savedIds());
   if (ticked.has(b.dataset.lib)) ticked.delete(b.dataset.lib); else ticked.add(b.dataset.lib);
@@ -1519,7 +1549,8 @@ function job(key, title, done, total, what, failed = 0, busy = 0) {
   const w = (n) => total ? `${Math.max(0, Math.min(100, 100 * n / total))}%` : "0";
   const left = Math.max(0, total - done - failed);
   const eta = timeLeft(key, done, left);
-  return `<div class="job"><div class="head"><b>${esc(title)}</b><span class="n">${num(done)} of ${num(total)}${failed ? ` · ${num(failed)} failed` : ""}${eta ? ` · ${eta}` : ""}</span></div>
+  const complete = total > 0 && left === 0 && !busy;
+  return `<div class="job"><div class="head"><b>${esc(title)}</b><span class="n">${complete ? `<span class="ok">✓</span> ` : ""}${num(done)} of ${num(total)}${failed ? ` · ${num(failed)} failed` : ""}${eta ? ` · ${eta}` : ""}</span></div>
     <div class="meter" aria-hidden="true"><span class="done" style="width:${w(done)}"></span><span class="failed" style="width:${w(failed)}"></span><span class="busy" style="width:${w(busy)}"></span></div>
     ${what ? `<div class="what"><span class="spinner" aria-hidden="true"></span>${what}</div>` : ""}</div>`;
 }
@@ -1533,14 +1564,15 @@ function drawWork(s) {
   if (st.switch) {
     if (st.switch.phase === "marking") jobs.push(`<div class="job"><div class="head"><b>Genres by sound</b><span class="n">${st.switch.for_seconds} s</span></div><div class="what"><span class="spinner" aria-hidden="true"></span>Switching to ${esc(st.switch.model_name)}: marking ${num(st.switch.songs)} songs to be heard again…</div></div>`);
     else jobs.push(job("styles", `Genres by sound · hearing every song again with ${st.switch.model_name}`, st.done || 0, st.switch.doubted || st.total || 0, st.current ? who(st.current) : "waiting for the queue to be empty", st.failed || 0));
-  } else if (st.available && (st.current || (st.total || 0) > (st.done || 0) + (st.failed || 0))) {
+  } else if (st.available) {
     jobs.push(job("styles", "Genres by sound", st.done || 0, st.total || 0, st.current ? who(st.current) : "", st.failed || 0));
   }
-  if (l.measuring || l.waiting) jobs.push(job("loudness", "Loudness & key", l.measured || 0, (l.measured || 0) + (l.waiting || 0) + (l.failed || 0), l.measuring ? who(l.measuring) : "", l.failed || 0));
-  if (so.hearing || (so.hears && so.songs > (so.sound || 0) + ((so.sources || {}).failed || 0))) jobs.push(job("sound", "Sound", so.sound || 0, so.songs || 0, so.hearing ? who(so.hearing) : "", (so.sources || {}).failed || 0));
+  // Every thing that's measured has its bar, also when it's done (the owner, 14 Nov), so the page says what's complete.
+  jobs.push(job("loudness", "Loudness & key", l.measured || 0, (l.measured || 0) + (l.waiting || 0) + (l.failed || 0), l.measuring ? who(l.measuring) : "", l.failed || 0));
+  if (so.hears !== false) jobs.push(job("sound", "Sound", so.sound || 0, so.songs || 0, so.hearing ? who(so.hearing) : "", (so.sources || {}).failed || 0));
   if (s.regridding) jobs.push(job("regrid", "Working out beats again", s.regridding.done, s.regridding.total, ""));
   if (st.switch && $("style-note").textContent.indexOf("…") < 0) $("style-note").innerHTML = st.switch.phase === "marking" ? `Switching to ${esc(st.switch.model_name)}: marking ${num(st.switch.songs)} songs to be heard again (${st.switch.for_seconds} s)…` : `${esc(st.switch.model_name)}: ${num(st.done || 0)} of ${num(st.switch.doubted || 0)} songs heard again so far. <a href="#libraries">Progress is under Libraries.</a>`;
-  $("work").innerHTML = jobs.join("") + (jobs.length === 1 && !toGo && !s.current ? `<div class="sub">Nothing else is running. Start analysis looks for new songs; what's new is analysed as it comes.</div>` : "");
+  $("work").innerHTML = jobs.join("") + (!toGo && !s.current && !st.current && !l.measuring && !so.hearing && !s.reading ? `<div class="sub">Nothing is running now. Start analysis looks for new songs; what's new is analysed as it comes. To do one thing again for every song, use Analyse again on the Overview.</div>` : "");
 }
 
 // ---- controls ----
@@ -1956,7 +1988,7 @@ function drawListening(d) {
   }
   const users = d.users || [];
   $("tm-who").hidden = users.length < 2;
-  $("tm-user").innerHTML = users.map((u) => `<option value="${esc(u.user)}"${u.user === d.user ? " selected" : ""}>${esc(u.user || "(no name)")} · ${num(u.listens)}</option>`).join("");
+  $("tm-user").innerHTML = users.map((u) => `<option value="${esc(u.user)}"${u.user === d.user ? " selected" : ""}>${esc(u.user || "(no name)")}${listenerFrom(u)} · ${num(u.listens)}</option>`).join("");
   $("tm-user-names").innerHTML = users.map((u) => `<option value="${esc(u.user)}"></option>`).join("");
   if (!$("tm-import-user").value) $("tm-import-user").value = d.user || (users.find((u) => u.user) || {}).user || ((d.playing || []).find((p) => p.user) || {}).user || "";
   const t = d.totals, all = d.all || {};
@@ -2195,22 +2227,68 @@ document.querySelectorAll("[data-log]").forEach((b) => b.addEventListener("click
 setInterval(refreshLog, 3000);
 
 
+// Where a listener's listens are from (the owner, 14 Nov: two listeners called max): the music servers whose login
+// has that very name, else what brought the listens in (a file, Last.fm, the app).
+const SOURCE_NAMES = {siansa: "the app", lastfm: "Last.fm", listenbrainz: "ListenBrainz", koito: "Koito", maloja: "Maloja"};
+function listenerFrom(u) {
+  const servers = ((status && status.servers) || []).filter((s) => s.user && s.user === u.user).map((s) => s.name || s.kind);
+  if (servers.length) return ` (${[...new Set(servers)].join(", ")})`;
+  const sources = Object.keys(u.sources || {}).map((k) => SOURCE_NAMES[k] || k);
+  return sources.length ? ` (from ${[...new Set(sources)].join(", ")})` : "";
+}
+
 // ---- overview ----
 function tile(href, k, v, of, s, meter) {
   const bar = meter ? `<div class="meter">${meter.map(([cls, n]) => `<span class="${cls}" style="width:${of ? 100 * n / of : 0}%"></span>`).join("")}</div>` : "";
   return `<a class="tile" href="${href}"><div class="k">${esc(k)}</div><div class="v">${v}${of != null ? ` <small>of ${num(of)}</small>` : ""}</div><div class="s">${s}</div>${bar}</a>`;
 }
-function drawTiles(s) {
+// What each thing is for, and what works it out (the owner, 14 Nov: "say what model is used to measure it").
+function kindsOf(s) {
   const c = s.counts || {}, total = (c.songs || 0) - (c.skipped || 0), done = c.done || 0, failed = c.failed || 0;
   const waiting = (c.queued || 0) + BUSY.reduce((n, k) => n + (c[k] || 0), 0);
-  const l = s.loudness || {}, st = s.styles || {};
-  $("tiles").innerHTML = [
-    tile("#songs", "Beats", num(done), total, `${waiting ? num(waiting) + " to go" : "all done"}${failed ? ` · ${num(failed)} failed` : ""}${c.skipped ? ` · ${num(c.skipped)} left out` : ""}`, [["done", done], ["failed", failed], ["busy", waiting]]),
-    tile("#loudness", "Loudness & key", num(l.measured), done, l.waiting ? `${num(l.waiting)} to go${l.measuring ? " · measuring now" : ""}` : `all measured${l.failed ? ` · ${num(l.failed)} couldn't be` : ""}`, [["done", l.measured || 0], ["failed", l.failed || 0]]),
-    tile("#genres", "Genres", st.available ? num(st.done) : "–", st.available ? st.total : null, st.available ? (st.current ? "hearing a song now" : (st.done >= st.total ? "all songs heard" : "songs heard so far")) : "this image has no genre model", st.available ? [["done", st.done || 0], ["failed", st.failed || 0]] : null),
-    tile("#similar", "Sound", num((s.sound || {}).sound), (s.sound || {}).songs ?? null, "for similar music and moods", [["done", (s.sound || {}).sound || 0]]),
-  ].join("");
+  const l = s.loudness || {}, st = s.styles || {}, so = s.sound || {}, soFailed = (so.sources || {}).failed || 0;
+  const where = s.device_name && s.device_name !== "CPU" ? ` on the GPU` : "";
+  return [
+    {id: "beats", href: "#songs", name: "Beats", what: "Tempo, every beat and the phrases: what DJ blends are laid on.",
+      by: `<b>Beat This!</b> ${esc(s.model || "")}${where}`, done, total, failed, busy: waiting,
+      now: s.current ? "analysing a song now" : "", left: waiting},
+    {id: "loudness", href: "#loudness", name: "Loudness & key", what: "How loud each song is, how it starts and ends, and its key: for even volume, fades and mixing in key.",
+      by: `<b>No AI model</b>: loudness by the broadcast standard (ITU-R BS.1770), the key by Krumhansl–Kessler profiles`,
+      done: l.measured || 0, total: done, failed: l.failed || 0, busy: 0, now: l.measuring ? "measuring a song now" : "", left: l.waiting || 0},
+    {id: "genres", href: "#genres", name: "Genres", what: "The 400 Discogs styles each song sounds like: the genre list and genre radios.",
+      by: st.available ? `<b>${esc(st.model_name || "Discogs-EffNet")}</b> on the ${esc(st.device || "CPU")}` : "<b>None</b>: this image has no genre model",
+      done: st.done || 0, total: st.available ? st.total || 0 : null, failed: st.failed || 0, busy: 0,
+      now: st.current ? "hearing a song now" : "", left: Math.max(0, (st.total || 0) - (st.done || 0) - (st.failed || 0)), off: !st.available},
+    {id: "sound", href: "#similar", name: "Sound", what: "What each song sounds and feels like: similar songs, albums and artists, moods, and the search by words.",
+      by: so.hears === false ? "<b>None</b>: this image can't hear songs" : `<b>MusiCNN</b> (how it sounds) and <b>CLAP</b> (moods and words)`,
+      done: so.sound || 0, total: so.songs ?? null, failed: soFailed, busy: 0, now: so.hearing ? "hearing a song now" : "",
+      left: Math.max(0, (so.songs || 0) - (so.sound || 0) - soFailed), off: so.hears === false},
+  ];
 }
+const AGAIN_ASK = {
+  beats: "Work out the beats of every song again? For a big library that can take days. The beats known now stay in use until each song is done.",
+  loudness: "Measure the loudness and key of every song again? What's known now stays in use until each song is measured.",
+  genres: "Hear every song's genres again? The genres known now stay in use until each song is heard.",
+  sound: "Hear the sound of every song again? Until a song is heard again it's missing from similar music and the search by words. For a big library that takes many hours.",
+};
+function drawTiles(s) {
+  $("tiles").innerHTML = kindsOf(s).map((k) => {
+    const w = (n) => k.total ? `${Math.max(0, Math.min(100, 100 * n / k.total))}%` : "0";
+    const state = k.off ? "not in this image" : s.paused && k.left ? `paused · ${num(k.left)} to go` : k.now ? `${k.now} · ${num(k.left)} to go` : k.left ? `${num(k.left)} to go` : k.total ? `<span class="ok">✓ all done</span>` : "no songs yet";
+    return `<div class="kind"><div class="top"><a href="${k.href}">${esc(k.name)}</a><span class="n">${k.total == null ? "–" : `${num(k.done)} <small>of ${num(k.total)}</small>`}</span></div>
+      <div class="for">${esc(k.what)}</div>
+      <div class="meter" aria-hidden="true"><span class="done" style="width:${w(k.done)}"></span><span class="failed" style="width:${w(k.failed)}"></span><span class="busy" style="width:${w(k.busy)}"></span></div>
+      <div class="by">Measured by ${k.by}</div>
+      <div class="foot"><span>${state}${k.failed ? ` · ${num(k.failed)} failed` : ""}</span>${k.off ? "" : `<button type="button" data-again="${k.id}" title="Does only this again, for every song">Analyse again</button>`}</div></div>`;
+  }).join("");
+}
+$("tiles").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-again]");
+  if (!b || !confirm(AGAIN_ASK[b.dataset.again])) return;
+  b.disabled = true;
+  try { await api("api/analyse-again", {method: "POST", body: JSON.stringify({what: b.dataset.again})}); } catch (err) { banner(err.message); }
+  refreshStatus();
+});
 
 // ---- setup ----
 function drawSetup(s) {

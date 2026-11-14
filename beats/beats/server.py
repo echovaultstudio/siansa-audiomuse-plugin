@@ -208,6 +208,10 @@ def _remove(path):
         pass
 
 
+# What can be analysed again by itself (0.45, the owner, 14 Nov), as the page names it.
+AGAIN = {"beats": "Beats", "loudness": "Loudness and key", "sound": "Sound", "genres": "Genres"}
+
+
 class App:
     """Everything the handler needs, so the tests can make one with stand-ins."""
 
@@ -1467,6 +1471,19 @@ class Handler(BaseHTTPRequestHandler):
                 app.store.event(f"Analysing every song again: {queued} queued")
                 app.worker.wake()
                 return self._json({"queued": queued})
+            if path == "/api/analyse-again":  # one kind of analysis again, for every song (0.45): {"what"}
+                what = str(body.get("what") or "")
+                if what not in AGAIN:
+                    return self._error(HTTPStatus.BAD_REQUEST, "what needed: " + ", ".join(AGAIN))
+                if what == "beats":
+                    songs = sum(app.store.queue(song_id, force=True) for song_id in app.store.song_ids())
+                else:
+                    songs = {"loudness": app.store.measure_again, "sound": app.store.sound_again, "genres": app.store.styles_again}[what]()
+                app.store.event(f"{AGAIN[what]} again for every song: {songs} songs")
+                if app.worker.paused:
+                    app.worker.pause(False)  # asked for now: a paused service would leave it waiting unseen
+                app.worker.wake()
+                return self._json({"what": what, "songs": songs})
             if path == "/api/log/level":
                 if str(body.get("level") or "").lower() not in ("debug", "info"):
                     return self._error(HTTPStatus.BAD_REQUEST, 'level needed: "debug" or "info"')
