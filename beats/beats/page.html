@@ -566,7 +566,7 @@ details.how { margin-top: 12px; } details.how summary { font-size: 0.8125rem; co
           <div class="what" id="now-what">Starting…</div>
           <div class="step" id="now-step"></div>
         </div>
-        <div class="controls"><button id="pause">Pause</button></div>
+        <div class="controls"><button id="check-new" title="Reads the libraries you analyse for songs added since, and analyses those. Nothing already analysed is touched">Check what's new</button><button id="pause">Pause</button></div>
       </div>
       <div class="card" id="start-card" hidden>
         <h3>Get started</h3>
@@ -610,8 +610,14 @@ details.how { margin-top: 12px; } details.how summary { font-size: 0.8125rem; co
       </div>
       <div class="card">
         <h3>Start over</h3>
-        <p class="sub">Analyse every song again, for a new model or after a big change. For a big library this takes days.</p>
-        <div class="controls row-gap"><button class="danger" id="all-again">Analyse every song again</button></div>
+        <p class="sub">Do one kind of analysis again for every song, or all of it, for a new model or after a big change. Nothing is forgotten first: what's known about a song stays in use until it has been done again. For a big library this takes hours to days. New songs never need this: <b>Check what's new</b> on the Overview finds them.</p>
+        <div class="controls row-gap" id="again-buttons">
+          <button class="danger" data-again="beats">Beats again</button>
+          <button class="danger" data-again="loudness">Loudness and key again</button>
+          <button class="danger" data-again="genres">Genres again</button>
+          <button class="danger" data-again="sound">Sound again</button>
+          <button class="danger" id="all-again">Analyse every song again</button>
+        </div>
       </div>
     </section>
 
@@ -1208,6 +1214,7 @@ function drawReading(r) {
   $("reading").hidden = !r;
   $("start").disabled = !!r;
   $("start").textContent = r ? "Reading…" : "Start analysis";
+  $("check-new").disabled = !!r; $("check-new").textContent = r ? "Checking…" : "Check what's new";
   if (r) {
     wasReading = true; readNote = "";
     const secs = Math.max(0, Math.round(Date.now() / 1000 - r.started));
@@ -1584,13 +1591,19 @@ function drawWork(s) {
   if (so.hears !== false) jobs.push(job("sound", "Sound", so.sound || 0, so.songs || 0, so.hearing ? who(so.hearing) : "", (so.sources || {}).failed || 0));
   if (s.regridding) jobs.push(job("regrid", "Working out beats again", s.regridding.done, s.regridding.total, ""));
   if (st.switch && $("style-note").textContent.indexOf("…") < 0) $("style-note").innerHTML = st.switch.phase === "marking" ? `Switching to ${esc(st.switch.model_name)}: marking ${num(st.switch.songs)} songs to be heard again (${st.switch.for_seconds} s)…` : `${esc(st.switch.model_name)}: ${num(st.done || 0)} of ${num(st.switch.doubted || 0)} songs heard again so far. <a href="#libraries">Progress is under Libraries.</a>`;
-  $("work").innerHTML = jobs.join("") + (!toGo && !s.current && !st.current && !l.measuring && !so.hearing && !s.reading ? `<div class="sub">Nothing is running now. Start analysis looks for new songs; what's new is analysed as it comes. To do one thing again for every song, use Analyse again on the Overview.</div>` : "");
+  $("work").innerHTML = jobs.join("") + (!toGo && !s.current && !st.current && !l.measuring && !so.hearing && !s.reading ? `<div class="sub">Nothing is running now. Start analysis looks for new songs; what's new is analysed as it comes. Check what's new on the Overview looks for new songs too.</div>` : "");
 }
 
 // ---- controls ----
 $("pause").addEventListener("click", async () => { await api(status?.paused ? "api/resume" : "api/pause", {method: "POST"}); refreshStatus(); });
+$("check-new").addEventListener("click", async () => {
+  const b = $("check-new");
+  b.disabled = true; b.textContent = "Checking…";
+  try { await api("api/libraries/read", {method: "POST", body: JSON.stringify({background: true})}); } catch (err) { banner(err.message); }
+  await refreshStatus(); statusLoop();
+});
 $("all-again").addEventListener("click", async () => {
-  if (confirm("Analyse every song again? For a big library that can take days.")) {
+  if (confirm("Analyse every song again, all of it? For a big library that can take days. What's known now stays in use until each song is done.")) {
     await api("api/analyse-all", {method: "POST"}); refreshStatus();
   }
 });
@@ -2274,14 +2287,14 @@ function kindsOf(s) {
     {id: "sound", href: "#similar", name: "Sound", what: "What each song sounds and feels like: similar songs, albums and artists, moods, and the search by words.",
       by: so.hears === false ? "<b>None</b>: this image can't hear songs" : `<b>MusiCNN</b> (how it sounds) and <b>CLAP</b> (moods and words)`,
       done: so.sound || 0, total: so.songs ?? null, failed: soFailed, busy: 0, now: so.hearing ? "hearing a song now" : "",
-      left: Math.max(0, (so.songs || 0) - (so.sound || 0) - soFailed), off: so.hears === false},
+      left: Math.max(0, (so.songs || 0) - (so.sound || 0) - soFailed) + (so.again || 0), off: so.hears === false},
   ];
 }
 const AGAIN_ASK = {
   beats: "Work out the beats of every song again? For a big library that can take days. The beats known now stay in use until each song is done.",
   loudness: "Measure the loudness and key of every song again? What's known now stays in use until each song is measured.",
   genres: "Hear every song's genres again? The genres known now stay in use until each song is heard.",
-  sound: "Hear the sound of every song again? Until a song is heard again it's missing from similar music and the search by words. For a big library that takes many hours.",
+  sound: "Hear the sound of every song again? For a big library that takes many hours. The sound known now stays in use until each song is heard.",
 };
 // A new install's way in (the owner, 14 Nov: setting up must be plain): shown until a music server is added and a
 // library is switched on, each step with where to do it and a tick once it's done.
@@ -2304,14 +2317,17 @@ function drawTiles(s) {
       <div class="for">${esc(k.what)}</div>
       <div class="meter" aria-hidden="true"><span class="done" style="width:${w(k.done)}"></span><span class="failed" style="width:${w(k.failed)}"></span><span class="busy" style="width:${w(k.busy)}"></span></div>
       <div class="by">Measured by ${k.by}</div>
-      <div class="foot"><span>${state}${k.failed ? ` · ${num(k.failed)} failed` : ""}</span>${k.off ? "" : `<button type="button" data-again="${k.id}" title="Does only this again, for every song">Analyse again</button>`}</div></div>`;
+      <div class="foot"><span>${state}${k.failed ? ` · ${num(k.failed)} failed` : ""}</span></div></div>`;
   }).join("");
 }
-$("tiles").addEventListener("click", async (e) => {
+// One kind of analysis again for every song: under Libraries › Start over (0.46, the owner: not a tap away on the
+// Overview), each asked about first.
+$("again-buttons").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-again]");
   if (!b || !confirm(AGAIN_ASK[b.dataset.again])) return;
   b.disabled = true;
   try { await api("api/analyse-again", {method: "POST", body: JSON.stringify({what: b.dataset.again})}); } catch (err) { banner(err.message); }
+  b.disabled = false;
   refreshStatus();
 });
 

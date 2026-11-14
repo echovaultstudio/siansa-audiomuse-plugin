@@ -48,7 +48,7 @@ class Cleaner:
         # Gone from the server: each ticked library listed right now.
         for folder in sorted(chosen, key=lambda f: libraries.get(f, f)):
             try:
-                now = [s["id"] for s in client.all_songs(folder) if s.get("id")]
+                now = [s["id"] for s in client.all_songs(folder, paths=False) if s.get("id")]  # ids alone
             except ServerError as e:
                 groups.append(self._group(f"gone:{folder}", f"Gone from {libraries.get(folder, folder)}", [],
                                           warning=f"{name} couldn't list this library ({e}): nothing of it is removed"))

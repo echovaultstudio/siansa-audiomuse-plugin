@@ -42,6 +42,9 @@ FIXED_ERRORS = ("'bars'", "not supported between instances of 'NoneType'")
 
 
 LIBRARY_RESCAN_SECONDS = 6 * 3600  # how often the chosen libraries are read again for new songs
+# How often every song's file path is asked for again (a file moved on the server). Between those, only the songs
+# without one are asked for (0.46): Navidrome's own list of a big library took minutes at every read.
+PATHS_AGAIN_SECONDS = 7 * 24 * 3600
 STYLE_KEEP = 15  # the top styles kept for each song (beats.style.KEEP)
 STYLE_RATE = 16_000  # the style model's sample rate: songs analysed before are decoded again at it
 STYLE_REPORT_EVERY = 500  # the agreement with the tags is worked out again after this many more songs
@@ -255,6 +258,18 @@ class Worker:
             finally:
                 self.reading = None
 
+    def _paths_to_ask(self, server, folder):
+        """Which songs of a library are asked for their file's path at this read: all of them once a week, and
+        otherwise only those that have none kept."""
+        key, now = f"paths_at:{server}:{folder}", time.time()
+        last = self.store.setting(key)
+        if last is not None and now - last < PATHS_AGAIN_SECONDS:
+            return lambda ids: self.store.without_path(server, ids)
+        self.store.set_setting(key, now)
+        if last is None:  # the first read by 0.46: every read before asked for them all
+            return lambda ids: self.store.without_path(server, ids)
+        return True
+
     def _read_libraries(self, only, report):
         started = time.monotonic()
         total, queued = 0, []
@@ -284,7 +299,7 @@ class Worker:
                                 "why": None if report is None or server == report else "first"}
                 done += 1
                 try:
-                    songs = [s for s in client.all_songs(folder) if s.get("id")]
+                    songs = [s for s in client.all_songs(folder, paths=self._paths_to_ask(server, folder)) if s.get("id")]
                     self.reading = {**self.reading, "songs": len(songs)}
                 except ServerError as e:
                     self.store.event(f"Couldn't read the library {names.get(folder, folder)}{self._label(server)}: {e}", "error")

@@ -145,6 +145,9 @@ class Store:
                     self.db.execute("UPDATE sound SET tempo=NULL")
             if "error" not in {r[1] for r in self.db.execute("PRAGMA table_info(sound)")}:
                 self.db.execute("ALTER TABLE sound ADD COLUMN error TEXT")  # 0.27: why a song couldn't be heard here
+            if "again" not in {r[1] for r in self.db.execute("PRAGMA table_info(sound)")}:
+                # 0.46: to be heard again, its sound kept in use until then (it was deleted first before).
+                self.db.execute("ALTER TABLE sound ADD COLUMN again INTEGER")
             if "source" not in {r[1] for r in self.db.execute("PRAGMA table_info(measures)")}:
                 self.db.execute("ALTER TABLE measures ADD COLUMN source TEXT")  # 0.20.0's first builds had none
             if "folder" not in {r[1] for r in self.db.execute("PRAGMA table_info(songs)")}:
@@ -236,25 +239,32 @@ class Store:
         """Keeps why ``song_id`` couldn't be heard here, so it isn't tried again and again (a pull from AudioMuse-AI,
         or hearing it after an update, replaces this)."""
         with self._write():
+            # A sound that's known is never replaced by a failure (0.46): a song that couldn't be heard again keeps
+            # what was heard before, and isn't asked for again.
+            if self.db.execute("UPDATE sound SET again = NULL WHERE song_id = ? AND musicnn IS NOT NULL", (song_id,)).rowcount:
+                return
             self.db.execute("INSERT OR REPLACE INTO sound (song_id, source, at, error) VALUES (?, 'beats', ?, ?)",
                             (song_id, time.time(), str(error)[:300]))
 
     def sound_again(self):
-        """Forgets the sound of every song heard here, so each is heard again (what was taken over from elsewhere is
-        kept: it can't be heard again the same way). How many songs. Similar music and the search by words have less
-        to go by until they're heard."""
+        """Marks the sound of every song heard here to be heard again (what was taken over from elsewhere is left: it
+        can't be heard again the same way). How many songs. Nothing is forgotten (0.46; it was deleted first before):
+        each song's sound stays in use until it's heard again, and a song that couldn't be heard is tried once more."""
         with self._write():
-            n = self.db.execute("SELECT COUNT(*) AS n FROM sound WHERE source = 'beats'").fetchone()["n"]
-            self.db.execute("DELETE FROM sound WHERE source = 'beats'")
-        if n:
-            self.sound_changes += 1
+            n = self.db.execute("UPDATE sound SET again = 1 WHERE source = 'beats' AND musicnn IS NOT NULL").rowcount
+            n += self.db.execute("DELETE FROM sound WHERE source = 'beats' AND musicnn IS NULL").rowcount
         return n
+
+    def sound_waiting(self):
+        """How many songs' sound is marked to be heard again."""
+        return self._rows("SELECT COUNT(*) AS n FROM sound WHERE again = 1")[0]["n"]
 
     def without_sound(self, limit=20):
         """Songs analysed for their beats whose sound isn't known (and that didn't fail to be heard), newest first."""
         return [r["song_id"] for r in self._rows(
             f"SELECT j.song_id FROM jobs j LEFT JOIN sound o ON o.song_id = j.song_id WHERE j.state IN {HAS_BEATS} AND "
-            f"o.song_id IS NULL AND NOT {skipped('sound', 'j.song_id')} ORDER BY j.finished_at DESC, j.song_id LIMIT ?", (limit,))]
+            f"(o.song_id IS NULL OR o.again = 1) AND NOT {skipped('sound', 'j.song_id')} "
+            "ORDER BY o.song_id IS NOT NULL, j.finished_at DESC, j.song_id LIMIT ?", (limit,))]
 
     def sound_sources(self, server=None):
         """``{"audiomuse": n, "beats": n, "failed": n}``: where each of ``server``'s songs' sound came from."""
@@ -623,6 +633,13 @@ class Store:
     def remove_server(self, server):
         """Forgets ``server``: as :meth:`remove_folder`, for all of its libraries."""
         return self._unlink("server=?", (server,))
+
+    def without_path(self, server, item_ids):
+        """Which of ``server``'s ``item_ids`` have no file path kept here: new to it, or read before paths were kept."""
+        kept = {r["item_id"] for r in self._rows(
+            "SELECT l.item_id FROM links l JOIN songs s ON s.id = l.song_id WHERE l.server = ? AND s.path IS NOT NULL",
+            (server,))}
+        return {i for i in item_ids if i not in kept}
 
     def gone_from(self, server, folder, item_ids):
         """The ids ``server``'s library ``folder`` had here that aren't among ``item_ids`` (what it has now)."""

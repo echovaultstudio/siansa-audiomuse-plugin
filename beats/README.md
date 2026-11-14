@@ -107,8 +107,8 @@ Each page has its own address (`#songs`, `#loudness`…), so Back and bookmarks 
 
 | Group | Page | What's on it |
 |---|---|---|
-| Analysis | **Overview** | What's being done now, and a card for each thing analysed (beats, loudness and key, genres, sound): how far it is, what measures it, and **Analyse again** to do only that again for every song |
-| | **Libraries** | A row for each library: a switch to analyse it and what it gets (beats, loudness, sound, genres); Start analysis (with its checks), a progress bar for each thing measured, tidying up, and starting over |
+| Analysis | **Overview** | What's being done now, and a card for each thing analysed (beats, loudness and key, genres, sound): how far it is and what measures it; **Check what's new** reads the libraries for songs added since (nothing already analysed is touched) |
+| | **Libraries** | A row for each library: a switch to analyse it and what it gets (beats, loudness, sound, genres); Start analysis (with its checks), a progress bar for each thing measured, tidying up, and **Start over**: one kind of analysis again for every song, or all of it, each asked about first |
 | | **Songs** | Every song (cards on a phone), and a song's page (its beats, loudness, fades, key and genres) when one is open |
 | Your listening | **Listening** | Your history: by year and month, your top artists, albums and songs, and when you listen |
 | Used by the Siansa app | **Loudness** | How loud the songs are and how they start and end: for levelling the volume and timing fades |
@@ -551,9 +551,9 @@ and measured here. New songs are measured on the way.
 ## The page's API
 
 `POST /api/analyse-again` with `{"what": "beats" | "loudness" | "sound" | "genres"}` does one kind of analysis again
-for every song (0.45, the Overview's **Analyse again**): beats are queued; loudness, key and genres are worked out
-again while what's known stays in use; the sound is forgotten first, so similar music has less to go by until songs
-are heard again. A paused service starts again.
+for every song (0.45; on the page under Libraries › **Start over** since 0.46): beats are queued; loudness, key,
+genres and the sound are worked out again while what's known stays in use (0.46: the sound was forgotten first
+before). A paused service starts again.
 
 `GET /api/health`, `/api/status`, `/api/libraries`, `/api/songs`, `/api/songs/<id>` (with every beat),
 `/api/beats/<id>`, `/api/audio/<id>`, `/api/grids?ids=`, `/api/export.csv`, `/api/export.json`;

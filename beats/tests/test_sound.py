@@ -462,6 +462,76 @@ class AnswersTest(Service):
         self.assertEqual(self.app.store.without_sound(), [])
         self.assertEqual(self.call("/api/status")["sound"]["sources"], {"audiomuse": 0, "beats": 2, "failed": 1})
 
+    def test_sound_again_keeps_every_songs_sound_until_its_heard_again(self):
+        """0.46 (the owner: "I'd hate to think that pressing any of those would wipe what's already analysed"):
+        Sound again marks the songs; nothing is forgotten, and a song that can't be heard again keeps its sound."""
+        self.hearer, self.words = FakeHearer(), FakeWords()
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.app.worker.HEAR_IDLE_SECONDS = 3600  # nothing is heard again behind the test's back
+        self.app.worker.pause(True)
+        kept = {r["song_id"]: bytes(r["musicnn"]) for r in self.app.store.db.execute("SELECT song_id, musicnn FROM sound WHERE musicnn IS NOT NULL")}
+        self.assertEqual(sorted(kept), ["t122", "t140"])
+        self.assertEqual(self.app.store.sound_again(), 3)  # the two heard, and the one that couldn't be (tried once more)
+        # Still there, still in use, and waiting to be heard again.
+        now = {r["song_id"]: bytes(r["musicnn"]) for r in self.app.store.db.execute("SELECT song_id, musicnn FROM sound WHERE musicnn IS NOT NULL")}
+        self.assertEqual(now, kept)
+        self.assertEqual(self.app.store.sound_waiting(), 2)
+        self.assertEqual(sorted(self.app.store.without_sound()), ["t122", "t140", "t96w"])
+        am = "/api/v1/audiomuse"
+        self.assertEqual([s["item_id"] for s in self.call(f"{am}/api/similar_tracks?item_id=t140&n=5")], ["t122"])
+        # One can't be heard this time: its sound from before stays, and it isn't asked for again.
+        self.app.store.sound_failed("t140", "the file was away")
+        self.assertEqual(sorted(self.app.store.without_sound()), ["t122", "t96w"])
+        after = {r["song_id"]: bytes(r["musicnn"]) for r in self.app.store.db.execute("SELECT song_id, musicnn FROM sound WHERE musicnn IS NOT NULL")}
+        self.assertEqual(after, kept)
+        # One is heard again: its mark goes.
+        self.app.store.save_sound([{"song_id": "t122", "musicnn": kept["t122"], "clap": None}], source="beats")
+        self.assertEqual(self.app.store.sound_waiting(), 0)
+        self.assertEqual(self.app.store.without_sound(), ["t96w"])
+
+    def test_a_read_asks_for_file_paths_only_where_none_is_kept(self):
+        """0.46: Navidrome's own list of a library (the files' real paths) took most of a read's time on a big
+        library. It's asked for the songs that have no path kept; all of them again once a week."""
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        paths = lambda: {r["id"]: r["path"] for r in self.app.store.db.execute("SELECT id, path FROM songs")}
+        first = paths()
+        self.assertEqual(first["t140"], "/music/Ecsape/Test/t140.flac")
+        native = lambda: [p for p, _ in self.fake.requests if p.startswith("/api/song")]
+        # Read again with nothing new: Navidrome's own API isn't asked at all, and every path is as it was.
+        del self.fake.requests[:]
+        self.read_again()
+        self.assertEqual(native(), [])
+        self.assertEqual(paths(), first)
+        # A new song: asked for by itself, and kept with its real path.
+        self.fake.songs.append({**next(s for s in self.fake.songs if s["id"] == "t140"), "id": "new1", "title": "New one", "file": "new1.flac"})
+        del self.fake.requests[:]
+        self.read_again()
+        self.assertEqual(native(), ["/api/song/new1"])
+        self.assertEqual(paths()["new1"], "/music/Ecsape/Test/new1.flac")
+        self.assertEqual({k: v for k, v in paths().items() if k != "new1"}, first)
+        # A Navidrome that doesn't answer for one song: the library's list, as before.
+        self.fake.native_one = False
+        self.fake.songs.append({**next(s for s in self.fake.songs if s["id"] == "t140"), "id": "new2", "title": "New two", "file": "new2.flac"})
+        del self.fake.requests[:]
+        self.read_again()
+        self.assertEqual(native(), ["/api/song/new2", "/api/song"])
+        self.assertEqual(paths()["new2"], "/music/Ecsape/Test/new2.flac")
+        # A week on: every song's path is asked for again, so a file that moved is followed.
+        self.app.store.set_setting("paths_at:main:1", time.time() - 8 * 24 * 3600)
+        next(s for s in self.fake.songs if s["id"] == "t122")["file"] = "moved/t122.flac"
+        del self.fake.requests[:]
+        self.read_again()
+        self.assertEqual(native(), ["/api/song"])
+        self.assertTrue(paths()["t122"].endswith("/moved/t122.flac"))
+        # Looking for what's gone needs ids alone: no paths asked.
+        del self.fake.requests[:]
+        self.call("/api/clean/preview")
+        self.assertEqual(native(), [])
+
     def read_again(self):
         self.call("/api/libraries/read", "POST", {})
         end = time.time() + 15

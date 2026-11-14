@@ -366,6 +366,7 @@ class App:
                                "loaded": self.words.loaded, "load_seconds": self.words.load_seconds},
                 # Heard here (0.27): whether this image can, where each song's sound came from, what's being heard.
                 "hears": self.hearer.available, "sources": sources,
+                "again": self.store.sound_waiting(),  # 0.46: marked to be heard again, still in use
                 "hearing": dict(self.worker.hearing) if self.worker.hearing else None}
 
     # ---- connections and access, set on the page (0.24.0) ----
