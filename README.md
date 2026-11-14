@@ -1,11 +1,12 @@
 # Siansa Beats
 
-The companion service for the [Siansa](https://github.com/echovaultstudio/Siansa) music player: a Docker container
-next to your music server that listens to every song in your library and tells the app what it heard. The music
-server keeps doing what it does (your library, playback); Siansa Beats adds what it can't.
+The companion service for [Siansa](https://github.com/echovaultstudio/Siansa), the music player for your own
+Navidrome, Emby or Jellyfin server. It's one Docker container beside your music server: it listens to every song in
+your library once and tells the app what it heard. Siansa makes its DJ mixes, even volume, genres, radios and your
+listening history from that.
 
-Siansa never needs it: the app works on its own, and with AudioMuse-AI (below). Siansa Beats is for those who want
-the most out of the app.
+Your music server keeps doing what it does (your library, playback). Nothing leaves your home, and nothing is ever
+changed on the server or in your files.
 
 ## What it does
 
@@ -60,35 +61,16 @@ choose the libraries to analyse, and connect the Siansa app (Settings › Connec
 Everything is kept in one SQLite file in the container's volume (`/data/beats.db`): copy it and you have a backup.
 Nothing is ever written to your music server or your files.
 
-## Without Siansa Beats: AudioMuse-AI
+## Good to know
 
-Siansa talks to [AudioMuse-AI](https://github.com/NeptuneHub/AudioMuse-AI) directly, as it always has: set its
-address in the app under **Settings › Connections › AudioMuse-AI**. Similar songs, song paths, mixes, mood radios,
-the sonic fingerprint and finding music by describing it then come from AudioMuse-AI. With both set up, the app asks
-Siansa Beats first and AudioMuse-AI when Siansa Beats can't answer. How it's set up in the app:
-[Siansa's AudioMuse page](https://github.com/echovaultstudio/Siansa/blob/main/docs/audiomuse.md).
-
-What only Siansa Beats does: DJ mixes (they need its beat grids; a tempo is only ever Beat This!'s), genres from the
-sound, and the listening history.
-
-### The Siansa Analysis plugin for AudioMuse-AI
-
-An extra, still here and still installable, for those who use AudioMuse-AI without Siansa Beats: each song's loudness and how
-it starts and ends (for levelling and crossfades), and similar albums and artists, from inside AudioMuse-AI. It's
-no longer worked on: Siansa Beats does all of it and more.
-
-In AudioMuse-AI, open **Plugins › Repositories** and add:
-
-```
-https://raw.githubusercontent.com/echovaultstudio/siansa-beats/main/manifest.json
-```
-
-Then install **Siansa Analysis** from the **Catalog** tab and click **Apply now (restart)**. Needs
-AudioMuse-AI 3.6.4 or later; no extra packages. Added it before this repository was renamed (from
-`siansa-audiomuse-plugin`)? The old address keeps working.
-
-Details and its API: [plugins/SiansaAnalysis/README.md](plugins/SiansaAnalysis/README.md).
+- **Siansa never needs it.** The app plays from a music server alone. It also still talks to
+  [AudioMuse-AI](https://github.com/NeptuneHub/AudioMuse-AI) for similar music and mixes; with both set up, it asks
+  Siansa Beats first. DJ mixes, genres from the sound and the listening history are Siansa Beats' own.
+- **In the app:** [Siansa's page about Siansa Beats](https://github.com/echovaultstudio/Siansa/blob/main/docs/siansa-beats.md).
+- **On the web:** [siansa.app/beats](https://siansa.app/beats).
 
 ## License
 
 [GNU Affero General Public License v3.0](LICENSE), like AudioMuse-AI.
+
+<sub>Also in this repository: the older [Siansa Analysis plugin for AudioMuse-AI](plugins/SiansaAnalysis/README.md), no longer worked on.</sub>
