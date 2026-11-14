@@ -45,15 +45,27 @@ RUN for try in 1 2 3 4 5 6; do \
  && pip install --no-deps /tmp/beat_this.tar.gz && rm /tmp/beat_this.tar.gz
 
 # The checkpoints: final0 (the full model, the default) and small0 (smaller and faster, a little less exact).
+# They're asked of this repository's own release first (a copy kept by .github/workflows/models.yml), then of the
+# authors' host: a build stopped whenever that host didn't answer (the owner, 14 Nov). Either way the file must be
+# the one expected (its SHA-256), and must load.
 ARG CHECKPOINTS="final0 small0"
+ARG CHECKPOINT_SHA256="final0=8c328b45f59d8dd3dff219253ff6a8d6482be57d0133a29140e2febbf8eb8331 small0=6074be2c4d490c5f6101fcc374a1ec72ae93456e23bb6019783b849f5dc7d47b"
 RUN mkdir -p /models && for name in $CHECKPOINTS; do \
-      for try in 1 2 3 4 5; do \
-        python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
-          "https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp/${name}.ckpt" "/models/${name}.ckpt" \
-          && break || { echo "download $try failed, trying again"; sleep 15; }; \
-      done \
-      && python -c "import sys, torch; torch.load(sys.argv[1], map_location='cpu'); print(sys.argv[1], 'loads')" \
-        "/models/${name}.ckpt"; \
+      want=""; for pair in $CHECKPOINT_SHA256; do [ "${pair%%=*}" = "$name" ] && want="${pair#*=}"; done; \
+      ok=""; \
+      for from in "https://github.com/echovaultstudio/siansa-beats/releases/download/models-1" \
+                  "https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp"; do \
+        for try in 1 2 3; do \
+          python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+            "$from/${name}.ckpt" "/models/${name}.ckpt" \
+            && { [ -z "$want" ] || echo "$want  /models/${name}.ckpt" | sha256sum -c - ; } \
+            && { ok=yes; break; } || { echo "$name from $from: try $try failed"; rm -f "/models/${name}.ckpt"; sleep 10; }; \
+        done; \
+        [ -n "$ok" ] && break; \
+      done; \
+      [ -n "$ok" ] || { echo "$name.ckpt couldn't be downloaded from either place"; exit 1; }; \
+      python -c "import sys, torch; torch.load(sys.argv[1], map_location='cpu'); print(sys.argv[1], 'loads')" \
+        "/models/${name}.ckpt" || exit 1; \
     done
 
 # The style model (each song's genre from its sound): Essentia's Discogs-EffNet (MTG, UPF; CC BY-NC-ND 4.0), as ONNX

@@ -2,12 +2,10 @@
 # downloaded them from the university's host each time, and stopped whenever that host didn't answer. They're taken
 # out of the image already published (the same files), and the Dockerfile asks here first.
 #
-# Runs when this branch is pushed, or by hand.
+# Run by hand (Actions > Model files) when a checkpoint changes; then put its new SHA-256 in beats/Dockerfile.
 name: Model files
 
 on:
-  push:
-    branches: [models-mirror]
   workflow_dispatch:
 
 permissions:
