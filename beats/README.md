@@ -143,7 +143,9 @@ background, and the page shows which library is being read and how far.
   found and by what ("4,012 already analysed from another server (4,012 by their file)"). So pointing Emby or Jellyfin
   at the folder Navidrome has costs a read of the library, not days of analysis.
 - **Navidrome's real paths** come from its own API (the one its web page uses), with the same user and password: the
-  path in the Subsonic API is made up from the tags unless the player is set to report real paths.
+  path in the Subsonic API is made up from the tags unless the player is set to report real paths. A read asks for the
+  paths of the songs that have none kept, and for every song's once a week (0.46; asking for all of them at every
+  read took most of a read on a big library).
 - **Another user of the same server** is added the same way (same kind and address, another user name): it sees the
   libraries that user may, and its songs are the first user's by their ids.
 - **The menu's Music server switch** (shown once there are two) picks whose songs the pages show: the overview's
