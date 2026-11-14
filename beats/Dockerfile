@@ -5,13 +5,13 @@
 # built and kept in /models, so the service itself needs no internet: only your music server.
 # How energetic a song is (0.35): Essentia's emoMusic arousal model (MTG, UPF; CC BY-NC-SA 4.0), published as a
 # TensorFlow file, made into ONNX here. TensorFlow is in this stage only: the image itself gets the one small file.
-FROM python:3.11-slim-bookworm AS arousal
+FROM python:3.15-slim-bookworm AS arousal
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_DEFAULT_TIMEOUT=120 PIP_RETRIES=10
 RUN pip install tensorflow-cpu==2.15.1 tf2onnx==1.16.1 "numpy<2"
 COPY arousal_model.py /tmp/arousal_model.py
 RUN python /tmp/arousal_model.py /emomusic-msd-musicnn-2.onnx && ls -la /emomusic-msd-musicnn-2.onnx
 
-FROM python:3.12-slim-bookworm
+FROM python:3.15-slim-bookworm
 
 LABEL org.opencontainers.image.source="https://github.com/echovaultstudio/siansa-beats" \
       org.opencontainers.image.description="Siansa Beats: Beat This! beat and downbeat tracking for a Navidrome playlist, with a page to compare it" \
