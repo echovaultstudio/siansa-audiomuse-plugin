@@ -249,6 +249,13 @@ main > section.on { display: grid; gap: 16px; }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .tile { padding: 12px; } .tile .v { font-size: 1.375rem; }
 }
+.steps { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 12px; counter-reset: step; }
+.steps li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; align-items: start; counter-increment: step; }
+.steps li::before { content: counter(step); width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; font-weight: 700; font-size: 0.8125rem; color: var(--muted); }
+.steps li[data-done=true]::before { content: "✓"; background: var(--amber); border-color: var(--amber); color: var(--on-amber); }
+.steps li b { display: block; }
+.steps li .sub { margin: 2px 0 0; }
+.steps li[data-done=true] b { color: var(--muted); }
 .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
 .kind { background: var(--raised); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: grid; gap: 8px; align-content: start; }
 .kind .top { display: flex; align-items: baseline; gap: 8px; }
@@ -560,6 +567,11 @@ details.how { margin-top: 12px; } details.how summary { font-size: 0.8125rem; co
           <div class="step" id="now-step"></div>
         </div>
         <div class="controls"><button id="pause">Pause</button></div>
+      </div>
+      <div class="card" id="start-card" hidden>
+        <h3>Get started</h3>
+        <p class="sub">Three steps, all on this page. Nothing is ever changed on your music server.</p>
+        <ol class="steps" id="start-steps"></ol>
       </div>
       <div class="kinds" id="tiles"></div>
       <div class="card">
@@ -1070,7 +1082,7 @@ async function refreshStatus() {
   const event = (e) => `<li class="${esc(e.level)}"><time>${new Date(e.at * 1000).toLocaleTimeString()}</time>${esc(e.message)}</li>`;
   $("events").innerHTML = s.events.map(event).join("") || `<li>Nothing yet.</li>`;
   $("events-recent").innerHTML = s.events.slice(0, 8).map(event).join("") || `<li>Nothing yet.</li>`;
-  drawTiles(s); drawSetup(s);
+  drawStart(s); drawTiles(s); drawSetup(s);
   const key = JSON.stringify(c) + (s.current ? s.current.id + s.current.step : "");
   // A library is a big list: asked again at most every 15 s while songs are being analysed.
   if (key !== lastCounts && Date.now() - songsAsked > 15000) { lastCounts = key; refreshSongs(); refreshLibraries(); }
@@ -2271,6 +2283,19 @@ const AGAIN_ASK = {
   genres: "Hear every song's genres again? The genres known now stay in use until each song is heard.",
   sound: "Hear the sound of every song again? Until a song is heard again it's missing from similar music and the search by words. For a big library that takes many hours.",
 };
+// A new install's way in (the owner, 14 Nov: setting up must be plain): shown until a music server is added and a
+// library is switched on, each step with where to do it and a tick once it's done.
+function drawStart(s) {
+  const server = !!(s.servers && s.servers.length), libs = ((s.libraries || {}).chosen || []).length > 0;
+  const songs = ((s.counts || {}).songs || 0) > 0;
+  $("start-card").hidden = server && libs && songs;
+  const step = (done, title, text) => `<li data-done="${done}"><div><b>${title}</b><p class="sub">${text}</p></div></li>`;
+  $("start-steps").innerHTML = [
+    step(server, "Add your music server", server ? "Done." : 'Under <a href="#setup">Setup › Music servers</a>: its address, user name and password, as you sign in to Siansa. Navidrome, Emby and Jellyfin work.'),
+    step(libs && songs, "Choose what to analyse", libs && songs ? "Done." : 'Under <a href="#libraries">Libraries</a>: switch on the libraries you want and press <b style="display:inline">Start analysis</b>. Try one small library first; a song takes a few seconds on a GPU and much longer on a CPU.'),
+    step(false, "Connect the Siansa app", 'In the app: Settings › Connections › Siansa Beats, with the address and key shown under <a href="#setup">Setup › Connect the Siansa app</a>. A password for this page is set there too, under Access.'),
+  ].join("");
+}
 function drawTiles(s) {
   $("tiles").innerHTML = kindsOf(s).map((k) => {
     const w = (n) => k.total ? `${Math.max(0, Math.min(100, 100 * n / k.total))}%` : "0";

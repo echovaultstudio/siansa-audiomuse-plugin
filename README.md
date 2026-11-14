@@ -27,13 +27,43 @@ the most out of the app.
 It reads Navidrome, Emby and Jellyfin, several servers and several users of one, without changing anything on them
 or in your music files. It runs on a CPU or an NVIDIA GPU, and everything is set up on its own web page (port 8090).
 
-**Set it up:** [`beats/README.md`](beats/README.md). The image is `ghcr.io/echovaultstudio/siansa-beats`
-(`:latest` for the CPU, `:cuda` for an NVIDIA GPU; `:dev` and `:dev-cuda` to try what's coming).
+## Quick start
+
+One file on a Docker server, with nothing to fill in:
+
+```
+mkdir -p ~/siansa-beats && cd ~/siansa-beats
+curl -fsSLO https://raw.githubusercontent.com/echovaultstudio/siansa-beats/main/beats/docker-compose.yml
+docker compose up -d
+```
+
+Then open `http://<the server>:8090`. The page's **Get started** card walks through the rest: add your music server,
+choose the libraries to analyse, and connect the Siansa app (Settings › Connections › Siansa Beats).
+
+- **What you need:** Docker, about 3 GB of disk, 2–3 GB of memory while it works. An NVIDIA GPU makes it many times
+  faster; it isn't needed.
+- **Images:** `ghcr.io/echovaultstudio/siansa-beats` (`:latest` for the CPU, `:cuda` for an NVIDIA GPU; `:dev` and
+  `:dev-cuda` to try what's coming).
+- **Everything else** (a GPU, TrueNAS, several servers and users, every page, the settings, the API, a forgotten
+  password): [`beats/README.md`](beats/README.md).
+
+## How it works, in short
+
+| What | Worked out by |
+|---|---|
+| Beats, bars and tempo | [Beat This!](https://github.com/CPJKU/beat_this) |
+| Loudness and fades | The broadcast standard (ITU-R BS.1770 / EBU R128); no AI model |
+| Key | Krumhansl–Kessler key profiles; no AI model |
+| Genres | Discogs-EffNet or MAEST (your choice, under Setup) |
+| How songs sound, moods, search by words | MusiCNN and CLAP |
+
+Everything is kept in one SQLite file in the container's volume (`/data/beats.db`): copy it and you have a backup.
+Nothing is ever written to your music server or your files.
 
 ## Without Siansa Beats: AudioMuse-AI
 
 Siansa talks to [AudioMuse-AI](https://github.com/NeptuneHub/AudioMuse-AI) directly, as it always has: set its
-address in the app under **Settings › Connections › Services › AudioMuse-AI**. Similar songs, song paths, mixes, mood radios,
+address in the app under **Settings › Connections › AudioMuse-AI**. Similar songs, song paths, mixes, mood radios,
 the sonic fingerprint and finding music by describing it then come from AudioMuse-AI. With both set up, the app asks
 Siansa Beats first and AudioMuse-AI when Siansa Beats can't answer. How it's set up in the app:
 [Siansa's AudioMuse page](https://github.com/echovaultstudio/Siansa/blob/main/docs/audiomuse.md).
@@ -43,7 +73,7 @@ sound, and the listening history.
 
 ### The Siansa Analysis plugin for AudioMuse-AI
 
-Still here and still installable, for those who use AudioMuse-AI without Siansa Beats: each song's loudness and how
+An extra, still here and still installable, for those who use AudioMuse-AI without Siansa Beats: each song's loudness and how
 it starts and ends (for levelling and crossfades), and similar albums and artists, from inside AudioMuse-AI. It's
 no longer worked on: Siansa Beats does all of it and more.
 
