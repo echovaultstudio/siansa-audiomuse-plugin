@@ -52,7 +52,7 @@ jobs:
       - name: Several servers (fake Emby and Jellyfin), and finding a song on two of them
         run: cd beats && python3 -P tests/test_match.py && python3 -P tests/test_servers.py
       - name: No secret as plain text (hashed, encrypted or not kept), set on the page
-        run: cd beats && python3 -P tests/test_secrets.py
+        run: cd beats && python3 -P tests/test_secrets.py && python3 -P tests/test_headers.py
       - name: What songs sound like, taken over from AudioMuse-AI (0.25)
         run: cd beats && python3 -P tests/test_sound.py
       - name: How energetic a song is, from the sound kept (0.35)

@@ -12,7 +12,7 @@ PAGE = os.path.join(os.path.dirname(__file__), "..", "beats", "page.html")
 class PageScriptTest(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "needs node")
     def test_the_page_script_parses(self):
-        script = "\n".join(re.findall(r"<script>(.*?)</script>", open(PAGE, encoding="utf-8").read(), re.S))
+        script = "\n".join(re.findall(r"<script\b[^>]*>(.*?)</script\s*>", open(PAGE, encoding="utf-8").read(), re.S | re.I))
         self.assertTrue(script.strip())
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
             f.write(script)
