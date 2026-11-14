@@ -82,6 +82,20 @@ def main(servers, library_path):
             real = client.real_paths()
             check(len(real) == len(songs), f"Navidrome's own API gives the files' real paths ({len(real)})")
             check(all(os.path.splitext(p)[1] for p in real.values()), "and they end in the files' names")
+            # 0.46: a read asks for the paths of the few songs that have none, one by one.
+            few = sorted(real)[:3]
+            asked = []
+            listing = client.real_paths
+            client.real_paths = lambda *a, **k: asked.append("list") or listing(*a, **k)
+            one = client._real_paths_of(few)
+            client.real_paths = listing
+            check(not asked, "one song's real path is given by itself (the library's list isn't needed)")
+            check(one == {i: real[i] for i in few}, f"and it's the same path as in the list: {one}")
+            none = client.all_songs(libraries[0]["id"], paths=lambda ids: set())
+            check(none and all(s["path"] is None for s in none), "songs whose path is kept come without one")
+            some = client.all_songs(libraries[0]["id"], paths=lambda ids: set(ids[:1]))
+            check(sum(1 for s in some if s["path"]) == 1 and next(s for s in some if s["path"])["path"] == real[next(s for s in some if s["path"])["id"]],
+                  "and a song without one gets its real path")
         try:
             wrong = make_client(kind, url, USER, "not the password")
             wrong.libraries()
