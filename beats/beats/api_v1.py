@@ -306,10 +306,10 @@ def similar_here(app, kind, asked, server):
     song_id = _here(app, asked["track_id"], server) if asked.get("track_id") else None
     try:
         if kind == "albums":
-            name, artist, found = app.sound.similar_albums(song_id)
+            name, artist, found = app.sound.similar_albums(song_id, app.only(server or app.servers.default_id))
             extra = {"name": name, "artist": artist, "track_id": asked.get("track_id")}
         else:
-            name, found = app.sound.similar_artists(song_id, asked.get("artist"))
+            name, found = app.sound.similar_artists(song_id, asked.get("artist"), app.only(server or app.servers.default_id))
             extra = {"name": name, "artist_asked": name}
     except Unknown:
         return None

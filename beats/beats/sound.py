@@ -82,7 +82,7 @@ class Sound:
         self.ids, self.rows, self.index = [], [], {}
         self.matrix = np.zeros((0, DIMENSIONS), np.float32)
         self.moods = np.zeros((0, len(MOODS)), np.float32)
-        self._albums = None  # (albums, artists) grouped, their lists made when first asked for
+        self._albums = {}  # server (None: every song) -> its albums and artists grouped, their lists made when first asked for
         self._centres_file, self._centres = centres, None
         self._words = None  # (the store's sound_changes it was read at, ids, rows, matrix): read when first searched
 
@@ -103,7 +103,7 @@ class Sound:
             feelings = [pairs(r["other"]) for r in rows]
             self.moods = np.array([[f.get(m, 0.0) for m in MOODS] for f in feelings], np.float32).reshape(-1, len(MOODS))
             self.rows = [{k: r[k] for k in ("song_id", "title", "artist", "album", "album_artist")} for r in rows]
-            self._albums, self._links = None, {}
+            self._albums, self._links = {}, {}
             self._seen = seen
             _log.info("The sound of %d songs is in memory", len(self.ids))
 
@@ -118,7 +118,9 @@ class Sound:
         at, mask = self._links.get(server, (0.0, None))
         if mask is None or time.monotonic() - at > MASK_SECONDS:
             have = self.store.server_song_ids(server)
-            mask = np.array([song_id in have for song_id in self.ids], bool)
+            before, mask = mask, np.array([song_id in have for song_id in self.ids], bool)
+            if before is not None and not np.array_equal(before, mask):
+                self._albums.pop(server, None)  # its library changed: its albums and artists are grouped again
             self._links[server] = (time.monotonic(), mask)
         return mask
 
@@ -362,22 +364,28 @@ class Sound:
 
     # ---- albums and artists ----
 
-    def _grouped(self):
+    def _grouped(self, server=None):
+        """The albums and artists of ``server``'s songs (of every song without one). Each server has its own: the
+        albums like one of a server's are found among that server's, not among every server's and then thinned out
+        (the owner, 14 Nov: a children's album on the Kids login was answered with the main login's albums, and
+        with few or none once those were left out)."""
         self._load()
-        if self._albums is None:
+        if server not in self._albums:
+            mask = self._mask(server)
             tracks = [(r["song_id"], r["album"], r["album_artist"], r["artist"], self.raw[i])
-                      for i, r in enumerate(self.rows)]
+                      for i, r in enumerate(self.rows) if mask is None or mask[i]]
             albums, artists = similarity.group_tracks(tracks)
-            self._albums = {"albums": albums, "artists": artists, "album_lists": None, "artist_lists": None}
-        return self._albums
+            self._albums[server] = {"albums": albums, "artists": artists, "album_lists": None, "artist_lists": None}
+        return self._albums[server]
 
-    def similar_albums(self, song_id):
-        """``(name, artist, [{album, artist, track_id, score}])`` of the albums like ``song_id``'s."""
+    def similar_albums(self, song_id, server=None):
+        """``(name, artist, [{album, artist, track_id, score}])`` of the albums like ``song_id``'s, among
+        ``server``'s."""
         self._load()
         at = self.index.get(song_id)
         if at is None or not self.rows[at]["album"]:
             raise Unknown("The sound of this song or its album isn't known yet")
-        grouped, r = self._grouped(), self.rows[at]
+        grouped, r = self._grouped(server), self.rows[at]
         if grouped["album_lists"] is None:
             grouped["album_lists"] = similarity.rank_albums(grouped["albums"])
         key = similarity.album_key(similarity.artist_of(r["album_artist"], r["artist"]), r["album"])
@@ -385,8 +393,9 @@ class Sound:
         return (group.name if group else r["album"], group.artist if group else r["artist"],
                 grouped["album_lists"].get(key) or [])
 
-    def similar_artists(self, song_id=None, artist=None):
-        """``(name, [{artist, track_id, score}])`` of the artists like ``song_id``'s, or like ``artist`` by name."""
+    def similar_artists(self, song_id=None, artist=None, server=None):
+        """``(name, [{artist, track_id, score}])`` of the artists like ``song_id``'s, or like ``artist`` by name,
+        among ``server``'s."""
         self._load()
         if song_id:
             at = self.index.get(song_id)
@@ -395,7 +404,7 @@ class Sound:
             artist = (self.rows[at]["artist"] or self.rows[at]["album_artist"] or "").strip()
         if not artist:
             raise Unknown("A song or an artist is needed")
-        grouped = self._grouped()
+        grouped = self._grouped(server)
         if grouped["artist_lists"] is None:
             grouped["artist_lists"] = similarity.rank_artists(grouped["artists"])
         return artist, grouped["artist_lists"].get(similarity.norm(artist)) or []

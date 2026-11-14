@@ -151,6 +151,22 @@ class SoundTest(Base):
         self.assertEqual((who, artists[0]["artist"]), ("Ana", "Bo"))
         self.assertEqual(self.sound.similar_artists(artist="flo")[1][0]["artist"] in ("Cy", "Di", "Ed", "Gus", "Ana", "Bo"), True)
 
+    def test_similar_albums_and_artists_are_found_among_the_servers_own(self):
+        # The owner, 14 Nov: an album on the Kids login was answered with the main login's albums.
+        on_emby = ("t1", "t2", "j1", "j2", "h1")
+        self.store.link_songs("emby", "lib", [{**{k: s[k] for k in s if k not in ("vector", "other")}, "id": "e-" + s["id"]}
+                                              for s in LIBRARY if s["id"] in on_emby])
+        there = sound.Sound(self.store)
+        have = {(s["album"], s["artist"]) for s in LIBRARY if s["id"] in on_emby}
+        _, _, albums = there.similar_albums("t1", "emby")
+        self.assertTrue(albums)
+        self.assertTrue(all((a["album"], a["artist"]) in have and a["track_id"] in on_emby for a in albums), albums)
+        _, artists = there.similar_artists("t1", server="emby")
+        self.assertTrue(artists)
+        self.assertTrue(all(a["track_id"] in on_emby for a in artists), artists)
+        # Without a server, every song counts, as before.
+        self.assertEqual([a["album"] for a in there.similar_albums("t1")[2]][:2], ["Higher", "Tops"])
+
     def test_new_sound_is_read_when_the_table_changes(self):
         self.assertEqual(self.sound.count(), len(LIBRARY))
         filled(self.store, songs=[song("r2", "Chord", "Hal", "Louder", "rock", wobble=14)])
