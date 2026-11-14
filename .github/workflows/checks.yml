@@ -33,9 +33,10 @@ jobs:
       - name: Python parses
         run: python3 -m compileall -q beats/beats plugins
 
-      # The Siansa Analysis plugin for AudioMuse-AI (an extra, kept working): its tests came here from the app's
+      # The two plugins for AudioMuse-AI (an extra, kept working): their tests came here from the app's
       # repository with the libraries AudioMuse-AI ships.
       - name: Plugin tests
         run: |
           pip install --quiet numpy==2.4.6 scipy==1.16.3 av==17.1.0 Flask==3.1.3
-          cd plugins/SiansaAnalysis && python3 -m unittest discover -s tests
+          (cd plugins/SiansaAnalysis && python3 -m unittest discover -s tests)
+          (cd plugins/SiansaBeats && python3 -m unittest discover -s tests)
