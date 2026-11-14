@@ -118,22 +118,44 @@ class PhraseTest(unittest.TestCase):
     def test_phrases_start_where_the_sections_do(self):
         self.check(128, 0)
 
-    def test_a_two_bar_lead_in_moves_the_phrases(self):
-        found = self.check(140, 2)
+    def test_a_four_bar_lead_in_moves_the_phrases(self):
+        found = self.check(140, 4)
+        self.assertEqual(found["phrase_source"], "sound")
         self.assertGreaterEqual(found["phrase_big_on"] * 2, found["phrase_big"])
 
-    def test_drum_and_bass_with_an_odd_lead_in(self):
-        self.check(174, 3)
+    def test_drum_and_bass_with_a_four_bar_lead_in(self):
+        self.check(174, 4)
+
+    def test_an_odd_lead_in_keeps_the_phrases_on_bar_1(self):
+        # Dance tracks are made in 8-bar blocks from bar 1 (the owner's marks: 21 of 22): sections heard 2 or 3
+        # bars in are taken as fills, not a shift.
+        for lead in (2, 3):
+            beats = grid_beats(140, 180)
+            steady = grid.steady_grid(beats, beats[::4], 140.0)
+            found = grid.with_sound(steady, song_levels(140, 180, SECTIONS, lead_bars=lead))
+            self.assertEqual((found["phrases"][0], found["phrase_source"], found["phrase_bars"]), (0.0, "bar 1", 8))
+
+    def test_a_track_from_a_mix_takes_its_phrases_from_the_sound(self):
+        beats = grid_beats(140, 180)
+        steady = grid.steady_grid(beats, beats[::4], 140.0)
+        found = grid.with_sound(steady, song_levels(140, 180, SECTIONS, lead_bars=3))
+        self.assertFalse(found["from_mix"])  # SECTIONS' quietest part is the lead-in, but the song ends loud…
+        loud = song_levels(140, 180, [SECTIONS[1], SECTIONS[3], SECTIONS[1], SECTIONS[3]], lead_bars=0)
+        found = grid.with_sound(steady, loud)
+        self.assertTrue(found["from_mix"])
+        flat = grid.with_sound(steady, song_levels(140, 180, [(-10.0, -10.0, -10.0, -10.0)]))
+        self.assertTrue(flat["from_mix"])
+        self.assertEqual((flat["phrases"], flat["phrase_source"]), ([], "mix: none"))
 
     def test_sixteen_bar_phrases(self):
         # The sound changes every 16 bars (two sections of 8 alike), after a 2-bar lead-in.
         sixteen = [SECTIONS[0], SECTIONS[0], SECTIONS[1], SECTIONS[1], SECTIONS[2], SECTIONS[2], SECTIONS[3], SECTIONS[3]]
         beats = grid_beats(128, 300)
         steady = grid.steady_grid(beats, beats[::4], 128.0)
-        found = grid.with_sound(steady, song_levels(128, 300, sixteen, lead_bars=2))
+        found = grid.with_sound(steady, song_levels(128, 300, sixteen, lead_bars=4))
         bar = 4 * 60.0 / 128
         self.assertEqual(found["phrase_bars"], 16)
-        self.assertAlmostEqual(found["phrases"][0], 2 * bar, delta=0.02)
+        self.assertAlmostEqual(found["phrases"][0], 4 * bar, delta=0.02)
         self.assertAlmostEqual(found["phrases"][1] - found["phrases"][0], 16 * bar, delta=0.02)
 
     def test_no_sections_no_phrases(self):
@@ -147,8 +169,8 @@ class PhraseTest(unittest.TestCase):
         beats = grid_beats(128, 60)
         steady = grid.steady_grid(beats, beats[::4], 128.0)
         found = grid.with_sound(steady, None)
-        self.assertEqual((found["downbeats"], found["downbeat_source"], found["phrases"]),
-                         (steady["downbeats"], "model", []))
+        self.assertEqual((found["downbeats"], found["downbeat_source"], found["phrases"], found["phrase_source"]),
+                         (steady["downbeats"], "model", steady["downbeats"][::8], "bar 1"))
 
     def test_analyse_reports_phrases_and_notes_them(self):
         beats = grid_beats(128, 180)
@@ -158,15 +180,15 @@ class PhraseTest(unittest.TestCase):
         notes = grid.verdict(result)
         self.assertTrue(any("Bars moved" in t for _, t in notes), notes)  # the model voted for beat 2
 
-    def test_drum_and_bass_read_at_half_speed_is_counted_at_174(self):
-        half = grid_beats(87, 180)  # the model heard every other beat
-        result = grid.analyse(half, half[::2], 180.0, song_levels(174, 180, SECTIONS, lead_bars=4),
-                              genres=["Drum & Bass"])
-        bar = 4 * 60.0 / 174
-        self.assertEqual(result["grid_counted"], "double")
-        self.assertAlmostEqual(result["grid_bpm"], 174.0, delta=0.1)
+    def test_drum_and_bass_read_at_half_speed_stays_as_heard(self):
+        # The model heard every other beat, as it did on three drum and bass songs of the owner's: the grid stays at
+        # 87 (genre tags aren't used), and the app counts it at 174 itself.
+        half = grid_beats(87, 180)
+        result = grid.analyse(half, half[::4], 180.0, song_levels(174, 180, SECTIONS, lead_bars=4))
+        self.assertEqual(result["grid_counted"], "same")
+        self.assertAlmostEqual(result["grid_bpm"], 87.0, delta=0.1)
         self.assertEqual(result["beats_per_bar"], 4)
-        self.assertAlmostEqual(result["phrase_first_ms"], 4 * bar * 1000, delta=20)
+        self.assertAlmostEqual(result["ends"]["intro_bpm"], 87.0, delta=0.1)
 
     def test_no_clear_phrases_is_flagged(self):
         result = {"bpm": 128.0, "steady": 0.99, "on_grid": 0.98, "phrase_count": 0, "phrase_big": 6, "phrase_big_on": 2}

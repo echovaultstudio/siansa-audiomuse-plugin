@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Siansa Beats</title>
+<style>
+/* The sign-in page (0.43, the owner, 13 Nov): shown instead of the browser's own password box when the page has a
+   password. The page's own colours and scale (page.html). */
+:root {
+  --page: #000000; --raised: #0B0F13; --raised-2: #121820; --text: #EEF2F5; --muted: #AFC2D3; --faint: #7F93A4;
+  --line: rgba(175, 194, 211, 0.16); --line-strong: rgba(175, 194, 211, 0.32);
+  --amber: #FFB547; --on-amber: #1A1200; --bad: #FF8A80;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root { --page: #F3F6F8; --raised: #FFFFFF; --raised-2: #EDF1F4; --text: #0C1216; --muted: #46576A; --faint: #5C6E80;
+    --line: rgba(12, 18, 22, 0.10); --line-strong: rgba(12, 18, 22, 0.22); --bad: #B3261E; color-scheme: light; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px;
+  background: var(--page); color: var(--text); font: 15px/1.45 var(--sans); }
+main { width: min(380px, 100%); background: var(--raised); border: 1px solid var(--line); border-radius: 16px; padding: 32px 24px; }
+h1 { font-size: 1.625rem; font-weight: 700; margin: 0 0 4px; letter-spacing: -0.01em; }
+h1 b { color: var(--amber); font-weight: 800; }
+p { color: var(--muted); margin: 0 0 24px; }
+label { display: block; font-size: 0.8125rem; color: var(--muted); margin-bottom: 4px; }
+input { width: 100%; font: inherit; color: var(--text); background: var(--raised-2); border: 1px solid var(--line-strong);
+  border-radius: 12px; padding: 12px; }
+button { width: 100%; margin-top: 16px; font: inherit; font-weight: 600; cursor: pointer; color: var(--on-amber);
+  background: var(--amber); border: 1px solid var(--amber); border-radius: 999px; padding: 12px; }
+button:disabled { opacity: 0.6; cursor: default; }
+input:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+#note { min-height: 1.45em; margin: 12px 0 0; font-size: 0.875rem; color: var(--bad); }
+details { margin-top: 16px; font-size: 0.8125rem; color: var(--muted); }
+summary { cursor: pointer; }
+details p { margin: 8px 0 0; }
+code { font: 0.75rem var(--mono); background: var(--raised-2); border-radius: 8px; padding: 2px 8px; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<main>
+  <h1><b>S</b>iansa Beats</h1>
+  <p>Beats, loudness, genres and your listening, for the Siansa app.</p>
+  <form id="form">
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required autofocus>
+    <button type="submit" id="go">Sign in</button>
+    <div id="note" role="alert"></div>
+  </form>
+  <details>
+    <summary>Forgotten the password?</summary>
+    <p>On the server, run <code>docker exec siansa-beats python -m beats.reset</code>. It takes the password away at once; then set a new one under Setup.</p>
+  </details>
+</main>
+<script>
+"use strict";
+const form = document.getElementById("form"), note = document.getElementById("note"), go = document.getElementById("go");
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  go.disabled = true; note.textContent = "";
+  try {
+    const r = await fetch("api/signin", {method: "POST", headers: {"Content-Type": "application/json"},
+                                         body: JSON.stringify({password: document.getElementById("password").value})});
+    if (r.ok) { location.reload(); return; }
+    const body = await r.json().catch(() => ({}));
+    note.textContent = body.error || "That didn't work.";
+  } catch (err) { note.textContent = "The service doesn't answer."; }
+  go.disabled = false; document.getElementById("password").select();
+});
+</script>
+</body>
+</html>

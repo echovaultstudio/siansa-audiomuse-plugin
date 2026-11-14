@@ -85,46 +85,23 @@ class RelationTest(unittest.TestCase):
         self.assertIsNone(grid.relation(0, 120))
 
 
-class GenreTest(unittest.TestCase):
-    def test_genres_find_their_range(self):
-        self.assertEqual(grid.genre_range(["Trance"])[:2], (125, 150))
-        self.assertEqual(grid.genre_range(["Progressive Trance"])[:2], (125, 150))
-        self.assertEqual(grid.genre_range(["Drum & Bass"])[:2], (160, 180))
-        self.assertEqual(grid.genre_range(["Electronic/Deep House"])[:2], (115, 132))
-        self.assertEqual(grid.genre_range(["Hip-Hop"])[:2], (70, 105))
-        self.assertIsNone(grid.genre_range(["Spoken word"]))
-        self.assertIsNone(grid.genre_range([]))
-
-    def test_the_first_known_genre_wins(self):
-        self.assertEqual(grid.genre_range(["Spoken word", "Techno"])[2], "Techno")
-
-    def test_words_not_parts_of_words(self):
-        self.assertIsNone(grid.genre_range(["Trapeze"]))
-        self.assertIsNone(grid.genre_range(["Popcorn"]))
-
-
 class VerdictTest(unittest.TestCase):
-    def test_control_shows_the_plugins_misreading(self):
+    def test_control_matches_its_tag(self):
         result = {"bpm": 140.2, "intro_bpm": 140.3, "outro_bpm": 140.1, "steady": 0.98}
-        notes = grid.verdict(result, tag_bpm=140, plugin={"intro_bpm": 187.1, "outro_bpm": 140.0}, genres=["Trance"])
-        texts = [t for _, t in notes]
-        self.assertIn("Matches the BPM tag", texts)
-        self.assertIn("Plugin's intro 187.1 is 4/3 of this", texts)
-        self.assertIn("Plugin's outro agrees", texts)
-        self.assertFalse(any("outside" in t for t in texts))
+        texts = [t for _, t in grid.verdict(result, tag_bpm=140)]
+        self.assertEqual(texts, ["Matches the BPM tag"])
 
-    def test_a_tag_at_half_and_a_tempo_outside_the_genre(self):
-        notes = dict((t, level) for level, t in grid.verdict({"bpm": 93.0, "steady": 0.99}, tag_bpm=186, genres=["Trance"]))
-        self.assertEqual(notes["BPM tag 186 is double of this"], "warn")
-        self.assertEqual(notes["93.0 is outside Trance's usual 125–150"], "warn")
+    def test_a_tag_at_double(self):
+        notes = dict((t, level) for level, t in grid.verdict({"bpm": 93.0, "steady": 0.99}, tag_bpm=186))
+        self.assertEqual(notes, {"BPM tag 186 is double of this": "warn"})
 
-    def test_half_speed_for_the_genre_isnt_a_disagreement(self):
-        notes = grid.verdict({"bpm": 87.0, "steady": 0.99}, genres=["Drum And Bass"])
-        self.assertEqual(notes, [("info", "Counted at half speed: 87.0 is 174.0 for Drum And Bass")])
+    def test_genres_dont_make_notes(self):
+        # Tags are partly guessed: a song at 87 is just 87, whatever its genre says.
+        self.assertEqual(grid.verdict({"bpm": 87.0, "steady": 0.99}), [])
 
     def test_a_half_time_intro_is_noted_not_flagged(self):
         result = {"bpm": 174.0, "intro_bpm": 87.0, "intro_steady": 0.95, "outro_bpm": 174.1, "steady": 0.9}
-        self.assertEqual(grid.verdict(result, genres=["Drum And Bass"]), [("info", "Starts at half time (87.0)")])
+        self.assertEqual(grid.verdict(result), [("info", "Starts at half time (87.0)")])
 
     def test_an_end_at_another_tempo_is_noted(self):
         result = {"bpm": 174.0, "intro_bpm": 140.0, "intro_steady": 0.95, "outro_bpm": None, "outro_steady": 0.3,
@@ -228,12 +205,75 @@ class SteadyGridTest(unittest.TestCase):
         self.assertAlmostEqual(result["grid_bpm"], 140.0, delta=0.05)
 
 
-class GenreFitTest(unittest.TestCase):
-    def test_half_and_double_are_the_same_beat(self):
-        self.assertIsNone(grid.genre_fit(174, 160, 180))
-        self.assertEqual(grid.genre_fit(87, 160, 180), "half")
-        self.assertEqual(grid.genre_fit(280, 125, 150), "double")
-        self.assertEqual(grid.genre_fit(105, 160, 180), "outside")
+def drifting(start_bpm, end_bpm, seconds, quantum=0.02, jitter=0.004, seed=3, steps=None):
+    """Beats of a track off a mixed CD: its tempo creeps from ``start_bpm`` to ``end_bpm`` (the DJ riding the
+    pitch), or jumps between ``steps`` [(seconds, bpm)], heard on the model's 20 ms grid with a little jitter."""
+    rng = random.Random(seed)
+    t, out = 0.4, []
+    while t < seconds:
+        if steps:
+            bpm = [b for at, b in steps if at <= t][-1]
+        else:
+            bpm = start_bpm + (end_bpm - start_bpm) * t / seconds
+        out.append(round((t + rng.uniform(-jitter, jitter)) / quantum) * quantum)
+        t += 60.0 / bpm
+    return out
+
+
+class FollowingGridTest(unittest.TestCase):
+    """Tracks off mixed CDs: steady as a drum machine, but the DJ rode the pitch (a fifth of the electronic songs
+    had no grid before 0.15.0, with Rojo, Symbols and Fiyaa from the owner's bad blends among them)."""
+
+    def test_a_creeping_tempo_gets_a_grid_that_follows_it(self):
+        beats = drifting(123.4, 124.0, 300)
+        self.assertIsNone(grid.steady_grid(beats, beats[::4], 123.7))
+        result = grid.analyse(beats, beats[::4], 300.0)
+        self.assertGreater(result["on_grid"], 0.95)
+        self.assertAlmostEqual(result["grid_drift"], 0.005, delta=0.002)
+        ends = result["ends"]
+        self.assertIsNotNone(ends)
+        # Each end at the tempo it plays there, so the next song is matched to the outro as it really goes.
+        self.assertAlmostEqual(ends["intro_bpm"], 123.45, delta=0.1)
+        self.assertAlmostEqual(ends["outro_bpm"], 123.95, delta=0.1)
+        self.assertGreater(ends["outro_steady"], 0.95)
+        self.assertGreater(ends["outro_rhythm"], 0.95)
+        # Every grid beat within a model step (20 ms) of a heard beat: the grid really is on the beat.
+        grid_beats = grid.following_grid(beats, beats[::4], 123.7)["beats"]
+        for b in beats[20:-20]:
+            self.assertLess(min(abs(b - g) for g in grid_beats), 0.025)
+
+    def test_a_pitch_nudged_in_steps(self):
+        beats = drifting(0, 0, 280, steps=[(0, 125.0), (90, 125.6), (190, 125.2)])
+        result = grid.analyse(beats, beats[::4], 280.0)
+        self.assertGreater(result["on_grid"], 0.9)
+        self.assertAlmostEqual(result["ends"]["outro_bpm"], 125.2, delta=0.15)
+
+    def test_a_real_tempo_change_gets_no_grid(self):
+        beats = drifting(118, 134, 300)  # 13 %: a song that speeds up, not a DJ's drift
+        self.assertIsNone(grid.following_grid(beats, beats[::4], 126))
+        self.assertIsNone(grid.analyse(beats, beats[::4], 300.0)["on_grid"])
+
+    def test_a_steady_song_keeps_its_even_grid(self):
+        beats = beats_at(128, 240)
+        result = grid.analyse(beats, beats[::4], 240.0)
+        self.assertEqual(result["grid_drift"], 0.0)
+        self.assertEqual(result["ends"]["intro_bpm"], result["ends"]["outro_bpm"])
+
+    def test_loose_beats_get_no_grid(self):
+        # A live band: every beat ±60 ms off.
+        beats = drifting(120, 121, 240, jitter=0.06, seed=9)
+        self.assertIsNone(grid.following_grid(beats, beats[::4], 120.5))
+
+
+class BeatlessOutroTest(unittest.TestCase):
+    def test_the_beat_stopping_is_sent_only_before_a_beatless_outro(self):
+        beats = beats_at(128, 200)
+        steady = grid.steady_grid(beats, beats[::4], 128.0)
+        # The beat to the end, but for the last few seconds of a fade-out: not a beatless outro.
+        self.assertIsNone(grid.app_ends(steady, beats, beats[-1] + 8.0)["beats_until_ms"])
+        # 30 seconds of pads after the last beat: one.
+        ends = grid.app_ends(steady, beats, beats[-1] + 30.0)
+        self.assertAlmostEqual(ends["beats_until_ms"], beats[-1] * 1000, delta=1)
 
 
 class CurveTest(unittest.TestCase):

@@ -1,5 +1,6 @@
 # Siansa Beats (beats): its tests, then the Docker image with Beat This! checked against songs of known tempo
-# and bars, then (on main) published to ghcr.io/echovaultstudio/siansa-beats for the Docker server to pull.
+# and bars, then published to ghcr.io/echovaultstudio/siansa-beats for the Docker server to pull: from main as
+# latest / cuda, from dev as dev / dev-cuda (to try before it reaches main).
 name: Siansa Beats
 
 on:
@@ -27,12 +28,91 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # -P (not -I) below: the tests need the user site, where numpy and scipy are installed.
+      - name: numpy, for the style model's input and the loudness
+        run: python3 -m pip install --break-system-packages --user numpy==1.26.4 cryptography==43.0.3 || python3 -m pip install --user numpy cryptography
       - name: Tempo, bars and the comparison
-        run: cd beats && python3 -I tests/test_grid.py
+        run: cd beats && python3 -P tests/test_grid.py
+      - name: Bars, phrases, where the beat locks in, and each end's sound
+        run: cd beats && python3 -P tests/test_phrase.py && python3 -P tests/test_ends.py && python3 -P tests/test_genres.py && python3 -P tests/test_about.py
+      - name: Loudness, fades and key (checked against scipy's filters and ffmpeg's own loudness meter)
+        run: |
+          # ffmpeg from pip, put on the PATH: the runner's package mirrors can stall for minutes (11 Nov: the job ran
+          # out of its ten minutes twice waiting for apt), and the test only needs the program.
+          python3 -m pip install --quiet --break-system-packages --user imageio-ffmpeg==0.6.0 || python3 -m pip install --quiet --user imageio-ffmpeg==0.6.0
+          mkdir -p "$HOME/.local/bin" && ln -sf "$(python3 -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" "$HOME/.local/bin/ffmpeg"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH" && ffmpeg -version | head -1
+          python3 -m pip install --break-system-packages --user scipy || python3 -m pip install --user scipy
+          cd beats && python3 -P tests/test_loudness.py
       - name: CPU or GPU
-        run: cd beats && python3 -I tests/test_analyser.py
+        run: cd beats && python3 -P tests/test_analyser.py
       - name: The service against a fake Navidrome and AudioMuse-AI
-        run: cd beats && python3 -I tests/test_service.py
+        run: cd beats && python3 -P tests/test_service.py
+      - name: Several servers (fake Emby and Jellyfin), and finding a song on two of them
+        run: cd beats && python3 -P tests/test_match.py && python3 -P tests/test_servers.py
+      - name: No secret as plain text (hashed, encrypted or not kept), set on the page
+        run: cd beats && python3 -P tests/test_secrets.py && python3 -P tests/test_headers.py
+      - name: What songs sound like, taken over from AudioMuse-AI (0.25)
+        run: cd beats && python3 -P tests/test_sound.py
+      - name: How energetic a song is, from the sound kept (0.35)
+        run: cd beats && python3 -P tests/test_drive.py
+      - name: Memory handed back (0.34)
+        run: cd beats && python3 -P tests/test_memory.py
+      - name: The listening history (0.29), its exports and Last.fm
+        run: |
+          python3 -m pip install --quiet --break-system-packages --user pillow==11.3.0 || python3 -m pip install --quiet --user pillow
+          cd beats && python3 -P tests/test_listens.py
+      - name: The page's script parses
+        run: cd beats && python3 -P tests/test_page_script.py
+
+  servers:
+    # Siansa Beats against real Navidrome, Emby and Jellyfin servers with the same music (0.23.0): the Siansa app's test
+    # servers (its scripts/servers, issue #903), their newest releases and the oldest ones the app supports. No model.
+    name: Real servers (${{ matrix.set }})
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - set: newest
+            navidrome: latest
+            emby: latest
+            jellyfin: latest
+          - set: oldest supported
+            navidrome: 0.64.2
+            emby: 4.8.10.0
+            jellyfin: 10.10.7
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: echovaultstudio/Siansa
+          path: siansa-app
+          sparse-checkout: scripts/servers
+      - name: numpy and ffmpeg (for making the test library)
+        run: |
+          python3 -m pip install --quiet --break-system-packages --user numpy==1.26.4 imageio-ffmpeg==0.6.0 cryptography==43.0.3
+          echo "FFMPEG=$(python3 -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" >> "$GITHUB_ENV"
+      - name: Start Navidrome, Emby and Jellyfin with the test library
+        env:
+          GITHUB_TOKEN: ${{ github.token }}  # for the lookup of Navidrome's newest release (the anonymous rate limit)
+          ND_VERSION: ${{ matrix.navidrome }}
+          EMBY_VERSION: ${{ matrix.emby }}
+          JELLYFIN_VERSION: ${{ matrix.jellyfin }}
+        run: |
+          siansa-app/scripts/servers/start.sh
+          cat "$RUNNER_TEMP/siansa-servers/servers.env" >> "$GITHUB_ENV"
+      - name: Siansa Beats on every server, and each song analysed once
+        run: cd beats && python3 -P tests/real_servers.py "$SIANSA_TEST_SERVERS" "$SIANSA_TEST_LIBRARY"
+      - name: The servers' logs
+        if: failure()
+        run: |
+          tail -40 "$RUNNER_TEMP/siansa-servers/navidrome.log" || true
+          docker logs siansa-emby 2>&1 | tail -40 || true
+          docker logs siansa-jellyfin 2>&1 | tail -40 || true
 
   image:
     # Two images: the CPU one (latest) and the cuda one for an NVIDIA GPU (cuda). GitHub's runners have no GPU, so the
@@ -82,6 +162,7 @@ jobs:
           python3 -I beats/tests/fakes.py songs 4533 > fake.log 2>&1 &
           sleep 2 && cat fake.log
 
+      # With the container's settings of before 0.24: taken over once, as an install that's updated does.
       - name: Start the service
         run: |
           docker run -d --name beats --network host \
@@ -100,12 +181,22 @@ jobs:
           docker image ls siansa-beats:test --format 'Image size: {{.Size}}'
 
       - name: Publish
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/beats-sound') && github.event_name != 'pull_request'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           version=$(python3 -c "import re;print(re.search(r'__version__ = \"(.+)\"', open('beats/beats/__init__.py').read())[1])")
           suffix="${{ matrix.suffix }}"
-          first=$([ -z "$suffix" ] && echo latest || echo cuda)
+          if [ "$GITHUB_REF" = refs/heads/dev ]; then
+            # dev / dev-cuda: the dev branch, never latest or cuda
+            first=$([ -z "$suffix" ] && echo dev || echo dev-cuda)
+            version="$version-dev"
+          elif [ "$GITHUB_REF" = refs/heads/beats-sound ]; then
+            # sound / sound-cuda: the try-out of 0.25 (what songs sound like), beside dev, until it's merged
+            first=$([ -z "$suffix" ] && echo sound || echo sound-cuda)
+            version="$version-sound"
+          else
+            first=$([ -z "$suffix" ] && echo latest || echo cuda)
+          fi
           for tag in "$first" "$version$suffix" "sha-${GITHUB_SHA::7}$suffix"; do
             docker tag siansa-beats:test "$IMAGE:$tag" && docker push -q "$IMAGE:$tag"
           done

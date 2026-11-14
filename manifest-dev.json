@@ -1,0 +1,11 @@
+{
+  "plugins": [
+    {
+      "id": "siansa_beats",
+      "name": "Siansa Beats (dev)",
+      "author": "Siansa",
+      "description": "For Siansa Dev: each song's loudness, how it starts and ends, similar albums and artists, with its tempo, beats, bars and phrases from Siansa Beats (Beat This!).",
+      "pluginUrl": "https://raw.githubusercontent.com/echovaultstudio/siansa-beats/dev/plugins/SiansaBeats/plugin.json"
+    }
+  ]
+}

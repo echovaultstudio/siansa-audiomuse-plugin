@@ -16,7 +16,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
 from beats.server import App, Config, make_server  # noqa: E402
-from fakes import PASSWORD, TOKEN, USER, FakeServer  # noqa: E402
+from fakes import PASSWORD, USER, FakeServer  # noqa: E402
 
 
 def main(folder, port=8090):
@@ -53,12 +53,15 @@ def main(folder, port=8090):
     fake = FakeServer(folder).start()
     data = tempfile.mkdtemp(prefix="beats-preview-")
     env = {"NAVIDROME_URL": fake.url, "NAVIDROME_USER": USER, "NAVIDROME_PASSWORD": PASSWORD,
-           "AUDIOMUSE_URL": fake.url, "AUDIOMUSE_TOKEN": TOKEN, "DATA_DIR": data, "PORT": str(port)}
+           "DATA_DIR": data, "PORT": str(port)}
     def measure(samples):  # the real sound, for the phrases: needs ffmpeg and numpy
         from beats import analyser, features
 
         return features.measure(analyser.decode(samples.path))
 
+    from beats import log
+
+    log.setup("debug")
     app = App(Config(env), tracker=Tracker(), decode=decode, measure=measure)
     app.worker.start()
     app.store.event("Preview: a stand-in instead of the model")

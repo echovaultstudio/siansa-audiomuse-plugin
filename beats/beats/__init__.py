@@ -1,3 +1,4 @@
-"""Siansa Beats: Beat This! beat and downbeat tracking for a test library, beside the Siansa plugin's readings."""
+"""Siansa Beats: Beat This! beat and downbeat tracking for the chosen libraries of your music servers (Navidrome, Emby,
+Jellyfin), for Siansa Dev's DJ blends."""
 
-__version__ = "0.5.2"
+__version__ = "0.45.1"

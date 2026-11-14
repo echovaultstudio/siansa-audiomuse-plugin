@@ -5,7 +5,7 @@
       "name": "Siansa Analysis",
       "author": "Siansa",
       "description": "For the Siansa app: each song's loudness, how it starts and ends, and its beat grids, plus similar albums and artists from AudioMuse-AI's sound analysis.",
-      "pluginUrl": "https://raw.githubusercontent.com/echovaultstudio/siansa-audiomuse-plugin/main/plugins/SiansaAnalysis/plugin.json"
+      "pluginUrl": "https://raw.githubusercontent.com/echovaultstudio/siansa-beats/main/plugins/SiansaAnalysis/plugin.json"
     }
   ]
 }

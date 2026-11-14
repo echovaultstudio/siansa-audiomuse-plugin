@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The real thing: the built image with Beat This! against the fake Navidrome (tests/fakes.py) and the songs from
 make_test_songs.py, whose tempos and bars are known. Checks every part a user touches: the scan, the queue, the
-model's readings, the comparison with the plugin and the BPM tag, the song's page, the audio and the CSV.
+model's readings, the comparison with the BPM tag, the song's page, the audio, the CSV and the log.
 
     python3 tests/e2e.py http://127.0.0.1:8090 <songs folder>/catalog.json
 
@@ -13,6 +13,7 @@ half time, which a DJ would too). Prints a table either way; exits 1 on a failur
 import json
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 STRICT = {"t140", "t122", "t128"}  # the steady 4/4 dance songs: what DJ blends need right
@@ -42,7 +43,7 @@ def main(base, catalog_path):
             time.sleep(1)
     print(f"Service up: model {health['model']}, loaded {health['model_loaded']}")
 
-    print("Scan:", call(base, "/api/scan", "POST", {"playlist": "Beat test"}))
+    print("Libraries:", call(base, "/api/libraries", "POST", {"ids": ["1"]}))
     started, end = time.time(), time.time() + 900
     while True:
         status = call(base, "/api/status")
@@ -91,10 +92,8 @@ def main(base, catalog_path):
             target.append(f"{sid}: the phrases start at {phrase} ms, expected {expected:.0f} "
                           f"({r.get('phrase_big_on')} of {r.get('phrase_big')} big changes on them)")
 
-    # The comparison: t140 carries the plugin's 4/3 misreading, t122 a BPM tag at half its tempo.
+    # The comparison: t122 carries a BPM tag at half its tempo.
     texts = {sid: [t for _, t in s["verdict"]] for sid, s in songs.items()}
-    if not any("is 4/3 of this" in t for t in texts.get("t140", [])):
-        problems.append(f"t140: the plugin's 4/3 misreading isn't shown ({texts.get('t140')})")
     if not any("is half of this" in t for t in texts.get("t122", [])):
         problems.append(f"t122: the BPM tag at half isn't shown ({texts.get('t122')})")
 
@@ -130,6 +129,50 @@ def checks(base, catalog, problems):
         problems.append("the page didn't load")
     if not call(base, "/api/health")["model_loaded"]:
         problems.append("the model isn't reported as loaded")
+    # The log in the real image: the start and the songs, and the debug report with where each thread is.
+    lines = [l["message"] for l in call(base, "/api/log?limit=5000")["lines"]]
+    if not any("Siansa Beats" in m and "on port" in m for m in lines) or not any("BPM" in m for m in lines):
+        problems.append(f"the log lacks the start or the songs ({len(lines)} lines)")
+    # The style model, in the real image: each song heard (the test songs are clicks and tones, so their styles are
+    # whatever the model makes of them: only that each has some, and the genres and a radio work).
+    styles = call(base, "/api/status")["styles"]
+    if not styles.get("available") or styles.get("done", 0) < len(catalog) - 1:
+        problems.append(f"the style model didn't hear every song: {styles}")
+    listed = call(base, "/api/genres")["genres"]
+    if not listed:
+        problems.append("no genres came from the songs' sound")
+    else:
+        top = listed[0]["style"]
+        if not call(base, "/api/genre?name=" + urllib.parse.quote(top))["ids"]:
+            problems.append(f"the radio for {top} found no songs")
+    # The app's API (v1), in the real image: loudness and fades measured from each real file, keys found.
+    caps = call(base, "/api/v1/capabilities")
+    if caps.get("api") != 1 or caps["features"]["beat_grids"]["songs"] < len(catalog) - 1:
+        problems.append(f"the capabilities aren't right: {caps}")
+    end = time.time() + 60
+    while time.time() < end and call(base, "/api/v1/capabilities")["features"]["loudness"]["songs"] < len(catalog) - 1:
+        time.sleep(1)
+    profiles = call(base, "/api/v1/profiles?ids=" + ",".join(catalog))["profiles"]
+    measured = [p for p in profiles if p.get("ref_lufs") is not None and p.get("start_ramp")]
+    if len(measured) < len(catalog) - 1:
+        problems.append(f"only {len(measured)} of {len(catalog)} songs have their loudness: {profiles[:2]}")
+    if not any(p.get("intro_bpm") and p.get("beat_grid") == "siansa_beats" for p in profiles):
+        problems.append("no profile carries its beat grid")
+    # The listening history, in the real image: a listen at half past midnight in Helsinki on 1 January is that
+    # year's there (so the image knows the time zones), and it's linked to the song here.
+    some = next(iter(catalog))
+    kept = call(base, "/api/v1/listens", "POST", {"user": "e2e", "listens": [
+        {"id": some, "at": 1767220200, "artist": catalog[some]["artist"], "title": catalog[some]["title"], "duration": 60}]})
+    year = call(base, "/api/listens?user=e2e&year=2026&tz=Europe/Helsinki")
+    if kept.get("kept") != 1 or year["totals"]["listens"] != 1 or year["hours"][0] != 1:
+        problems.append(f"the listening history isn't right: {kept}, {year['totals']}, hours {year['hours']}")
+    if call(base, "/api/v1/listens/top?user=e2e")["top"][0].get("id") != some:
+        problems.append("a listen isn't linked to its song")
+    if call(base, "/api/v1/openapi.json").get("openapi", "")[:1] != "3":
+        problems.append("the API's description isn't there")
+    report = call(base, "/api/debug")
+    if "beats-model" not in report.get("threads", {}) or not report.get("versions", {}).get("torch"):
+        problems.append("the debug report lacks the threads or torch's version")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""The service end to end without the model: Navidrome and AudioMuse-AI are tests/fakes.py, and a stand-in tracker
+"""The service end to end without the model: Navidrome is tests/fakes.py, and a stand-in tracker
 gives each song the beats of its known tempo. The model itself is checked by e2e.py in the Docker image."""
 
 import base64
@@ -10,14 +10,15 @@ import tempfile
 import time
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
-from beats import grid  # noqa: E402
-from beats.audiomuse import AudioMuse, AudioMuseError  # noqa: E402
+from beats import __version__, grid  # noqa: E402
 from beats.server import App, Config, make_server  # noqa: E402
 from beats.store import Store  # noqa: E402
+from beats.worker import Worker  # noqa: E402
 from beats.subsonic import Subsonic, SubsonicError  # noqa: E402
 from fakes import PASSWORD, TOKEN, USER, FakeServer  # noqa: E402
 
@@ -31,6 +32,41 @@ CATALOG = [
     {"id": "bad", "title": "Broken", "artist": "Nobody", "genre": "", "bpm": None, "duration": 30,
      "expect_bpm": None, "expect_bar": None, "plugin": None},
 ]
+
+
+class FakeStyle:
+    """The style model's stand-in: Control sounds like trance, Deep like deep house, Waltz like trance too (its Pop
+    tag is wrong)."""
+
+    HEARD = {"t140": [("Electronic---Trance", 0.71), ("Electronic---Progressive Trance", 0.4)],
+             "t122": [("Electronic---Deep House", 0.66), ("Electronic---House", 0.5)],
+             "t96w": [("Electronic---Trance", 0.55), ("Pop---Ballad", 0.1)]}
+
+    def __init__(self, models_dir, on=True, spec=None):
+        from beats import style as style_module
+
+        self.models_dir = models_dir
+        self.spec = spec or style_module.MODELS["effnet"]
+        os.makedirs(models_dir, exist_ok=True)
+        labels = sorted({l for heard in self.HEARD.values() for l, _ in heard} | {"Rock---Punk", "Pop---Pop Rock"})
+        with open(os.path.join(models_dir, "discogs-effnet-bs64-1.json"), "w") as f:
+            json.dump({"classes": labels}, f)
+        self.on, self.loaded, self.load_seconds, self.calls = on, False, 0.01, []
+
+    def unload(self):
+        self.loaded = False
+
+    @property
+    def available(self):
+        return self.on
+
+    def __call__(self, samples, rate=16_000):
+        self.loaded = True
+        self.calls.append((samples.song_id, rate))
+        return self.HEARD.get(samples.song_id, [])
+
+    def both(self, samples, rate=16_000):
+        return {"gpu": None, "cpu": self.HEARD.get(samples.song_id, [])}
 
 
 class Samples:
@@ -52,15 +88,26 @@ def fake_decode(path):
     return Samples(song_id, song["duration"])
 
 
+def fake_sound(path, samples, rate):
+    """Stands in for the loudness, fades and key measure: the stand-in files aren't audio."""
+    song_id = samples.song_id
+    if song_id == "t96w":
+        raise RuntimeError("ffmpeg couldn't read the song for its loudness: nope")
+    return {"ref_lufs": -9.5 if song_id == "t140" else -12.25, "start_ramp": "xAAA", "end_ramp": "xAAB",
+            "duration_ms": int(samples.seconds * 1000), "key": "A", "scale": "minor", "key_strength": 0.8}
+
+
 class FakeTracker:
     loaded = True
     load_seconds = 0.1
 
     def __init__(self):
         self.calls = 0
+        self.delay = 0.0
 
     def __call__(self, samples):
         self.calls += 1
+        time.sleep(self.delay)
         song = next(s for s in CATALOG if s["id"] == samples.song_id)
         period = 60.0 / song["expect_bpm"]
         beats = [round((0.3 + i * period) / 0.02) * 0.02 for i in range(int((song["duration"] - 0.5) / period))]
@@ -90,12 +137,11 @@ class Base(unittest.TestCase):
 
 
 class SubsonicTest(Base):
-    def test_reads_playlists_songs_and_files_with_a_token_login(self):
+    def test_reads_libraries_songs_and_files_with_a_token_login(self):
         nd = Subsonic(self.fake.url, USER, PASSWORD)
         self.assertEqual(nd.ping()["type"], "navidrome")
-        self.assertEqual(nd.playlist_named("BEAT TEST")["id"], "pl-1")
-        self.assertIsNone(nd.playlist_named("nope"))
-        songs = nd.playlist_songs("pl-1")
+        self.assertEqual(nd.libraries(), [{"id": "1", "name": "Music"}, {"id": "2", "name": "Compilations"}])
+        songs = nd.all_songs("1")
         self.assertEqual([s["id"] for s in songs], ["t140", "t122", "t96w", "bad"])
         self.assertEqual(songs[0]["tag_bpm"], 140.0)
         self.assertEqual(songs[0]["genres"], ["Trance"])
@@ -128,44 +174,15 @@ class SubsonicTest(Base):
                          ["Pop", "Rock"])
 
 
-class AudioMuseTest(Base):
-    def test_reads_the_plugins_profiles_with_a_token(self):
-        am = AudioMuse(self.fake.url, TOKEN)
-        found = am.profiles(["t140", "t122"])
-        self.assertEqual(found["t140"]["intro_bpm"], 187.1)
-        self.assertNotIn("t122", found)
-        self.assertEqual(am.health()["plugin_version"], "0.5.7-fake")
+class LogTest(unittest.TestCase):
+    def test_secrets_are_taken_out(self):
+        from beats.log import redact
 
-    def test_many_songs_are_asked_in_requests_short_enough_for_audiomuse(self):
-        # Navidrome's ids are 22 characters: 200 of them made a request line AudioMuse-AI turned away (HTTP 400).
-        ids = ["t140"] + [f"{n:022d}" for n in range(600)]
-        found = AudioMuse(self.fake.url, TOKEN).profiles(ids)
-        self.assertEqual(found["t140"]["intro_bpm"], 187.1)
-        asked = [q["ids"].split(",") for path, q in self.fake.requests if path.endswith("/api/profiles")]
-        self.assertGreater(len(asked), 3)
-        self.assertEqual(sum(len(a) for a in asked), len(ids))
-
-    def test_batches_keep_to_the_address_budget_and_the_id_limit(self):
-        from beats.audiomuse import PROFILES, batches
-        for chunk in batches([f"{n:022d}" for n in range(1000)]):
-            self.assertLessEqual(len(PROFILES + "?ids=" + ",".join(chunk)), 3500)
-        self.assertEqual([len(c) for c in batches([str(n) for n in range(1200)], budget=10 ** 6)], [500, 500, 200])
-        self.assertEqual(batches(["a", "", "a", "b"]), [["a", "b"]])
-
-    def test_problems_say_what_to_check(self):
-        with self.assertRaisesRegex(AudioMuseError, "http://"):
-            AudioMuse("audiomuse:8000").health()
-        with self.assertRaisesRegex(AudioMuseError, "Nothing answers.*container itself"):
-            AudioMuse("http://127.0.0.1:9", timeout=3).health()
-        with self.assertRaisesRegex(AudioMuseError, "set AUDIOMUSE_TOKEN"):
-            AudioMuse(self.fake.url).health()
-        with self.assertRaisesRegex(AudioMuseError, "HTTP 404: No Siansa plugin there"):
-            AudioMuse(self.fake.url + "/audiomuse", TOKEN).health()
-
-    def test_a_wrong_token_says_so(self):
-        with self.assertRaisesRegex(AudioMuseError, "AUDIOMUSE_TOKEN"):
-            AudioMuse(self.fake.url, "wrong").profiles(["t140"])
-        self.assertFalse(AudioMuse("").configured)
+        self.assertEqual(redact("http://nd:4533/rest/stream?u=max&t=abc123&s=x9&v=1.16.1&id=5"),
+                         "http://nd:4533/rest/stream?u=max&t=***&s=***&v=1.16.1&id=5")
+        self.assertEqual(redact("Authorization: Bearer eyJhbGciOi.x.y"), "Authorization: Bearer ***")
+        self.assertEqual(redact("password=hunter2 token: abc"), "password=*** token: ***")
+        self.assertEqual(redact("/api/songs?find=password&show=done"), "/api/songs?find=password&show=done")
 
 
 class StoreTest(unittest.TestCase):
@@ -190,7 +207,7 @@ class StoreTest(unittest.TestCase):
 
     def test_the_queue_and_its_states(self):
         db = self.store()
-        db.add_song(self.song(), playlist="Beat test")
+        db.add_song(self.song(), folder="1")
         self.assertTrue(db.queue("a"))
         self.assertFalse(db.queue("a"))  # already queued
         self.assertEqual(db.next_queued(), "a")
@@ -201,6 +218,44 @@ class StoreTest(unittest.TestCase):
         self.assertFalse(db.queue("a"))  # done stays done…
         self.assertTrue(db.queue("a", force=True))  # …unless asked again
         self.assertEqual(db.counts(), {"queued": 1, "songs": 1})
+
+    def test_libraries_queue_in_turn_and_one_worker_claims_each_song(self):
+        db = self.store()
+        self.assertEqual(db.add_songs([self.song("m1"), self.song("m2")], "1"), ["m1", "m2"])
+        self.assertEqual(db.add_songs([self.song("c1")], "2"), ["c1"])
+        db.add_song(self.song("old"))  # from the playlist of 0.9.0: no library yet
+        self.assertEqual(db.add_songs([self.song("m1")], "1"), [])  # nothing new
+        self.assertEqual(db.claim_next(), "m1")
+        self.assertEqual(db.counts()["downloading"], 1)
+        self.assertEqual(db.unqueue_except(["1"]), 1)  # c1; m1 is being worked on, m2 is in library 1
+        self.assertEqual(db.claim_next(), "m2")
+        self.assertIsNone(db.claim_next())
+        db.set_state("m1", "done")
+        self.assertEqual(db.folder_counts(), {"1": {"songs": 2, "done": 1}, "2": {"songs": 1, "done": 0}})
+        db.add_song(self.song("old"), folder="2")  # found in a library later
+        self.assertEqual(db.song("old")["folder"], "2")
+
+    def test_the_table_finds_and_limits(self):
+        db = self.store()
+        db.add_songs([dict(self.song("a"), title="Stars Align"), dict(self.song("b"), genres=["Drum & Bass"]),
+                      dict(self.song("c"), title="100%_sure"), self.song("d")], "1")
+        ids = lambda **k: [r["id"] for r in db.overview("final0", **k)]  # noqa: E731
+        self.assertEqual(sorted(ids()), ["a", "b", "c", "d"])
+        self.assertEqual(ids(find="stars ALIGN"), ["a"])
+        self.assertEqual(ids(find="drum"), ["b"])  # genres too
+        self.assertEqual(ids(find="%_"), ["c"])  # as written, not as a pattern
+        self.assertEqual(len(ids(limit=2)), 2)
+        db.set_state("b", "failed", "no")
+        self.assertEqual(ids(state="failed"), ["b"])
+        self.assertEqual(db.overview("final0", song_id="b")[0]["genres"][0]["label"], "Drum & Bass")
+
+    def test_settings_are_kept(self):
+        db = self.store()
+        self.assertIsNone(db.setting("library"))
+        db.set_setting("library", True)
+        db.close()
+        self.opened.remove(db)
+        self.assertTrue(self.store().setting("library"))
 
     def test_work_cut_off_by_a_restart_goes_back_in_the_queue(self):
         db = self.store()
@@ -223,9 +278,7 @@ class StoreTest(unittest.TestCase):
         self.assertIsNone(db.result("a", "small0"))
         row = db.overview("final0")[0]
         self.assertEqual(row["result"]["bpm"], 128.01)
-        self.assertIsNone(row["plugin"])
-        db.save_plugin("a", {"intro_bpm": 128.0})
-        self.assertEqual(db.overview("final0")[0]["plugin"]["intro_bpm"], 128.0)
+        self.assertNotIn("plugin", row)
         db.remove("a")
         self.assertEqual(db.overview("final0"), [])
         self.assertEqual(db.genres("a"), [])
@@ -240,13 +293,19 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(db.events(limit=1)[0]["message"], f"e{store.EVENTS_KEPT + 19}")
 
 
-class ServiceTest(Base):
-    def start(self, password=""):
+class Service(Base):
+    """A running service with the stand-ins, and how to ask it; the tests are :class:`ServiceTest`'s (and
+    test_servers.py's)."""
+
+    def start(self, password="", style=None, api_key="", style_factory=None):
         env = {"NAVIDROME_URL": self.fake.url, "NAVIDROME_USER": USER, "NAVIDROME_PASSWORD": PASSWORD,
                "AUDIOMUSE_URL": self.fake.url, "AUDIOMUSE_TOKEN": TOKEN, "DATA_DIR": os.path.join(self.tmp, "data"),
-               "BEATS_PASSWORD": password, "PORT": "0"}
+               "MODELS_DIR": os.path.join(self.tmp, "models"),
+               "BEATS_PASSWORD": password, "BEATS_API_KEY": api_key, "PORT": "0"}
         self.tracker = FakeTracker()
-        self.app = App(Config(env), tracker=self.tracker, decode=fake_decode)
+        self.app = App(Config(env), tracker=self.tracker, decode=fake_decode, style=style or FakeStyle(
+            os.path.join(self.tmp, "models"), on=False), sound=fake_sound, words=getattr(self, "words", None),
+                       hearer=getattr(self, "hearer", None), style_factory=style_factory)
         self.server = make_server(self.app, host="127.0.0.1", port=0)
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
         import threading
@@ -280,14 +339,16 @@ class ServiceTest(Base):
         end = time.time() + timeout
         while time.time() < end:
             counts = self.call("/api/status")["counts"]
-            if counts.get("songs") and counts.get("songs") == counts.get("done", 0) + counts.get("failed", 0):
+            if counts.get("songs") and counts.get("songs") == counts.get("done", 0) + counts.get("failed", 0) + counts.get("skipped", 0):
                 return counts
             time.sleep(0.1)
         self.fail(f"not done: {self.call('/api/status')}")
 
-    def test_a_playlist_analysed_and_compared(self):
+
+class ServiceTest(Service):
+    def test_a_library_analysed_and_compared(self):
         self.start()
-        self.assertEqual(self.call("/api/scan", "POST", {"playlist": "beat TEST"}), {"songs": 4, "queued": 4})
+        self.assertEqual(self.call("/api/libraries", "POST", {"ids": ["1"]}), {"songs": 4, "queued": 4})
         counts = self.wait_done()
         self.assertEqual((counts["done"], counts["failed"]), (3, 1))
         songs = {s["id"]: s for s in self.call("/api/songs")}
@@ -295,11 +356,11 @@ class ServiceTest(Base):
         control = songs["t140"]
         self.assertAlmostEqual(control["result"]["bpm"], 140.0, delta=0.1)
         self.assertEqual(control["result"]["beats_per_bar"], 4)
-        self.assertEqual(control["plugin"]["intro_bpm"], 187.1)
+        self.assertNotIn("plugin", control)
         texts = [t for _, t in control["verdict"]]
-        self.assertIn("Plugin's intro 187.1 is 4/3 of this", texts)
+        self.assertFalse([t for t in texts if "Plugin" in t])
         self.assertIn("Matches the BPM tag", texts)
-        self.assertEqual(control["genre_range"], [125, 150])
+        self.assertNotIn("genre_range", control)
 
         self.assertIn(["warn", "BPM tag 61 is half of this"], songs["t122"]["verdict"])
         self.assertEqual(songs["t96w"]["result"]["beats_per_bar"], 3)
@@ -318,18 +379,36 @@ class ServiceTest(Base):
         self.assertAlmostEqual(len(beats["downbeats"]), len(beats["beats"]) / 4, delta=1)
         self.assertTrue(detail["grid"]["beats"])
 
-        # Scanning again queues nothing new; Analyse again does.
-        self.assertEqual(self.call("/api/scan", "POST", {})["queued"], 0)
+        # Reading the library again queues nothing new; Analyse again does.
+        self.assertEqual(self.call("/api/libraries/read", "POST")["queued"], 0)
         self.assertEqual(self.call("/api/songs/t140/analyse", "POST"), {"queued": True})
         self.wait_done()
         self.assertEqual(self.tracker.calls, 4)
         self.assertEqual(self.call("/api/analyse-all", "POST")["queued"], 4)
         self.wait_done()
 
+        # One thing again by itself (0.45, the owner, 14 Nov): beats queue every song; loudness and key are measured
+        # again while what's known stays in use; a paused service starts again, as it was just asked to work.
+        self.assertEqual(self.call("/api/analyse-again", "POST", {"what": "beats"}), {"what": "beats", "songs": 4})
+        self.wait_done()
+        self.app.store.save_measure("t140", {"ref_lufs": -9.0, "key": "A", "scale": "minor"}, 99)
+        self.call("/api/pause", "POST")
+        self.assertEqual(self.call("/api/analyse-again", "POST", {"what": "loudness"})["what"], "loudness")
+        self.assertFalse(self.call("/api/status")["paused"])
+        self.assertIn("t140", self.app.store.without_measure(99))
+        self.assertEqual(self.app.store.measure("t140")["ref_lufs"], -9.0)  # still in use until it's measured again
+        for what in ("genres", "sound"):
+            self.assertEqual(self.call("/api/analyse-again", "POST", {"what": what})["what"], what)
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.call("/api/analyse-again", "POST", {"what": "everything"})
+        self.assertEqual(caught.exception.code, 400)
+        self.wait_done()
+
         status = self.call("/api/status")
-        self.assertEqual(status["plugin"]["state"], "ok")
-        self.assertEqual((status["plugin"]["found"], status["plugin"]["asked"]), (1, 4))
-        self.assertTrue(any("Playlist \"Beat test\": 4 songs, 4 new" in e["message"] for e in status["events"]))
+        self.assertNotIn("plugin", status)
+        # Nothing but the music server is asked anything (0.43).
+        self.assertFalse([path for path, _ in self.fake.requests if path.startswith(("/plugins/", "/api/sync"))])
+        self.assertTrue(any("Library Music: 4 songs, 4 new" in e["message"] for e in status["events"]))
         self.assertTrue(any("Broken failed" in e["message"] for e in status["events"]))
         self.assertTrue(status["model_loaded"])
 
@@ -337,16 +416,48 @@ class ServiceTest(Base):
         lines = csv.decode().splitlines()
         self.assertTrue(lines[0].startswith("artist,title"))
         self.assertEqual(len(lines), 5)
-        self.assertIn("4/3", csv.decode())
+        self.assertIn("BPM tag 61 is half of this", csv.decode())
+        self.assertNotIn("plugin", csv.decode().splitlines()[0])
 
         self.assertEqual(self.call("/api/songs/bad", "DELETE"), {"removed": True})
         self.assertEqual(len(self.call("/api/songs")), 3)
         # Temporary downloads are gone.
         self.assertEqual([f for f in os.listdir(self.app.config.data_dir) if f.startswith("song-")], [])
 
+    def test_status_shows_songs_being_worked_out_again(self):
+        self.start()
+        self.app.worker.regridding = {"done": 3, "total": 10}
+        self.assertEqual(self.call("/api/status")["regridding"], {"done": 3, "total": 10})
+        self.app.worker.regridding = None
+        self.assertIsNone(self.call("/api/status")["regridding"])
+
+    def test_the_pages_counts_are_kept_while_nothing_is_written(self):
+        """0.35.1: counting 45,000 sounds took over a second every few seconds on the owner's server."""
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        store, asked = self.app.store, []
+        counted, sources = store.sound_counts, store.sound_sources
+        store.sound_counts = lambda server=None: (asked.append("counts"), counted(server))[1]
+        store.sound_sources = lambda server=None: (asked.append("sources"), sources(server))[1]
+        seen, quiet = store.writes, 0  # the sound, the styles and the loudness follow the beats: until all is still
+        while quiet < 10:
+            time.sleep(0.1)
+            quiet = quiet + 1 if store.writes == seen else 0
+            seen = store.writes
+        first = self.call("/api/status")["sound"]
+        asked.clear()
+        for _ in range(3):
+            self.assertEqual(self.call("/api/status")["sound"]["songs"], first["songs"])
+        self.assertEqual(asked, [])  # nothing was written: nothing counted again
+        store.event("something happened")  # anything written: counted again, at once
+        self.assertEqual(self.call("/api/status")["sound"]["songs"], first["songs"])
+        self.assertEqual(sorted(asked), ["counts", "sources"])
+        self.assertIn("queue", self.app.status_parts)  # where a slow answer's time went, for the log
+
     def test_results_of_an_older_version_are_worked_out_again_from_their_beats(self):
         self.start()
-        self.call("/api/scan", "POST", {})
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
         db = self.app.store
         with db.lock, db.db:  # as 0.2: no main tempo yet, and the whole-song line as the tempo
@@ -360,7 +471,7 @@ class ServiceTest(Base):
 
     def test_the_data_comes_out_for_tuning(self):
         self.start()
-        self.call("/api/scan", "POST", {})
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
         self.wait_done()
         data = self.call("/api/export.json")
         self.assertEqual(len(data["songs"]), 3)
@@ -369,19 +480,476 @@ class ServiceTest(Base):
         self.assertIn("bpm", song["result"])
         self.assertNotIn(TOKEN, json.dumps(data))
 
-    def test_the_plugin_line_says_what_went_wrong(self):
+    def test_section_marks_are_kept_shown_and_exported(self):
         self.start()
-        self.app.audiomuse.token = "wrong"
-        self.call("/api/plugin/refresh", "POST")
-        plugin = self.call("/api/status")["plugin"]
-        self.assertEqual(plugin["state"], "error")
-        self.assertIn("AUDIOMUSE_TOKEN", plugin["text"])
-        self.app.audiomuse.url = ""
-        self.assertEqual(self.app.worker.check_plugin()["state"], "off")
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        added = self.call("/api/songs/t140/marks", "POST", {"seconds": 67.4})
+        self.call("/api/songs/t140/marks", "POST", {"seconds": 12.25})
+        marks = self.call("/api/songs/t140")["marks"]
+        self.assertEqual([m["seconds"] for m in marks], [12.25, 67.4])
+        self.assertEqual({s["id"]: s["marks"] for s in self.call("/api/songs")}["t140"], 2)
+        self.call("/api/analyse-all", "POST")  # analysing again keeps them
+        self.wait_done()
+        song = {s["id"]: s for s in self.call("/api/export.json")["songs"]}["t140"]
+        self.assertEqual(song["marks"], [12.25, 67.4])
+        left = self.call(f"/api/songs/t140/marks/{added['id']}", "DELETE")
+        self.assertEqual([m["seconds"] for m in left["marks"]], [12.25])
+        for bad in ({"seconds": "soon"}, {}, {"seconds": -1}):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.call("/api/songs/t140/marks", "POST", bad)
+            self.assertEqual(caught.exception.code, 400)
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.call("/api/songs/nope/marks", "POST", {"seconds": 1})
+        self.assertEqual(caught.exception.code, 404)
+
+    def test_grids_for_the_app(self):
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        answer = self.call("/api/grids?ids=t140,nope,t122,t140")
+        self.assertEqual(answer["missing"], ["nope"])
+        grids = {g["track_id"]: g for g in answer["grids"]}
+        self.assertEqual(set(grids), {"t140", "t122"})
+        g = grids["t140"]
+        for end in ("intro", "outro"):
+            for field in ("bpm", "beat_ms", "bar_ms", "rhythm", "steady"):
+                self.assertIsNotNone(g[f"{end}_{field}"], f"{end}_{field}")
+        self.assertAlmostEqual(g["intro_bpm"], 140.0, delta=0.1)
+        self.assertLess(g["intro_beat_ms"], g["outro_beat_ms"])
+        self.assertEqual(g["intro_phrase_bars"], 8)
+        self.assertIsNone(g["beats_until_ms"])  # it beats to its end: no beatless outro
+        self.assertNotIn("ends", self.call("/api/songs")[0]["result"])
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.call("/api/grids?ids=" + ",".join(str(n) for n in range(2001)))
+        self.assertEqual(caught.exception.code, 400)
+
+    def test_v1_capabilities_and_profiles_for_the_app(self):
+        self.start()
+        empty = self.call("/api/v1/capabilities")
+        self.assertEqual((empty["service"], empty["api"]), ("siansa-beats", 1))
+        self.assertEqual(empty["features"]["beat_grids"]["songs"], 0)
+        self.assertFalse(empty["features"]["similar"]["available"])  # no song's sound is here yet
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        caps = self.call("/api/v1/capabilities")
+        self.assertEqual(caps["songs"]["analysed"], 3)
+        self.assertEqual(caps["features"]["beat_grids"]["songs"], 3)
+        self.assertEqual(caps["features"]["loudness"]["songs"], 2)  # t96w couldn't be measured
+        self.assertEqual(caps["limits"]["profile_ids"], 500)
+
+        answer = self.call("/api/v1/profiles?ids=t140,nope,t96w,t140")
+        self.assertEqual(answer["schema_version"], 1)
+        self.assertEqual(answer["pending"], ["nope"])
+        profiles = {p["track_id"]: p for p in answer["profiles"]}
+        self.assertEqual(set(profiles), {"t140", "t96w"})
+        p = profiles["t140"]
+        self.assertEqual((p["ref_lufs"], p["start_ramp"], p["end_ramp"], p["duration_ms"]), (-9.5, "xAAA", "xAAB", 60000))
+        self.assertEqual((p["key"], p["scale"], p["beat_grid"]), ("A", "minor", "siansa_beats"))
+        self.assertAlmostEqual(p["intro_bpm"], 140.0, delta=0.1)
+        self.assertNotIn("beats_until_ms", p)  # nulls are left out, as the plugin did
+        grid_only = profiles["t96w"]  # its beats, without loudness: the app levels it by its tags
+        self.assertEqual((grid_only["ref_lufs"], grid_only["start_ramp"], grid_only["duration_ms"]), (None, "", 0))
+        self.assertNotIn("key", grid_only)
+        self.assertEqual(grid_only["beat_grid"], "siansa_beats")
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.call("/api/v1/profiles?ids=" + ",".join(str(n) for n in range(501)))
+        self.assertEqual(caught.exception.code, 400)
+        self.assertEqual(self.call("/api/status")["loudness"]["measured"], 2)
+
+    def test_the_loudness_dashboard(self):
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        report = self.call("/api/loudness")
+        self.assertEqual((report["measured"], report["failed"], report["waiting"]), (2, 1, 0))
+        self.assertEqual(report["sources"], {"beats": 2, "plugin": 0})
+        self.assertEqual(report["with_key"], 2)
+        self.assertEqual(report["keys"], {"A minor": 2})
+        self.assertEqual(sum(report["lufs"]["counts"]), 2)
+        self.assertEqual((report["lufs"]["quietest"], report["lufs"]["loudest"]), (-12.25, -9.5))
+        self.assertEqual(report["failed_songs"][0]["title"], "Waltz")
+        song = self.call("/api/songs/t140")
+        self.assertEqual((song["measure"]["ref_lufs"], song["measure"]["key"], song["measure"]["source"]), (-9.5, "A", "beats"))
+        row = next(s for s in self.call("/api/songs") if s["id"] == "t96w")
+        self.assertIn("nope", row["sound"]["error"])
+        status = self.call("/api/status")
+        self.assertEqual(status["connections"], {
+            "navidrome": True, "api_key": False, "password": False, "secret_key": "data folder",
+            "left_in_container": ["NAVIDROME_PASSWORD", "AUDIOMUSE_URL", "AUDIOMUSE_TOKEN"]})
+
+    def test_v1_genres_about_and_bad_blends(self):
+        self.start(style=FakeStyle(os.path.join(self.tmp, "models"), on=True))
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.assertEqual(self.call("/api/v1/genres")["genres"], self.call("/api/genres")["genres"])
+        listed = {g["style"]: g for g in self.call("/api/v1/genres")["genres"]}
+        self.assertEqual(listed["Trance"]["libraries"], {"1": listed["Trance"]["songs"]})  # each library's songs
+        trance = self.call("/api/v1/genre?name=Trance")
+        self.assertEqual((set(trance["ids"]), trance["styles"]), ({"t140", "t96w"}, ["Electronic---Trance"]))
+        for path in ("/api/v1/genre", "/api/v1/genre/about", "/api/v1/genre?name=Trance&limit=x"):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.call(path)
+            self.assertEqual(caught.exception.code, 400, path)
+        self.app.store.set_setting("about:trance", {"summary": "Fast.", "url": "https://en.wikipedia.org/wiki/Trance_music",
+                                                    "source": "Wikipedia", "at": time.time()})
+        about = self.call("/api/v1/genre/about?name=Trance")  # kept: not looked up on Wikipedia in the tests
+        self.assertEqual((about["name"], about["about"]["summary"]), ("Trance", "Fast."))
+        self.assertEqual(about["status"], "found")
+        self.app.store.set_setting("about:polka", {"at": time.time(), "v": 2})  # Wikipedia has nothing on it
+        self.assertEqual(self.call("/api/v1/genre/about?name=Polka")["status"], "missing")
+        self.app.store.set_setting("about:surf", {"failed": True, "at": time.time(), "v": 2})
+        self.assertEqual(self.call("/api/v1/genre/about?name=Surf")["status"], "failed")
+        made = self.call("/api/v1/bad-blends", "POST", {"from_id": "t140", "to_id": "t122", "technique": "echo out"})
+        self.assertEqual(self.call("/api/bad-blends")[0]["id"], made["id"])
+        # Clear all (the owner, 12 Nov): a fresh start for the next day's testing.
+        self.call("/api/v1/bad-blends", "POST", {"from_id": "t122", "to_id": "t140", "technique": "quick swap"})
+        self.assertEqual(self.call("/api/bad-blends", "DELETE")["removed"], 2)
+        self.assertEqual(self.call("/api/bad-blends"), [])
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.call("/api/v1/bad-blends", "POST", {"from_id": "t140"})
+        self.assertEqual(caught.exception.code, 400)
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.call("/api/v1/nothing")
+        self.assertEqual(caught.exception.code, 404)
+        spec = self.call("/api/v1/openapi.json")
+        self.assertEqual(spec["info"]["version"], "1")
+        for path in ("/api/v1/capabilities", "/api/v1/profiles", "/api/v1/genres", "/api/v1/genre", "/api/v1/genre/about",
+                     "/api/v1/bad-blends", "/api/v1/listens", "/api/v1/listens/now", "/api/v1/listens/top", "/api/v1/listens/totals", "/api/v1/loves",
+                     "/api/v1/songs/genres"):
+            self.assertIn(path, spec["paths"])
+
+    def test_v1_similar_albums_and_artists_need_the_songs_sound(self):
+        self.start()
+        self.assertFalse(self.call("/api/v1/capabilities")["features"]["similar"]["available"])
+        albums = self.call("/api/v1/similar/albums?track_id=t140")
+        self.assertEqual((albums["source"], albums["similar"]), ("beats", []))  # not known yet: empty, never an error
+        for path, code in (("/api/v1/similar/albums", 400), ("/api/v1/similar/albums?artist=x", 400)):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.call(path)
+            self.assertEqual(caught.exception.code, code, path)
+
+    def test_an_api_key_for_the_app(self):
+        self.start(password="s3cret", api_key="k3y")
+        self.assertEqual(self.call("/api/v1/capabilities", password="", headers={"Authorization": "Bearer k3y"})["api"], 1)
+        self.assertEqual(self.call("/api/v1/capabilities", password="", headers={"Authorization": "Bearer s3cret"})["api"], 1)
+        self.assertEqual(self.call("/api/v1/capabilities")["api"], 1)  # Basic with the password
+        for header in ({}, {"Authorization": "Bearer wrong"}, {"Authorization": "Basic " + base64.b64encode(b"siansa:k3y").decode()}):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.call("/api/v1/profiles?ids=t140", password="", headers=header)
+            self.assertEqual(caught.exception.code, 401, header)
+        self.assertEqual(self.call("/api/health", password="")["status"], "ok")
+
+    def test_songs_analysed_before_get_their_loudness_while_the_queue_is_empty(self):
+        Worker.MEASURE_IDLE_SECONDS = 0.5
+        self.addCleanup(setattr, Worker, "MEASURE_IDLE_SECONDS", 60.0)
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        with self.app.store.lock, self.app.store.db:  # as 0.19 left them: beats, no loudness
+            self.app.store.db.execute("DELETE FROM measures")
+        end = time.time() + 20
+        while time.time() < end and self.app.store.measure_counts(1)["waiting"]:
+            time.sleep(0.2)
+        self.assertEqual(self.app.store.measure_counts(1), {"measured": 2, "failed": 1, "waiting": 0})
+        self.assertEqual(self.call("/api/v1/profiles?ids=t122")["profiles"][0]["ref_lufs"], -12.25)
+
+    def test_the_log_shows_every_step_with_debug_details_and_no_secrets(self):
+        from beats import log
+
+        self.start()
+        log.setup("info")
+        self.assertEqual(self.call("/api/log/level", "POST", {"level": "debug"}), {"level": "debug"})
+        self.assertEqual(self.app.store.setting("log_level"), "debug")
+        self.assertEqual(self.call("/api/status")["log_level"], "debug")
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        lines = self.call("/api/log?limit=5000")["lines"]
+        text = "\n".join(l["message"] for l in lines)
+        self.assertIn("downloaded", text)
+        self.assertIn("the model found", text)
+        self.assertIn("getMusicFolders", text)  # the requests to Navidrome, with their times
+        self.assertTrue(any(l["level"] == "error" and "Broken failed" in l["message"] for l in lines))
+        self.assertNotRegex(text, r"[?&]t=[0-9a-f]{6}")  # Subsonic's login token never reaches the log
+        newer = self.call(f"/api/log?after={lines[-1]['n']}")["lines"]
+        self.assertTrue(all(l["n"] > lines[-1]["n"] for l in newer))
+        self.assertEqual(self.call("/api/log?level=warn&limit=5000")["lines"],
+                         [l for l in self.call("/api/log?limit=5000")["lines"] if l["level"] in ("warn", "error")])
+        r, body = self.call("/api/log/download", raw=True)
+        self.assertIn("attachment", r.headers["Content-Disposition"])
+        self.assertIn(b"ERROR", body)
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/log/level", "POST", {"level": "loud"})
+        self.assertEqual(e.exception.code, 400)
+        self.call("/api/log/level", "POST", {"level": "info"})
+        before = self.call("/api/log?limit=1")["lines"][-1]["n"]
+        self.call("/api/songs/t140/analyse", "POST")
+        self.wait_done()
+        self.assertFalse([l for l in self.call(f"/api/log?after={before}&limit=5000")["lines"] if l["level"] == "debug"])
+
+    def test_songs_that_failed_on_a_fixed_bug_are_analysed_again(self):
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.app.store.set_state("t140", "failed", "'bars'")
+        calls = self.tracker.calls
+        self.app.worker.regrid()
+        self.wait_done()
+        self.assertEqual(self.tracker.calls, calls + 1)
+        states = {s["id"]: s["state"] for s in self.call("/api/songs")}
+        self.assertEqual(states["t140"], "done")
+        self.assertEqual(states["bad"], "failed")  # its own error, not a fixed bug: left alone
+
+    def test_genres_come_from_the_sound_alone(self):
+        style = FakeStyle(os.path.join(self.tmp, "models"))
+        self.start(style=style)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        songs = {s["id"]: s for s in self.call("/api/songs")}
+        self.assertEqual({g["source"] for s in songs.values() for g in s["genres"]} - {"tag", "sound"}, set())  # no vote
+        self.assertEqual({sid for sid, _ in style.calls}, {"t140", "t122", "t96w"})  # from the samples on hand
+        radio = self.call("/api/genre?name=" + urllib.parse.quote("Electronic / Trance"))
+        self.assertEqual(radio["styles"], ["Electronic---Trance"])
+        self.assertEqual(radio["ids"], ["t140", "t96w"])  # the one that sounds most like it first
+        self.assertEqual(radio["songs"], 2)
+        self.assertEqual(set(self.call("/api/genre?name=Electronic")["ids"]), {"t140", "t122", "t96w"})
+        self.assertEqual(self.call("/api/genre?name=Opera")["ids"], [])
+        # Its House tag no longer tips the song: Deep House is what it sounds like most, House second.
+        self.assertEqual(self.call("/api/genre?name=House")["ids"], ["t122"])
+        # Tagged Pop, sounds like trance: in Trance, and in no genre it only scores 0.10 for.
+        self.assertEqual(self.call("/api/genre?name=Ballad")["ids"], [])
+        self.assertEqual(self.call("/api/genre?name=Pop")["ids"], [])
+        listed = self.call("/api/genres")
+        self.assertEqual(listed["genres"][0], {"label": "Electronic---Trance", "genre": "Electronic", "style": "Trance",
+                                               "songs": 2, "name": "Trance", "libraries": {"1": 2}})
+        self.assertEqual({g["style"]: g["songs"] for g in listed["genres"]},
+                         {"Trance": 2, "Progressive Trance": 1, "Deep House": 1, "House": 1})
+        status = self.call("/api/status")["styles"]
+        self.assertTrue(status["available"])
+        self.assertEqual(status["done"], 3)
+        self.assertEqual(status["failed"], 0)  # the broken one failed before: not asked for its style
+        _, csv_body = self.call("/api/export.csv", raw=True)
+        self.assertIn("Trance 0.71 / Progressive Trance 0.40", csv_body.decode())
+
+    def test_a_genre_gives_all_its_songs_and_a_song_is_always_in_its_best(self):
+        # t122: a country song with a synthy sheen (the owner, 12 Nov): Electro House its faint fourth guess.
+        class Country(FakeStyle):
+            HEARD = dict(FakeStyle.HEARD, t96w=[("Pop---Ballad", 0.08), ("Electronic---Trance", 0.05)],
+                         t122=[("Folk, World, & Country---Country", 0.5), ("Pop---Ballad", 0.3), ("Electronic---Synth-pop", 0.2),
+                               ("Electronic---Electro House", 0.18), ("Electronic---House", 0.16)])
+        style = Country(os.path.join(self.tmp, "models"))
+        self.start(style=style)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.assertEqual(self.call("/api/v1/genre?name=Ballad")["ids"], ["t122", "t96w"])  # t96w's best, however low
+        trance = self.call("/api/v1/genre?name=Trance")
+        self.assertEqual((trance["ids"], trance["weights"], trance["sure"]), (["t140"], [0.71], 1))
+        # Among its best three only (0.36): Synth-pop yes, Electro House and House no.
+        self.assertEqual(self.call("/api/v1/genre?name=Synth-pop")["ids"], ["t122"])
+        self.assertEqual(self.call("/api/v1/genre?name=" + urllib.parse.quote("Electro House"))["ids"], [])
+        self.assertEqual(self.call("/api/v1/genre?name=House")["ids"], [])
+        # A whole family: only the songs whose best style is in it (t122's is Country).
+        everything = self.call("/api/v1/genre?name=Electronic")  # no limit asked: all of them
+        self.assertEqual((set(everything["ids"]), everything["songs"]), ({"t140"}, 1))
+        self.assertEqual(self.call("/api/v1/genre?name=Country")["ids"], ["t122"])
+        one = self.call("/api/v1/genre?name=Trance&limit=1")
+        self.assertEqual((len(one["ids"]), one["songs"]), (1, 1))
+
+    def test_each_songs_own_genres_for_what_a_mix_has_to_offer(self):
+        style = FakeStyle(os.path.join(self.tmp, "models"))
+        style.HEARD = dict(style.HEARD, t96w=[("Pop---Ballad", 0.08), ("Electronic---Trance", 0.05)])
+        self.start(style=style)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        caps = self.call("/api/v1/capabilities")
+        self.assertTrue(caps["features"]["genres"]["per_song"])
+        self.assertEqual(caps["limits"]["genre_ids"], 500)
+        answer = self.call("/api/v1/songs/genres?ids=t96w,t140,nothing")
+        self.assertEqual(set(answer["songs"]), {"t96w", "t140"})  # a song not here isn't in it
+        self.assertEqual([(g["name"], g["genre"], g["score"]) for g in answer["songs"]["t96w"]], [("Ballad", "Pop", 0.08)])  # its best, however low
+        scores = [g["score"] for g in answer["songs"]["t140"]]
+        self.assertEqual(scores, sorted(scores, reverse=True))  # its best first
+        self.assertTrue(all(s >= answer["minimum"] for s in scores[1:]))
+        self.assertIn("Trance", [g["name"] for g in answer["songs"]["t140"]])
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.call("/api/v1/songs/genres")
+        self.assertEqual(caught.exception.code, 400)
+
+    def test_genres_voted_before_are_removed(self):
+        style = FakeStyle(os.path.join(self.tmp, "models"))
+        self.start(style=style)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.app.store.set_genres("t96w", "vote", ["Pop---Ballad"], [0.45])  # as 0.27 kept it, from its Pop tag
+        self.assertEqual(self.app.store.drop_votes(), 1)
+        self.assertEqual(self.app.store.drop_votes(), 0)
+        self.assertEqual([g for g in self.app.store.genres("t96w") if g["source"] == "vote"], [])
+        self.assertEqual(self.call("/api/genre?name=Ballad")["ids"], [])
+
+    def test_songs_analysed_before_get_their_styles_while_the_queue_is_empty(self):
+        style = FakeStyle(os.path.join(self.tmp, "models"), on=False)
+        self.start(style=style)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.assertEqual(style.calls, [])
+        style.on = True  # an update brings the model
+        end = time.time() + 20
+        while time.time() < end and self.call("/api/status")["styles"].get("done", 0) < 3:
+            time.sleep(0.2)
+        self.assertEqual(self.call("/api/status")["styles"]["done"], 3)
+        self.assertEqual(set(self.call("/api/genre?name=Trance")["ids"]), {"t140", "t96w"})
+
+    def test_on_a_gpu_songs_analysed_before_are_heard_two_at_a_time(self):
+        """0.41 (the owner, 13 Nov): a GPU hears the waiting songs in passes of two, the next ones fetched meanwhile;
+        each song still gets its own styles, and a pass that fails is heard one by one. A pass that runs out of the
+        GPU's memory (0.42.2) is the last pass of two: one a pass from then on, said once in Activity."""
+        class Gpu(FakeStyle):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                self.passes, self.fail_once, self.songs_at_once, self.problem = [], True, 2, None
+
+            def one_at_a_time(self, why):
+                self.songs_at_once, self.problem = 1, f"the style model hears one song at a time on the GPU: {why}"
+                return True
+
+            def many(self, songs):
+                self.loaded = True
+                ids = [samples.song_id for samples, _ in songs]
+                self.passes.append(ids)
+                if self.fail_once:
+                    self.fail_once = False
+                    raise RuntimeError("CUDA out of memory. Tried to allocate 2.03 GiB")
+                return [self.HEARD.get(i, []) for i in ids]
+
+        style = Gpu(os.path.join(self.tmp, "models"), on=False)
+        self.start(style=style)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        style.on = True
+        end = time.time() + 20
+        while time.time() < end and self.call("/api/status")["styles"].get("done", 0) < 3:
+            time.sleep(0.2)
+        self.assertEqual(self.call("/api/status")["styles"]["done"], 3)
+        self.assertEqual([len(p) for p in style.passes], [2])  # the one pass of two, which didn't fit
+        self.assertEqual(len(style.calls), 3)  # its two heard one by one, then the third alone: one a pass now
+        self.assertEqual(style.songs_at_once, 1)
+        self.assertIn("one song at a time", " ".join(e["message"] for e in self.app.store.events()))
+        self.assertEqual(set(self.call("/api/genre?name=Trance")["ids"]), {"t140", "t96w"})
+        self.assertEqual(self.call("/api/genre?name=" + urllib.parse.quote("Deep House"))["ids"], ["t122"])
+
+    def test_a_gpu_that_disagrees_is_let_go_and_every_song_is_heard_again(self):
+        """0.37.1 (the owner, 12 Nov: a country album scored 0.7 as electro house): the model checks the GPU's scores
+        against the CPU's on the first real song; when they differ, the songs' styles are doubted, kept in use, and
+        each is heard again on the CPU, which replaces them."""
+        style = FakeStyle(os.path.join(self.tmp, "models"))
+        self.start(style=style)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.assertEqual(self.call("/api/status")["styles"]["done"], 3)
+        self.assertEqual(set(self.call("/api/genre?name=Trance")["ids"]), {"t140", "t96w"})
+        # The check comes back bad: the styles are doubted (still there for a radio) and heard again.
+        style.checked = {"diff": 0.3, "ok": False}
+        style.problem = "the style model's scores on the GPU differ from ONNX Runtime's by 0.30"
+        before = len(style.calls)
+        self.app.worker._style_checked()
+        self.assertEqual(set(self.call("/api/genre?name=Trance")["ids"]), {"t140", "t96w"})
+        self.assertEqual(self.call("/api/status")["styles"]["done"], 0)
+        end = time.time() + 20
+        while time.time() < end and self.call("/api/status")["styles"].get("done", 0) < 3:
+            time.sleep(0.2)
+        self.assertEqual(self.call("/api/status")["styles"]["done"], 3)
+        self.assertGreaterEqual(len(style.calls), before + 3)
+        self.assertEqual(set(self.call("/api/genre?name=Trance")["ids"]), {"t140", "t96w"})
+        self.assertTrue(any("differ from ONNX Runtime" in e["message"] for e in self.call("/api/status")["events"]))
+        # Hearing a song again both ways, for a look.
+        again = self.call("/api/v1/songs/styles/again?ids=t140")
+        self.assertEqual(again["songs"]["t140"]["cpu"][0], ["Trance", 0.71])
+        self.assertIsNone(again["songs"]["t140"]["gpu"])
+        self.assertEqual(again["songs"]["t140"]["song"]["title"], "Control")
+        self.assertEqual(again["songs"]["t140"]["from"][0][1], "t140")
+        self.assertGreater(again["songs"]["t140"]["file"]["seconds"], 0)
+
+    def test_the_style_model_can_be_changed_in_setup_and_every_song_is_heard_again(self):
+        """0.39 (the owner, 13 Nov): Discogs-EffNet or MAEST, chosen on the page; the choice is kept, the songs'
+        styles are doubted (still used) and heard again with the new model; one not in the image can't be chosen."""
+        from beats import style as style_module
+
+        models = os.path.join(self.tmp, "models")
+        made = []
+        def factory(spec):
+            made.append(spec.id)
+            return FakeStyle(models, spec=spec)
+        self.start(style=FakeStyle(models), style_factory=factory)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        listed = self.call("/api/style/models")
+        self.assertEqual(listed["chosen"], "effnet")
+        self.assertEqual([m["id"] for m in listed["models"]], ["effnet", "maest"])
+        self.assertEqual([m["available"] for m in listed["models"]], [False, False])  # no files in a test
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/style/model", "POST", {"model": "maest"})
+        self.assertEqual(e.exception.code, 400)
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/style/model", "POST", {"model": "nope"})
+        self.assertEqual(e.exception.code, 400)
+        # With MAEST in the image: the switch doubts every song's styles and hears them again.
+        for name in ("discogs-maest-30s-pw-1.onnx", "discogs-maest-30s-pw-1.json"):
+            with open(os.path.join(self.app.config.models_dir, name), "w") as f:
+                f.write("{}")
+        before = self.call("/api/status")["styles"]["done"]
+        self.assertEqual(before, 3)
+        r = self.call("/api/style/model", "POST", {"model": "maest"})
+        self.assertEqual((r["doubted"], r["chosen"], made), (3, "maest", ["maest"]))
+        self.assertEqual(set(self.call("/api/genre?name=Trance")["ids"]), {"t140", "t96w"})  # still there meanwhile
+        # The switch is shown while it runs (0.40.1): marking, then hearing, then gone when every song is heard.
+        end = time.time() + 20
+        seen = set()
+        while time.time() < end:
+            styles = self.call("/api/status")["styles"]
+            if styles.get("switch"):
+                seen.add(styles["switch"]["phase"])
+                self.assertEqual(styles["switch"]["model_name"], "MAEST (2023)")
+            elif styles.get("done", 0) >= 3 and "hearing" in seen:
+                break
+            time.sleep(0.1)
+        self.assertIn("hearing", seen)
+        self.assertIsNone(self.call("/api/status")["styles"]["switch"])
+        self.assertEqual(self.call("/api/status")["styles"]["done"], 3)
+        self.assertEqual(self.call("/api/status")["styles"]["model"], "maest")
+        self.assertEqual(self.app.store.setting("style_model"), "maest")
+        # The same model again changes nothing.
+        self.assertEqual(self.call("/api/style/model", "POST", {"model": "maest"})["doubted"], 0)
+
+    def test_without_the_style_model_the_app_falls_back_to_tags(self):
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        radio = self.call("/api/genre?name=Trance")
+        self.assertEqual(radio["ids"], [])
+        self.assertIn("no style model", radio["why"])
+        self.assertFalse(self.call("/api/status")["styles"]["available"])
+
+    def test_the_debug_report_says_where_everything_is_without_secrets(self):
+        self.start(password="pagepass")
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        r, body = self.call("/api/debug", raw=True)
+        self.assertIn("attachment", r.headers["Content-Disposition"])
+        report = json.loads(body)
+        self.assertEqual(report["versions"]["siansa_beats"], __version__)
+        self.assertEqual([(s["id"], s["signed_in"]) for s in report["setup"]["servers"]], [("main", True)])
+        self.assertEqual(report["setup"]["secrets_left_in_container"], ["NAVIDROME_PASSWORD", "BEATS_PASSWORD", "AUDIOMUSE_URL", "AUDIOMUSE_TOKEN"])
+        self.assertEqual(report["setup"]["page_password"], "set")
+        self.assertNotIn("audiomuse_token", report["setup"])
+        self.assertNotIn(f'"{TOKEN}"', body.decode())
+        self.assertIn("beats-model", report["threads"])
+        self.assertEqual(report["status"]["counts"]["failed"], 1)
+        self.assertNotIn("pagepass", body.decode())
+        self.assertNotRegex(body.decode(), r"[?&]t=[0-9a-f]{6}")
 
     def test_the_audio_is_passed_through_with_seeking(self):
         self.start()
-        self.call("/api/scan", "POST", {})
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
         r, data = self.call("/api/audio/t122", raw=True)
         self.assertEqual((r.status, data), (200, b"t122"))
         r, data = self.call("/api/audio/t122", headers={"Range": "bytes=2-"}, raw=True)
@@ -392,21 +960,21 @@ class ServiceTest(Base):
             self.call("/api/audio/unknown")
         self.assertEqual(e.exception.code, 404)
 
-    def test_an_unknown_playlist_lists_the_ones_there_are(self):
+    def test_an_unknown_library_lists_the_ones_there_are(self):
         self.start()
         with self.assertRaises(urllib.error.HTTPError) as e:
-            self.call("/api/scan", "POST", {"playlist": "Nope"})
-        self.assertEqual(e.exception.code, 502)
-        self.assertIn("Beat test, Something else", json.loads(e.exception.read())["error"])
-        # …and it stays in Activity, where it can be read at leisure.
-        self.assertTrue(any(ev["level"] == "error" and 'No playlist called "Nope"' in ev["message"]
-                            for ev in self.call("/api/status")["events"]))
-        self.assertEqual([p["name"] for p in self.call("/api/playlists")], ["Beat test", "Something else"])
+            self.call("/api/libraries", "POST", {"ids": ["9"]})
+        self.assertEqual(e.exception.code, 400)
+        self.assertIn("1 Music, 2 Compilations", json.loads(e.exception.read())["error"])
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/libraries", "POST", {})
+        self.assertEqual(e.exception.code, 400)
+        self.assertEqual(self.call("/api/status")["counts"]["songs"], 0)
 
     def test_pause_and_carry_on(self):
         self.start()
         self.assertEqual(self.call("/api/pause", "POST"), {"paused": True})
-        self.call("/api/scan", "POST", {})
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
         time.sleep(0.5)
         self.assertEqual(self.tracker.calls, 0)
         self.assertEqual(self.call("/api/resume", "POST"), {"paused": False})
@@ -416,16 +984,210 @@ class ServiceTest(Base):
     def test_a_password_guards_everything_but_health(self):
         self.start(password="s3cret")
         self.assertEqual(self.call("/api/health", password="")["status"], "ok")
-        for path in ("/", "/api/status", "/api/songs", "/api/audio/t140", "/api/export.csv"):
+        for path in ("/api/status", "/api/songs", "/api/audio/t140", "/api/export.csv"):
             with self.assertRaises(urllib.error.HTTPError) as e:
                 self.call(path, password="")
             self.assertEqual(e.exception.code, 401, path)
-            self.assertIn("Basic", e.exception.headers["WWW-Authenticate"])
+            self.assertIsNone(e.exception.headers["WWW-Authenticate"])  # no browser's own password box (0.43)
         with self.assertRaises(urllib.error.HTTPError):
             self.call("/api/status", password="wrong")
         self.assertIn("counts", self.call("/api/status"))
         _, page = self.call("/", raw=True)
         self.assertIn(b"<title>Siansa Beats</title>", page)
+
+    def test_a_browser_signs_in_on_a_page_of_its_own(self):
+        """0.43 (the owner, 13 Nov): with a password set, opening the page gives the sign-in page; the right password
+        gives a session in a cookie scripts can't read; signing out, a changed password and the reset from Docker end
+        it; a few wrong tries and the address must wait."""
+        from beats import reset
+        from beats import server as server_module
+
+        self.start(password="correct horse")
+        r, page = self.call("/", password="", raw=True)
+        self.assertEqual(r.status, 200)
+        self.assertIn(b"Sign in", page)
+        self.assertNotIn(b"api/status", page)  # nothing of the page itself
+        self.assertNotIn(b"correct horse", page)
+
+        def signin(password):
+            request = urllib.request.Request(self.base + "/api/signin", method="POST",
+                                             data=json.dumps({"password": password}).encode())
+            return urllib.request.urlopen(request, timeout=10)
+
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            signin("wrong")
+        self.assertEqual((e.exception.code, e.exception.headers["Set-Cookie"]), (401, None))
+        cookie = signin("correct horse").headers["Set-Cookie"]
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=Strict", cookie)
+        token = cookie.split(";")[0]
+        self.assertTrue(token.startswith(server_module.SESSION_COOKIE + "="))
+        self.assertIn("counts", self.call("/api/status", password="", headers={"Cookie": token}))
+        self.assertIn(b"<title>Siansa Beats</title>", self.call("/", password="", headers={"Cookie": token}, raw=True)[1])
+        self.assertNotIn(token.split("=", 1)[1], json.dumps(self.app.store.setting("sessions")))  # only its hash is kept
+        # Signing out ends it, and the browser forgets the cookie.
+        out, _ = self.call("/api/signout", "POST", {}, password="", headers={"Cookie": token}, raw=True)
+        self.assertIn("Max-Age=0", out.headers["Set-Cookie"])
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/status", password="", headers={"Cookie": token})
+        self.assertEqual(e.exception.code, 401)
+        # A changed password signs every other browser out; the one that changed it gets a new session.
+        other = signin("correct horse").headers["Set-Cookie"].split(";")[0]
+        mine = signin("correct horse").headers["Set-Cookie"].split(";")[0]
+        changed, _ = self.call("/api/access/password", "POST", {"password": "a newer password"}, password="",
+                               headers={"Cookie": mine}, raw=True)
+        fresh = changed.headers["Set-Cookie"].split(";")[0]
+        self.assertIn("counts", self.call("/api/status", password="", headers={"Cookie": fresh}))
+        for old in (other, mine):
+            with self.assertRaises(urllib.error.HTTPError):
+                self.call("/api/status", password="", headers={"Cookie": old})
+        # The reset from Docker: the password and every session go; the page is open.
+        reset.reset(os.path.join(self.tmp, "data"))
+        self.assertIsNone(self.app.store.setting("sessions"))
+        self.assertIn("counts", self.call("/api/status", password=""))
+        # Wrong tries: after a few, that address waits.
+        self.call("/api/access/password", "POST", {"password": "third password"}, password="")
+        codes = []
+        for _ in range(server_module.SIGN_IN_TRIES + 1):
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                signin("nope")
+            codes.append(e.exception.code)
+        self.assertEqual(codes, [401] * server_module.SIGN_IN_TRIES + [429])
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            signin("third password")  # even the right one waits now
+        self.assertEqual(e.exception.code, 429)
+        # The same limit for a password said in a request itself (Basic, or a Bearer that isn't the key).
+        for headers in ({"Authorization": "Bearer nope"}, {"Authorization": "Basic " + base64.b64encode(b"siansa:nope").decode()}):
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                self.call("/api/status", password="", headers=headers)
+            self.assertEqual(e.exception.code, 429, headers)
+
+    def test_chosen_libraries(self):
+        for song in self.fake.songs:
+            song["library"] = "2" if song["id"] == "t96w" else "1"  # the waltz is on a compilation
+        self.start()
+        self.assertEqual([(l["name"], l["on"]) for l in self.call("/api/libraries")],
+                         [("Music", False), ("Compilations", False)])
+        self.assertEqual(self.call("/api/libraries", "POST", {"ids": ["1"]}), {"songs": 3, "queued": 3})
+        counts = self.wait_done()
+        self.assertEqual((counts["songs"], counts["done"], counts["failed"]), (3, 2, 1))
+        self.assertNotIn("t96w", [s["id"] for s in self.call("/api/songs")])
+        status = self.call("/api/status")
+        self.assertEqual(status["libraries"]["chosen"], ["1"])
+        self.assertIsNotNone(status["libraries"]["read_at"])
+        libraries = {l["name"]: l for l in self.call("/api/libraries")}
+        self.assertEqual((libraries["Music"]["on"], libraries["Music"]["songs"], libraries["Music"]["done"]), (True, 3, 2))
+        self.assertFalse(libraries["Compilations"]["on"])
+
+        self.assertEqual(self.call("/api/libraries", "POST", {"ids": ["1", "2"]}), {"songs": 4, "queued": 1})
+        self.wait_done()
+        self.assertEqual([s["id"] for s in self.call("/api/songs?find=waltz")], ["t96w"])
+        self.assertEqual([s["id"] for s in self.call("/api/songs?show=failed")], ["bad"])
+        failed = self.call("/api/failed/export")["failed"]
+        self.assertEqual([f["id"] for f in failed], ["bad"])
+        self.assertTrue(failed[0]["error"])
+        self.assertEqual(failed[0]["library"], "1")
+        self.assertIn("error", self.call("/api/export.csv?show=failed", raw=True)[1].decode().splitlines()[0].split(","))
+        self.assertEqual(sorted(s["id"] for s in self.call("/api/songs?show=done")), ["t122", "t140", "t96w"])
+        self.assertEqual(len(self.call("/api/songs?limit=2")), 2)
+        self.assertEqual(len(self.call("/api/songs")), 4)
+        self.assertEqual(len(self.call("/api/export.json")["songs"]), 3)
+        self.assertEqual([s["id"] for s in self.call("/api/export.json?find=waltz")["songs"]], ["t96w"])
+        _, csv_body = self.call("/api/export.csv?find=waltz", raw=True)
+        self.assertEqual(len(csv_body.decode().strip().splitlines()), 2)
+        self.assertEqual(self.call("/api/grids?ids=t122")["grids"][0]["track_id"], "t122")  # the app finds them all
+        self.assertEqual(self.call("/api/libraries/read", "POST"), {"songs": 4, "queued": 0})
+
+    def test_the_songs_of_a_library_left_out_can_be_removed(self):
+        for song in self.fake.songs:
+            song["library"] = "2" if song["id"] in ("t96w", "t122") else "1"  # 2: long DJ mixes, say
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1", "2"]})
+        self.wait_done()
+        self.call("/api/songs/t122/marks", "POST", {"seconds": 12.0})
+        with self.assertRaises(urllib.error.HTTPError) as e:  # still being analysed
+            self.call("/api/libraries/2/songs", "DELETE")
+        self.assertEqual(e.exception.code, 409)
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.assertEqual(self.call("/api/libraries/2/songs", "DELETE"), {"removed": 2})
+        self.assertEqual(sorted(s["id"] for s in self.call("/api/songs")), ["bad", "t140"])
+        self.assertEqual(self.call("/api/grids?ids=t122")["missing"], ["t122"])
+        libraries = {l["id"]: l for l in self.call("/api/libraries")}
+        self.assertEqual((libraries["2"]["songs"], libraries["1"]["songs"]), (0, 2))
+        self.assertEqual(self.app.store.marks("t122"), [])
+
+    def test_the_libraries_of_0_9_0s_whole_library(self):
+        self.start()
+        self.app.store.set_setting("library", True)
+        self.assertEqual(self.app.worker.chosen(), ["1", "2"])
+        self.assertEqual(self.call("/api/status")["libraries"]["chosen"], ["1", "2"])
+
+    def test_the_library_album_by_album_when_search_finds_nothing(self):
+        self.fake.search_all = False
+        nd = Subsonic(self.fake.url, USER, PASSWORD)
+        self.assertEqual(sorted(s["id"] for s in nd.all_songs()), ["bad", "t122", "t140", "t96w"])
+        self.fake.songs[0]["library"] = "2"
+        self.assertEqual([s["id"] for s in nd.all_songs("2")], ["t140"])
+        self.fake.search_all = True
+        self.assertEqual(len(nd.all_songs(page=3)), 4)  # paged
+        self.assertEqual(len(nd.all_songs("1", page=2)), 3)
+
+    def test_leaving_a_library_out_empties_its_queue(self):
+        for song in self.fake.songs:
+            song["library"] = "2" if song["id"] in ("t96w", "t122") else "1"
+        self.start()
+        self.call("/api/pause", "POST")
+        self.call("/api/libraries", "POST", {"ids": ["1", "2"]})
+        self.assertEqual(self.call("/api/status")["counts"]["queued"], 4)
+        self.assertEqual(self.call("/api/libraries", "POST", {"ids": ["1"]}), {"songs": 2, "queued": 0})
+        self.assertEqual(self.call("/api/status")["counts"]["queued"], 2)
+        self.assertEqual(self.call("/api/libraries", "POST", {"ids": []}), {"songs": 0, "queued": 0})
+        self.assertEqual(self.call("/api/status")["counts"].get("queued", 0), 0)
+
+    def test_the_next_song_is_downloaded_while_the_model_works(self):
+        self.start()
+        self.tracker.delay = 0.4
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        end, seen = time.time() + 10, False
+        while time.time() < end and not seen:
+            status = self.call("/api/status")
+            seen = bool(status["current"] and status["next"])
+            time.sleep(0.05)
+        self.assertTrue(seen, "never a song in the model and the next one being prepared at once")
+        self.wait_done()
+
+    def test_bad_blends_from_the_app(self):
+        self.start()
+        self.call("/api/libraries", "POST", {"ids": ["1"]})
+        self.wait_done()
+        self.assertEqual(self.call("/api/status")["bad_blends"], 0)
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call("/api/bad-blends", "POST", {"from_id": "t140"})
+        self.assertEqual(e.exception.code, 400)
+        made = self.call("/api/bad-blends", "POST", {"from_id": "t140", "to_id": "t122", "technique": "bass swap",
+                                                    "details": {"bars": 16, "from_rhythm": 0.56}})
+        self.call("/api/bad-blends", "POST", {"from_id": "gone", "to_id": "t140", "details": "not a dict"})
+        rows = self.call("/api/bad-blends")
+        self.assertEqual(len(rows), 2)
+        first = rows[1]
+        self.assertEqual((first["id"], first["technique"], first["details"]["bars"]), (made["id"], "bass swap", 16))
+        self.assertTrue(first["from_title"])
+        self.assertIsNone(rows[0]["from_title"])  # a song that isn't here
+        self.assertEqual(rows[0]["details"], {})
+        self.assertEqual(self.call("/api/status")["bad_blends"], 2)
+        self.assertTrue(any("Bad blend marked" in e["message"] for e in self.call("/api/status")["events"]))
+        export = self.call("/api/bad-blends/export")
+        marked = next(b for b in export["bad_blends"] if b["id"] == made["id"])
+        self.assertEqual((marked["from"]["id"], marked["to"]["id"]), ("t140", "t122"))
+        self.assertTrue(marked["from"]["beats"])
+        self.assertIsNone(next(b for b in export["bad_blends"] if b["from_id"] == "gone")["from"])
+        self.assertEqual(self.call(f"/api/bad-blends/{made['id']}", "DELETE"), {"removed": True})
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.call(f"/api/bad-blends/{made['id']}", "DELETE")
+        self.assertEqual(e.exception.code, 404)
+        grids = self.call("/api/grids?ids=t140")["grids"][0]
+        for key in ("intro_lock_ms", "outro_lock_ms", "mix_track", "intro_bass_bars", "drops_ms", "intro_energy"):
+            self.assertIn(key, grids)
 
     def test_unknown_routes_and_songs(self):
         self.start()
@@ -440,3 +1202,44 @@ class ServiceTest(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KeptTest(unittest.TestCase):
+    """Answers kept ready: fresh when the data changed and the database is quiet, the last one at once when it's busy."""
+
+    def test_a_change_is_seen_when_the_database_answers_in_time(self):
+        from beats.server import Kept
+
+        state = {"changes": 0, "value": 1}
+        kept = Kept(lambda: state["value"], seconds=300, changes=lambda: state["changes"])
+        self.assertEqual(kept.get(), 1)
+        state["value"] = 2
+        self.assertEqual(kept.get(), 1)  # nothing changed: the kept one, without asking
+        state["changes"] += 1
+        self.assertEqual(kept.get(), 2)
+
+    def test_a_busy_database_doesnt_hold_the_answer_up(self):
+        import threading
+
+        from beats.server import Kept
+
+        gate = threading.Event()
+        state = {"changes": 0, "calls": 0}
+
+        def work():
+            state["calls"] += 1
+            if state["calls"] > 1:
+                gate.wait(5)  # a database busy with analysis
+            return state["calls"]
+
+        kept = Kept(work, seconds=300, changes=lambda: state["changes"])
+        self.assertEqual(kept.get(), 1)
+        state["changes"] += 1
+        started = time.monotonic()
+        self.assertEqual(kept.get(), 1)  # the last one, after at most Kept.WAIT
+        self.assertLess(time.monotonic() - started, Kept.WAIT + 0.4)
+        gate.set()
+        end = time.monotonic() + 5
+        while kept.value != 2 and time.monotonic() < end:
+            time.sleep(0.01)
+        self.assertEqual(kept.value, 2)

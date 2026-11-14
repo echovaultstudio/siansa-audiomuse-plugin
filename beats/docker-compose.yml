@@ -1,5 +1,7 @@
-# Siansa Beats: copy this and the .env next to it on the Docker server, then `docker compose up -d`.
-# The page is then at http://<that server>:8090. See README.md.
+# Siansa Beats: copy this file to the Docker server and run `docker compose up -d`. Nothing needs filling in.
+# The page is then at http://<that server>:8090, and its Get started card walks through the rest. No password goes in
+# here: the servers, the page's password and the app's key are set on the page. A .env next to this file can change
+# the settings below (.env.example lists them); it isn't needed. See README.md.
 services:
   beats:
     image: ghcr.io/echovaultstudio/siansa-beats:latest
@@ -8,15 +10,11 @@ services:
     ports:
       - "8090:8090"
     environment:
-      NAVIDROME_URL: ${NAVIDROME_URL}
-      NAVIDROME_USER: ${NAVIDROME_USER}
-      NAVIDROME_PASSWORD: ${NAVIDROME_PASSWORD}
-      PLAYLIST: ${PLAYLIST:-Beat test}
-      AUDIOMUSE_URL: ${AUDIOMUSE_URL:-}
-      AUDIOMUSE_TOKEN: ${AUDIOMUSE_TOKEN:-}
       BEATS_MODEL: ${BEATS_MODEL:-final0}
       BEATS_THREADS: ${BEATS_THREADS:-0}
-      BEATS_PASSWORD: ${BEATS_PASSWORD:-}
+      # Optional: the key the kept secrets are encrypted with, to keep it out of the data volume (else a key file there).
+      BEATS_SECRET_KEY: ${BEATS_SECRET_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - beats-data:/data
     # A song at a time; the model uses the CPU's cores while it reads one. Lower to keep the server responsive.

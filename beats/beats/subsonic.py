@@ -1,30 +1,67 @@
-"""Navidrome (or any OpenSubsonic server), read only: playlists, songs and their audio, as the Siansa app asks.
+"""Navidrome (or any OpenSubsonic server), read only: its libraries, their songs and their audio.
 
 Logs in with a salted token (``t``/``s``), never sending the password itself. Nothing on the server is changed.
+
+Each song comes with its file's path, to find the same file on another server (:mod:`beats.match`): Navidrome's own
+API says where the file really is (Subsonic's ``path`` is made up from the tags unless the player is set to report
+real paths), so it's asked first, with the same user and password; Subsonic's path is the fallback.
 """
 
 import hashlib
 import json
 import secrets
-import shutil
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from . import log
+
+_log = log.get("navidrome")
 
 CLIENT = "siansa-beats"
 API = "1.16.1"
 
 
-class SubsonicError(Exception):
-    """The server answered with an error, or couldn't be reached."""
+class ServerError(Exception):
+    """A music server answered with an error, or couldn't be reached."""
+
+
+SubsonicError = ServerError  # its name until 0.23, when Emby and Jellyfin came
+
+# A song's file is never bigger than this (0.40): a stream that doesn't end, or a server sending something else,
+# can't fill the disk. 2 GB holds a two-hour FLAC mix.
+MOST_SONG_BYTES = 2 << 30
+
+
+def save(response, out, song_id="?", label="the server"):
+    """Copies a song's file from ``response`` to ``out``, no further than :data:`MOST_SONG_BYTES`: its size. The
+    download is refused before it starts when the server says the file is bigger, and cut off if it turns out to be."""
+    most = MOST_SONG_BYTES
+    said = response.headers.get("Content-Length")
+    if said and said.isdigit() and int(said) > most:
+        raise ServerError(f"stream: {label} says the file is {int(said) / 1e6:,.0f} MB, over the {most >> 20} MB a song may be")
+    size = 0
+    while True:
+        chunk = response.read(1 << 20)
+        if not chunk:
+            return size
+        size += len(chunk)
+        if size > most:
+            _log.warning("stream %s: cut off at %d MB, more than a song can be", song_id, most >> 20)
+            raise ServerError(f"stream: the file goes past the {most >> 20} MB a song may be: not kept")
+        out.write(chunk)
 
 
 class Subsonic:
+    kind, label = "navidrome", "Navidrome"
+
     def __init__(self, url, user, password, timeout=30.0):
         self.url = (url or "").rstrip("/")
         self.user = user or ""
         self.password = password or ""
         self.timeout = timeout
+        self._native_token = None
 
     @property
     def configured(self):
@@ -43,56 +80,226 @@ class Subsonic:
 
     def _get(self, method, **extra):
         if not self.configured:
-            raise SubsonicError("Navidrome isn't set up (NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASSWORD)")
+            raise SubsonicError("Navidrome isn't set up: add it under Setup › Music servers")
+        started = time.monotonic()
+        shown = {k: v for k, v in extra.items() if v is not None}
         try:
             with urllib.request.urlopen(self.address(method, **extra), timeout=self.timeout) as response:
                 body = json.load(response)
         except urllib.error.HTTPError as e:
+            _log.warning("%s %s: HTTP %s after %.2fs", method, shown, e.code, time.monotonic() - started)
             raise SubsonicError(f"{method}: HTTP {e.code}") from None
         except (urllib.error.URLError, OSError, ValueError) as e:
+            _log.warning("%s %s: %s after %.2fs", method, shown, getattr(e, "reason", e), time.monotonic() - started)
             raise SubsonicError(f"{method}: {getattr(e, 'reason', e)}") from None
         answer = body.get("subsonic-response") or {}
         if answer.get("status") != "ok":
             error = answer.get("error") or {}
+            _log.warning("%s %s: Navidrome says %s", method, shown, error)
             raise SubsonicError(f"{method}: {error.get('message') or 'the server said no'}")
+        _log.debug("%s %s: ok in %.2fs", method, shown, time.monotonic() - started)
         return answer
 
     def ping(self):
         answer = self._get("ping")
         return {"version": answer.get("serverVersion") or answer.get("version"), "type": answer.get("type")}
 
-    def playlists(self):
-        """``[{id, name, songs}]``."""
-        lists = (self._get("getPlaylists").get("playlists") or {}).get("playlist") or []
-        return [{"id": p["id"], "name": p.get("name", ""), "songs": p.get("songCount", 0)} for p in lists]
+    def libraries(self):
+        """Navidrome's libraries (Subsonic's music folders): ``[{id, name}]``, ids as text."""
+        folders = (self._get("getMusicFolders").get("musicFolders") or {}).get("musicFolder") or []
+        return [{"id": str(f["id"]), "name": f.get("name") or str(f["id"])} for f in folders if f.get("id") is not None]
 
-    def playlist_named(self, name):
-        """The playlist called ``name`` (case doesn't matter), or ``None``."""
-        for p in self.playlists():
-            if p["name"].strip().lower() == (name or "").strip().lower():
-                return p
-        return None
+    def all_songs(self, library=None, page=500):
+        """Every song in ``library`` (an id from :meth:`libraries`; ``None``: every library), ``page`` at a time:
+        ``search3`` with an empty query (as clients that sync the whole library ask Navidrome), or album by album
+        when the server finds nothing for an empty query."""
+        songs, offset = [], 0
+        while True:
+            found = (self._get("search3", query="", songCount=page, songOffset=offset, artistCount=0,
+                               albumCount=0, musicFolderId=library).get("searchResult3") or {}).get("song") or []
+            songs += [song_from(e) for e in found]
+            if len(found) < page:
+                break
+            offset += page
+        songs = songs or self._songs_by_album(library)
+        try:  # where each file really is, for finding it on another server
+            real = self.real_paths(library)
+        except ServerError as e:
+            real = {}
+            _log.debug("Navidrome's own API didn't give the files' paths (Subsonic's are used): %s", e)
+        for song in songs:
+            if real.get(song["id"]):
+                song["path"] = real[song["id"]]
+        return songs
 
-    def playlist_songs(self, playlist_id):
-        entries = (self._get("getPlaylist", id=playlist_id).get("playlist") or {}).get("entry") or []
-        return [song_from(e) for e in entries]
+    def _native(self, path, token=None, body=None):
+        """One call of Navidrome's own API (the one its web page uses), as JSON."""
+        request = urllib.request.Request(self.url + path, data=json.dumps(body).encode() if body is not None else None,
+                                         headers={"Content-Type": "application/json"})
+        if token:
+            request.add_header("X-ND-Authorization", "Bearer " + token)
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as e:
+            raise ServerError(f"{path.split('?')[0]}: HTTP {e.code}") from None
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            raise ServerError(f"{path.split('?')[0]}: {getattr(e, 'reason', e)}") from None
+
+    def real_paths(self, library=None, page=1000):
+        """``{song id: path}`` of ``library``'s songs (every library's with ``None``), as Navidrome's own API has them:
+        the file's real place, under its library's folder."""
+        if not self.configured:
+            raise ServerError("Navidrome isn't set up")
+        if not self._native_token:
+            answer = self._native("/auth/login", body={"username": self.user, "password": self.password})
+            self._native_token = (answer or {}).get("token")
+            if not self._native_token:
+                raise ServerError("/auth/login: no token")
+        out, start = {}, 0
+        while True:
+            query = {"_start": start, "_end": start + page, "_sort": "id", "_order": "ASC"}
+            if library is not None:
+                query["library_id"] = library
+            try:
+                rows = self._native("/api/song?" + urllib.parse.urlencode(query), self._native_token)
+            except ServerError:
+                self._native_token = None  # an old token: a new login next time
+                raise
+            if not isinstance(rows, list):
+                raise ServerError("/api/song: not a list")
+            for row in rows:
+                if row.get("id") and row.get("path"):
+                    root, path = str(row.get("libraryPath") or ""), str(row["path"])
+                    out[row["id"]] = path if path.startswith("/") or not root else root.rstrip("/") + "/" + path
+            if len(rows) < page:
+                return out
+            start += page
+
+    def most_played(self, limit=20):
+        """The ids of the songs this user has played most, the most played first (Navidrome's own API)."""
+        if not self.configured:
+            raise ServerError("Navidrome isn't set up")
+        if not self._native_token:
+            answer = self._native("/auth/login", body={"username": self.user, "password": self.password})
+            self._native_token = (answer or {}).get("token")
+            if not self._native_token:
+                raise ServerError("/auth/login: no token")
+        query = {"_start": 0, "_end": limit, "_sort": "play_count", "_order": "DESC"}
+        try:
+            rows = self._native("/api/song?" + urllib.parse.urlencode(query), self._native_token)
+        except ServerError:
+            self._native_token = None
+            raise
+        if not isinstance(rows, list):
+            raise ServerError("/api/song: not a list")
+        return [str(r["id"]) for r in rows if r.get("id") and (r.get("playCount") or 0) > 0]
+
+    def _songs_by_album(self, library, page=500):
+        songs, offset = [], 0
+        while True:
+            albums = (self._get("getAlbumList2", type="alphabeticalByName", size=page, offset=offset,
+                                musicFolderId=library)
+                      .get("albumList2") or {}).get("album") or []
+            for album in albums:
+                songs += [song_from(e) for e in (self._get("getAlbum", id=album["id"]).get("album") or {}).get("song") or []]
+            if len(albums) < page:
+                return songs
+            offset += page
 
     def song(self, song_id):
         return song_from(self._get("getSong", id=song_id).get("song") or {})
 
+    def picture(self, song_id, of="cover", size=300):
+        """``(bytes, content type)`` of the song's cover (``of="cover"``) or its artist's picture (``"artist"``), about
+        ``size`` px; None when the server has none. Navidrome answers a picture it doesn't have with its stand-in (a
+        blue disc, a star) as an ordinary picture, marked "don't keep" and without a version: that isn't a picture."""
+        song = self._get("getSong", id=song_id).get("song") or {}
+        if of != "artist":
+            return self._picture(song.get("coverArt") or song.get("albumId") or song_id, size)
+        artist = song.get("artistId") or next((a.get("id") for a in song.get("artists") or [] if a.get("id")), None)
+        if not artist:
+            return None
+        # Navidrome fetches an artist's photo from its agents (such as Last.fm) only when asked about the artist; until
+        # then its picture is the star stand-in (the owner, 11 Nov: Rammstein, Sleep Token showed none). Asking about it
+        # first is what Siansa does too; the photo's own address is the fallback when Navidrome still has the stand-in.
+        try:
+            info = self._get("getArtistInfo2", id=artist, count=0).get("artistInfo2") or {}
+        except SubsonicError:
+            info = {}
+        found = self._picture(f"ar-{artist}", size)
+        if found is None:
+            for address in (info.get("largeImageUrl"), info.get("mediumImageUrl")):
+                if address and address.startswith(("http://", "https://")) and "/rest/" not in address:
+                    found = self._outside(address)
+                    if found:
+                        break
+        return found
+
+    def _picture(self, cover, size):
+        """Navidrome's picture ``cover`` (an id of getCoverArt); None for none or its stand-in."""
+        try:
+            asked = {"id": cover, "size": size} if size else {"id": cover}
+            with urllib.request.urlopen(self.address("getCoverArt", **asked), timeout=self.timeout) as response:
+                kind = response.headers.get("Content-Type") or ""
+                stand_in = "no-store" in (response.headers.get("Cache-Control") or "").lower() and not response.headers.get("ETag")
+                if not kind.startswith("image/") or stand_in:
+                    # Why there's none, for the log: its stand-in (no picture yet), or not a picture at all.
+                    _log.debug("getCoverArt %s: %s (%s, Cache-Control %s, ETag %s)", cover,
+                               "its stand-in" if stand_in else "not a picture", kind or "no type",
+                               response.headers.get("Cache-Control") or "none", response.headers.get("ETag") or "none")
+                    return None
+                return response.read(), kind
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                _log.debug("getCoverArt %s: none (HTTP 404)", cover)
+                return None
+            if e.code >= 500 and size:
+                # Navidrome can fail to resize an animated cover: the picture as it is, then (its first frame is shown).
+                _log.debug("getCoverArt %s at %s px: HTTP %s; asking for it as it is", cover, size, e.code)
+                return self._picture(cover, None)
+            raise SubsonicError(f"getCoverArt: HTTP {e.code}") from None
+        except (urllib.error.URLError, OSError) as e:
+            raise SubsonicError(f"getCoverArt: {getattr(e, 'reason', e)}") from None
+
+    def _outside(self, address):
+        """A picture at an address Navidrome gave (an artist photo its agents found); None when it can't be had."""
+        try:
+            request = urllib.request.Request(address, headers={"User-Agent": "SiansaBeats", "Accept": "image/*"})
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                kind = response.headers.get("Content-Type") or ""
+                return (response.read(8 * 1024 * 1024), kind) if kind.startswith("image/") else None
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            _log.debug("The artist photo at %s couldn't be had: %s", address.split("?")[0], getattr(e, "reason", e))
+            return None
+
+    def audio(self, song_id, byte_range=None):
+        """The song as MP3 for the page's player (every browser plays it), opened: the caller reads and closes it."""
+        request = urllib.request.Request(self.address("stream", id=song_id, format="mp3", maxBitRate=320))
+        if byte_range:
+            request.add_header("Range", byte_range)
+        return urllib.request.urlopen(request, timeout=60)
+
     def download(self, song_id, path):
         """The song's original file, saved at ``path``. Returns its size in bytes."""
+        started = time.monotonic()
         try:
             with urllib.request.urlopen(self.address("stream", id=song_id, format="raw"), timeout=self.timeout) as r, \
                     open(path, "wb") as out:
                 kind = r.headers.get("Content-Type", "")
                 if "json" in kind or "xml" in kind:
-                    raise SubsonicError(f"stream: {r.read(300).decode(errors='replace')}")
-                shutil.copyfileobj(r, out, 1 << 20)
-                return out.tell()
+                    said = r.read(300).decode(errors="replace")
+                    _log.warning("stream %s: Navidrome sent %s instead of the file: %s", song_id, kind, said)
+                    raise SubsonicError(f"stream: {said}")
+                size = save(r, out, song_id, "Navidrome")
+                _log.debug("stream %s: %.1f MB (%s) in %.2fs", song_id, size / 1e6, kind or "no type",
+                           time.monotonic() - started)
+                return size
         except urllib.error.HTTPError as e:
+            _log.warning("stream %s: HTTP %s after %.2fs", song_id, e.code, time.monotonic() - started)
             raise SubsonicError(f"stream: HTTP {e.code}") from None
         except (urllib.error.URLError, OSError) as e:
+            _log.warning("stream %s: %s after %.2fs", song_id, getattr(e, "reason", e), time.monotonic() - started)
             raise SubsonicError(f"stream: {getattr(e, 'reason', e)}") from None
 
 
@@ -110,4 +317,5 @@ def song_from(e):
         "suffix": e.get("suffix") or "",
         "tag_bpm": float(e.get("bpm") or 0) or None,
         "genres": genres,
+        "path": e.get("path") or None,
     }

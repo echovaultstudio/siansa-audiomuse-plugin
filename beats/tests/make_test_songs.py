@@ -6,7 +6,8 @@ Each has a kick on every beat, a bass note and a chord change on every downbeat,
 hi-hats between, so its beats and bars are unambiguous to a listener. And phrases, as dance music has them: after
 a lead-in of a few bars (the kick alone), 8-bar sections that change in turn: the groove (kick, bass, chords),
 the full beat (with claps and hats), a breakdown (chords alone, no kick), and the peak (everything, louder hats).
-So the phrases start a known number of bars in (``expect_phrase_bar``). One also carries the plugin's misreading
+So the phrases start a known number of bars in (``expect_phrase_bar``): after a 4-bar lead-in (the sound moves
+them from bar 1), or from bar 1 (no lead-in, or a whole 8 bars of one). One also carries the plugin's misreading
 of Control (4/3 of its tempo) and one a BPM tag at half its tempo, so the comparison's checks get exercised.
 
     python3 tests/make_test_songs.py <folder>
@@ -25,11 +26,11 @@ RATE = 44_100
 
 SONGS = [
     # id, title, artist, genre, bpm, beats a bar, seconds, BPM tag, plugin's readings, lead-in bars
-    ("t140", "Steady 140", "Test Trance", "Trance", 140.0, 4, 100, 140, {"intro_bpm": 187.1, "outro_bpm": 140.1}, 2),
+    ("t140", "Steady 140", "Test Trance", "Trance", 140.0, 4, 100, 140, {"intro_bpm": 187.1, "outro_bpm": 140.1}, 4),
     ("t174", "Rolling 174", "Test Breaks", "Drum & Bass", 174.0, 4, 80, 174, {"intro_bpm": 87.0, "outro_bpm": 174.0}, 4),
     ("t122", "Deep 122", "Test House", "House", 122.0, 4, 90, 61, None, 0),
     ("t96w", "Waltz 96", "Test Waltz", "Pop", 96.0, 3, 70, None, None, 0),
-    ("t128", "Club 128", "Test Club", "Techno", 128.0, 4, 100, 128, {"intro_bpm": 128.0, "outro_bpm": 128.0}, 3),
+    ("t128", "Club 128", "Test Club", "Techno", 128.0, 4, 100, 128, {"intro_bpm": 128.0, "outro_bpm": 128.0}, 8),
 ]
 
 
@@ -82,6 +83,9 @@ def render(bpm, per_bar, seconds, seed, lead=0):
                 bass = [note(root / 2, i / RATE, beat) for i in range(int(beat * RATE))]
                 add(t, bass, 0.45)
     peak = max(1e-9, max(abs(v) for v in out))
+    fade = int(4 * RATE)  # the song fades out over its last 4 seconds, as nearly every song does (a song at full
+    for i in range(max(0, n - fade), n):  # volume at both ends is taken for a track cut from a mixed CD)
+        out[i] *= (n - i) / fade
     return [v / peak * 0.85 for v in out]
 
 
