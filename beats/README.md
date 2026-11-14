@@ -20,8 +20,39 @@ what songs sound like: the [app's API](#the-apps-api-v1). It needs no other serv
 
 ## Set it up
 
-You need a Docker server on the same network as Navidrome, with about 3 GB of disk for the image and 2–3 GB of
-memory free while it works.
+You need Docker on a machine that can reach your music server (Navidrome, Emby or Jellyfin), about 3 GB of disk
+for the image, and 2–3 GB of memory free while it works. An NVIDIA GPU makes it many times faster; it isn't needed.
+
+1. **Start it.** One file, with nothing to fill in. The image is public, so no login is needed:
+
+   ```
+   mkdir -p ~/siansa-beats && cd ~/siansa-beats
+   curl -fsSLO https://raw.githubusercontent.com/echovaultstudio/siansa-beats/main/beats/docker-compose.yml
+   docker compose up -d
+   ```
+
+   With an NVIDIA GPU (and NVIDIA's container toolkit), get `docker-compose.gpu.yml` from the same place too and
+   start it with `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`. On TrueNAS:
+   [below](#on-truenas-with-a-gpu).
+
+2. **Open http://\<the server\>:8090.** The Overview's **Get started** card walks through the rest, and ticks each
+   step as it's done:
+
+   - **Add your music server** (Setup › Music servers): its address, user name and password, as you sign in to
+     Siansa.
+   - **Choose what to analyse** (Libraries): switch on the libraries you want and press **Start analysis**. Try one
+     small library first: a song takes a few seconds on a GPU, much longer on a CPU. Compilations or audiobooks can
+     be left off.
+   - **Connect the Siansa app**: in the app, Settings › Connections › Siansa Beats, with the address and key shown
+     under Setup › Connect the Siansa app.
+
+3. **Optional.** A password for the page and a key for the app (Setup › Access); the model, the CPU cores and the
+   log's detail in a `.env` next to the compose file ([Settings](#settings), `.env.example` lists them).
+
+To update later: `docker compose pull && docker compose up -d`. What's been analysed is kept. To watch it work:
+`docker compose logs -f`.
+
+### Good to know
 
 **How energetic a song is (0.35).** Beside a song's energy (how loud its frames are), every song with a
 sound gets its **arousal**: about 1 (calm) to 9, from Essentia's emoMusic model (MTG, UPF; CC BY-NC-SA 4.0), which
@@ -37,34 +68,6 @@ seconds. What a song needed is handed back to the system when it's done. The log
 start and each time the models go, and `/api/status` has it as `memory_mb`. On a GPU, the GPU's own libraries stay
 with the service once a model has used it (CUDA keeps them until the service restarts), so it rests higher there
 than on the CPU.
-
-1. **Know your libraries.** Siansa Beats analyses the Navidrome libraries you tick on its page (Navidrome's
-   Settings › Libraries lists them), so you can leave some out, such as compilations or audiobooks. A song takes a
-   few seconds on a GPU, much longer on the CPU: try one small library first.
-
-2. **Get the two files** into a folder on the server. The image is public, so no login is needed:
-
-   ```
-   mkdir -p ~/siansa-beats && cd ~/siansa-beats
-   base=https://raw.githubusercontent.com/echovaultstudio/siansa-beats/main/beats
-   curl -fsSLO $base/docker-compose.yml && curl -fsSL $base/.env.example -o .env
-   ```
-
-3. **`.env` needs nothing filled in.** No password goes in it or in the YAML (0.24.0): once it runs, open the page
-   and under **Setup** add your music server (as you sign in to Siansa) and, if you like, a password for the page
-   and a key for the app.
-
-4. **Start it:**
-
-   ```
-   cd ~/siansa-beats
-   docker compose pull && docker compose up -d
-   docker compose logs -f        # Ctrl+C to stop watching
-   ```
-
-5. Open **http://\<the server\>:8090**. The pills at the top say whether Navidrome answers and how the model runs.
-
-To update later: `docker compose pull && docker compose up -d`. What's been analysed is kept.
 
 ## On TrueNAS with a GPU
 
@@ -151,6 +154,10 @@ background, and the page shows which library is being read and how far.
 - No password is kept as it's typed (see "Secrets" below), and none is ever shown, logged or put in the debug
   report. Emby's and Jellyfin's token is sent in a header, never in an address. Nothing is ever written to a server.
 - What songs sound like (below) is answered for each server in its own ids.
+- **Similar albums and artists are found among that server's own music** (0.44.1): a Kids login beside the main one
+  gets the Kids library's albums, not the main one's. The Siansa app names the login the songs belong to.
+- **Listening** says, beside a listener's name, which music server's login it is (or where its listens came from),
+  so two listeners of one name can be told apart.
 
 ### What songs sound like
 
@@ -516,7 +523,7 @@ What the Siansa app asks for, under `/api/v1/`, described in full in [`beats/ope
 | `GET /api/v1/listens/totals?user=&from=&to=&tz=` | That stretch in numbers (0.33): `listens`, `seconds`, `artists`, `songs`, `albums`, `new_artists` and `hours` (listens per hour of the day in `tz`). Siansa's Time machine and listening reports read a listener's history from this and `listens/top`. |
 | `GET /api/v1/songs/genres?ids=a,b` | The genres each of up to 500 songs is in by its sound, its best first (0.32): `{"songs": {"<id>": [{"name", "genre", "style", "score"}]}}`. Siansa picks a vibe's sound dials from it: what that mix has to offer. |
 | `GET /api/v1/genre/about?name=` | A short description of a genre, from Wikipedia. Every genre's (the sound's and the songs' tags) is fetched in the background every 6 hours and kept; one not fetched yet waits up to 3 s and then answers `"pending": true`, to ask again shortly. |
-| `GET /api/v1/similar/albums?track_id=` | Albums that sound like that song's album (`source`: `beats`). An empty list, with a `note`, while that song's sound isn't known here yet. |
+| `GET /api/v1/similar/albums?track_id=` | Albums that sound like that song's album, among the named server's own (`?server=`; `source`: `beats`). An empty list, with a `note`, while that song's sound isn't known here yet. |
 | `GET /api/v1/similar/artists?track_id=` or `?artist=` | Artists that sound like that one, the same way. |
 | `GET /api/v1/sound/similar?item_id=&n=` | Songs that sound like a song (`mood_similarity=true`: only in its mood; `mood=&centroid_index=`: around a mood centre). |
 | `GET /api/v1/sound/path?start_song_id=&end_song_id=&max_steps=` | A path of exactly `max_steps` songs from one song to the other (an end can be `start_mood` / `end_mood`). |
@@ -543,10 +550,21 @@ and measured here. New songs are measured on the way.
 
 ## The page's API
 
+`POST /api/analyse-again` with `{"what": "beats" | "loudness" | "sound" | "genres"}` does one kind of analysis again
+for every song (0.45, the Overview's **Analyse again**): beats are queued; loudness, key and genres are worked out
+again while what's known stays in use; the sound is forgotten first, so similar music has less to go by until songs
+are heard again. A paused service starts again.
+
 `GET /api/health`, `/api/status`, `/api/libraries`, `/api/songs`, `/api/songs/<id>` (with every beat),
 `/api/beats/<id>`, `/api/audio/<id>`, `/api/grids?ids=`, `/api/export.csv`, `/api/export.json`;
 `/api/bad-blends`, `/api/failed/export`, `/api/listens?user=&year=&month=&tz=`, `/api/art/cover/<song id>?size=` and `/api/art/artist/<song id>?size=` (a song's cover and its artist's picture), `/api/listens/import` (`POST`: the export file as the body, `?user=&name=`), `/api/listens/artist?user=&name=&tz=` (one artist's page), `POST /api/listens/lastfm`, `POST /api/listens/remove`, `/api/genres`, `/api/genre?name=&limit=`, `/api/style/models` (the style models to choose from, 0.39; `POST /api/style/model {"model"}` picks one), `/api/log?after=&limit=&level=`, `/api/log/download`, `/api/debug`, `/api/analysis/checks` (the last Start analysis report, 0.40), `/api/clean/preview` (what could be tidied away, with a token); `POST /api/analysis/start {"ids", "skips": {library: [tasks]}}` (the checks, then the ticked libraries read for new songs; tasks: `beats`, `loudness`, `sound`, `styles`), `/api/clean {"token", "groups"}`, `/api/libraries {"ids"}`, `/api/libraries/read`, `/api/bad-blends`, `/api/songs/<id>/analyse`, `/api/analyse-all`, `/api/log/level {"level"}`, `/api/pause`, `/api/resume`; `DELETE /api/songs/<id>`, `/api/bad-blends/<n>`, `/api/libraries/<id>/songs`. See
 `beats/server.py`.
+
+## Building the image
+
+The Beat This! checkpoints are downloaded while the image is built: from this repository's release `models-1`
+first, then from the authors' host, and each must have the SHA-256 written in the Dockerfile. The release is made
+by the **Model files** workflow (run by hand), which copies them out of the published image.
 
 ## Credits
 
