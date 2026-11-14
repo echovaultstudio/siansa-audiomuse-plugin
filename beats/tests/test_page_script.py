@@ -5,14 +5,39 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from html.parser import HTMLParser
 
 PAGE = os.path.join(os.path.dirname(__file__), "..", "beats", "page.html")
+
+
+def _scripts(page):
+    """What's inside each script tag, read as a browser reads the page."""
+    found = []
+
+    class Reader(HTMLParser):
+        inside = False
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "script":
+                self.inside = True
+                found.append("")
+
+        def handle_endtag(self, tag):
+            if tag == "script":
+                self.inside = False
+
+        def handle_data(self, data):
+            if self.inside:
+                found[-1] += data
+
+    Reader().feed(page)
+    return found
 
 
 class PageScriptTest(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "needs node")
     def test_the_page_script_parses(self):
-        script = "\n".join(re.findall(r"<script\b[^>]*>(.*?)</script\s*>", open(PAGE, encoding="utf-8").read(), re.S | re.I))
+        script = "\n".join(_scripts(open(PAGE, encoding="utf-8").read()))
         self.assertTrue(script.strip())
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
             f.write(script)
